@@ -2,8 +2,7 @@
   "_doc": "Source of truth for manual curation. Regen lib/rork-videos.ts from this file. When admin UI ships, it will read/write this JSON.",
   "exclude": [
     "instagram_instagram_ernestosoftware_DWtxhtDAjhG",
-    "instagram_instagram_ernestosoftware_DWrOdwsgve3",
-    "__TEST_EXCLUDE__"
+    "instagram_instagram_ernestosoftware_DWrOdwsgve3"
   ],
   "formatPins": {
     "snapchat-hook-reaction": [
