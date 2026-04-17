@@ -1,0 +1,31 @@
+{
+  "_doc": "Source of truth for manual curation. Regen lib/rork-videos.ts from this file. When admin UI ships, it will read/write this JSON.",
+  "exclude": [
+    "instagram_instagram_ernestosoftware_DWtxhtDAjhG",
+    "instagram_instagram_ernestosoftware_DWrOdwsgve3"
+  ],
+  "formatPins": {
+    "snapchat-hook-reaction": [
+      "tiktok_tiktok_builtbygianni_7624955123973819678"
+    ],
+    "visual-hook-plus-device": [
+      "instagram_instagram_stef0yaps_DVc7yrmkRzj",
+      "instagram_instagram_vibingwithxavierr_DW-jhlsigdo",
+      "instagram_instagram_caithecheese_DWACNUaEQXo"
+    ],
+    "top-three-websites": [
+      "instagram_instagram_numberswithxavier_DWwjk-NiY2S",
+      "instagram_instagram_numberswithxavier_DW1rjnUiY25",
+      "instagram_instagram_numberswithxavier_DWovS-ICnGR"
+    ]
+  },
+  "formatBuckets": {
+    "talking-head": "comment-for-link",
+    "snapchat-hook-reaction": "snapchat-hook-reaction",
+    "reaction-plus-demo": "free-resource-drop",
+    "split-screen": null,
+    "building-page": "ai-tool-reveal",
+    "top-three-websites": "websites-list",
+    "visual-hook-plus-device": "secret-website"
+  }
+}
