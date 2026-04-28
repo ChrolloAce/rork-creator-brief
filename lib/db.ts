@@ -139,10 +139,19 @@ const RORK_OVERVIEW: BriefOverview = {
     "Pick a format from the sidebar. Read the shot-by-shot structure. Steal a hook from the matching library. Ship the video. Repeat.",
 };
 
-let initialized = false;
+let schemaPromise: Promise<void> | null = null;
 
 async function ensureSchema() {
-  if (initialized) return;
+  if (schemaPromise) return schemaPromise;
+  schemaPromise = runSchema().catch((e) => {
+    // Don't permanently cache a failure — let the next request retry.
+    schemaPromise = null;
+    throw e;
+  });
+  return schemaPromise;
+}
+
+async function runSchema() {
   const sql = getSql();
   await sql`
     CREATE TABLE IF NOT EXISTS brief (
@@ -206,7 +215,6 @@ async function ensureSchema() {
     WHERE id = 'default'
       AND NOT EXISTS (SELECT 1 FROM curation WHERE id = ${DEFAULT_BRIEF_SLUG})
   `;
-  initialized = true;
 }
 
 type BriefRow = {
