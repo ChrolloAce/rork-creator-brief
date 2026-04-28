@@ -1,4 +1,4 @@
-import { formats } from "./formats";
+import type { Format } from "./types";
 
 export type NavSection = {
   label: string;
@@ -14,14 +14,18 @@ export type NavSection = {
 export const overviewId = "overview";
 export const formatId = (slug: string) => `format:${slug}`;
 
-export function buildNavSections(): NavSection[] {
+export function buildNavSections(
+  formats: Format[],
+  briefSlug: string
+): NavSection[] {
+  const base = `/b/${briefSlug}`;
   return [
     {
       label: "Start here",
       items: [
         {
           id: overviewId,
-          href: "/",
+          href: base,
           title: "Overview",
           meta: "The brief",
         },
@@ -31,7 +35,7 @@ export function buildNavSections(): NavSection[] {
       label: "Formats",
       items: formats.map((f) => ({
         id: formatId(f.slug),
-        href: `/formats/${f.slug}`,
+        href: `${base}/formats/${f.slug}`,
         title: f.title,
         meta: f.tagline,
         thumbnail: f.thumbnail,

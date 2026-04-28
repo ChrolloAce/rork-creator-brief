@@ -78,97 +78,152 @@ function HookRow({ hook, index }: { hook: Hook; index: number }) {
   );
 }
 
-export function OverviewView() {
-  const valueProps = [
-    "Idea to App Store in minutes, not months",
-    "Create real mobile apps with words",
-    "Start a business. Start making money on the App Store.",
-    "Be the next one.",
-  ];
-  const audience = [
-    "High school & university students who want to live life on their own terms",
-    "Startup founders",
-    "Non-technical entrepreneurs who want to solve their own problem or quit their day job",
-    "Marketers and AI early adopters",
-    "Designers and PMs",
-  ];
+export type BriefOverview = {
+  heroHeadline?: string;
+  heroAccentWord?: string;
+  heroSubtext?: string;
+  productHeading?: string;
+  productDescription?: string;
+  valueProps?: string[];
+  audience?: string[];
+  tagline?: string;
+  taglineSub?: string;
+  howToUse?: string;
+};
+
+function renderHeroHeadline(line?: string, accent?: string) {
+  if (!line) return null;
+  if (!accent) return <>{line}</>;
+  const idx = line.toLowerCase().indexOf(accent.toLowerCase());
+  if (idx < 0) return <>{line}</>;
+  const before = line.slice(0, idx);
+  const match = line.slice(idx, idx + accent.length);
+  const after = line.slice(idx + accent.length);
+  return (
+    <>
+      {before}
+      <span className="bg-accent text-accent-ink border-2 border-line px-2 rounded-md inline-block">
+        {match}
+      </span>
+      {after}
+    </>
+  );
+}
+
+export function OverviewView({
+  briefName,
+  overview,
+}: {
+  briefName: string;
+  overview: BriefOverview | null;
+}) {
+  const o: BriefOverview = overview ?? {};
+  const valueProps = o.valueProps ?? [];
+  const audience = o.audience ?? [];
+
   return (
     <div className="space-y-10">
       <header className="space-y-5">
-        <SectionLabel>Rork Creator Brief · v2.0</SectionLabel>
-        <h1 className="text-4xl sm:text-5xl font-black tracking-tight leading-[1.05]">
-          Ship content that ships{" "}
-          <span className="bg-accent text-accent-ink border-2 border-line px-2 rounded-md inline-block">
-            apps
-          </span>
-          .
-        </h1>
-        <p className="text-base sm:text-lg text-ink-soft max-w-2xl leading-relaxed">
-          Formats, hooks, and reference examples for Rork creators. Pick a
-          format on the left. Copy a hook. Ship the video. Everything is tuned
-          for the non-technical founder audience.
-        </p>
+        <SectionLabel>{briefName} Creator Brief</SectionLabel>
+        {o.heroHeadline && (
+          <h1 className="text-4xl sm:text-5xl font-black tracking-tight leading-[1.05]">
+            {renderHeroHeadline(o.heroHeadline, o.heroAccentWord)}
+          </h1>
+        )}
+        {o.heroSubtext && (
+          <p className="text-base sm:text-lg text-ink-soft max-w-2xl leading-relaxed">
+            {o.heroSubtext}
+          </p>
+        )}
       </header>
 
-      <div className="grid gap-6 md:grid-cols-2">
-        <section className="border-2 border-line bg-background rounded-md nb-shadow p-5 sm:p-6">
-          <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-3">
-            What Rork is
-          </div>
-          <p className="text-ink leading-relaxed">
-            Rork creates any mobile app or game for iOS & Android in minutes,
-            just by chatting with AI.{" "}
-            <span className="font-bold">Rork Max</span> is the first website
-            that can build complex apps & games for iPhone. Even Pokémon Go.
-          </p>
-          <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mt-6 mb-3">
-            Core value props
-          </div>
-          <ul className="space-y-2">
-            {valueProps.map((v) => (
-              <li key={v} className="flex gap-2 text-ink">
-                <span className="text-accent font-black shrink-0">◆</span>
-                <span>{v}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
+      {(o.productHeading ||
+        o.productDescription ||
+        valueProps.length > 0 ||
+        audience.length > 0 ||
+        o.tagline) && (
+        <div className="grid gap-6 md:grid-cols-2">
+          {(o.productHeading ||
+            o.productDescription ||
+            valueProps.length > 0) && (
+            <section className="border-2 border-line bg-background rounded-md nb-shadow p-5 sm:p-6">
+              {o.productHeading && (
+                <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-3">
+                  {o.productHeading}
+                </div>
+              )}
+              {o.productDescription && (
+                <p className="text-ink leading-relaxed whitespace-pre-line">
+                  {o.productDescription}
+                </p>
+              )}
+              {valueProps.length > 0 && (
+                <>
+                  <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mt-6 mb-3">
+                    Core value props
+                  </div>
+                  <ul className="space-y-2">
+                    {valueProps.map((v) => (
+                      <li key={v} className="flex gap-2 text-ink">
+                        <span className="text-accent font-black shrink-0">
+                          ◆
+                        </span>
+                        <span>{v}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </section>
+          )}
 
-        <section className="border-2 border-line bg-background rounded-md nb-shadow p-5 sm:p-6">
-          <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-3">
-            Who you&rsquo;re talking to
-          </div>
-          <ul className="space-y-2">
-            {audience.map((a) => (
-              <li key={a} className="flex gap-2 text-ink">
-                <span className="text-accent font-black shrink-0">→</span>
-                <span>{a}</span>
-              </li>
-            ))}
-          </ul>
-          <div className="mt-6 border-2 border-line bg-paper rounded-md p-4">
-            <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-2">
-              Brand tagline
-            </div>
-            <p className="text-xl font-black">&ldquo;Be the next one.&rdquo;</p>
-            <p className="text-sm text-ink-soft mt-2 leading-relaxed">
-              The next Mark Zuckerberg. The next Zack Yadegari. Frame the
-              viewer as the protagonist of their own founder story.
-            </p>
-          </div>
-        </section>
-      </div>
-
-      <section className="border-2 border-line bg-accent text-accent-ink rounded-md nb-shadow p-5 sm:p-6">
-        <div className="text-[10px] uppercase tracking-[0.2em] font-bold mb-2">
-          How to use this brief
+          {(audience.length > 0 || o.tagline) && (
+            <section className="border-2 border-line bg-background rounded-md nb-shadow p-5 sm:p-6">
+              {audience.length > 0 && (
+                <>
+                  <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-3">
+                    Who you&rsquo;re talking to
+                  </div>
+                  <ul className="space-y-2">
+                    {audience.map((a) => (
+                      <li key={a} className="flex gap-2 text-ink">
+                        <span className="text-accent font-black shrink-0">
+                          →
+                        </span>
+                        <span>{a}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+              {o.tagline && (
+                <div
+                  className={`${audience.length > 0 ? "mt-6" : ""} border-2 border-line bg-paper rounded-md p-4`}
+                >
+                  <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-2">
+                    Brand tagline
+                  </div>
+                  <p className="text-xl font-black">&ldquo;{o.tagline}&rdquo;</p>
+                  {o.taglineSub && (
+                    <p className="text-sm text-ink-soft mt-2 leading-relaxed">
+                      {o.taglineSub}
+                    </p>
+                  )}
+                </div>
+              )}
+            </section>
+          )}
         </div>
-        <p className="leading-relaxed">
-          Pick a <strong>format</strong> from the sidebar. Read the shot-by-shot
-          structure. Steal a <strong>hook</strong> from the matching library.
-          Ship the video. Repeat.
-        </p>
-      </section>
+      )}
+
+      {o.howToUse && (
+        <section className="border-2 border-line bg-accent text-accent-ink rounded-md nb-shadow p-5 sm:p-6">
+          <div className="text-[10px] uppercase tracking-[0.2em] font-bold mb-2">
+            How to use this brief
+          </div>
+          <p className="leading-relaxed whitespace-pre-line">{o.howToUse}</p>
+        </section>
+      )}
     </div>
   );
 }
@@ -176,13 +231,17 @@ export function OverviewView() {
 export function FormatView({
   format,
   hookCategories,
+  useAllHooks = false,
 }: {
   format: Format;
   hookCategories: HookCategory[];
+  useAllHooks?: boolean;
 }) {
-  const matching = hookCategories.filter((c) =>
-    format.hookCategorySlugs.includes(c.slug)
-  );
+  const matching = useAllHooks
+    ? hookCategories
+    : hookCategories.filter((c) =>
+        format.hookCategorySlugs.includes(c.slug)
+      );
   const totalHooks = matching.reduce((n, c) => n + c.hooks.length, 0);
 
   return (

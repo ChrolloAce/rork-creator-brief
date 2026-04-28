@@ -1,14 +1,6 @@
-import { Shell } from "@/components/Shell";
-import { formats } from "@/lib/formats";
-import { hookCategories } from "@/lib/hooks";
-import { overviewId } from "@/lib/nav";
+import { redirect } from "next/navigation";
+import { DEFAULT_BRIEF_SLUG } from "@/lib/db";
 
 export default function Home() {
-  return (
-    <Shell
-      formats={formats}
-      hookCategories={hookCategories}
-      activeId={overviewId}
-    />
-  );
+  redirect(`/b/${DEFAULT_BRIEF_SLUG}`);
 }

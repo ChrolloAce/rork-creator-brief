@@ -12,12 +12,24 @@ export function Shell({
   formats,
   hookCategories,
   activeId,
+  brief,
+  useAllHooks = false,
 }: {
   formats: Format[];
   hookCategories: HookCategory[];
   activeId: string;
+  brief: {
+    slug: string;
+    name: string;
+    logoUrl: string | null;
+    overview?: import("@/lib/db").BriefOverview | null;
+  };
+  useAllHooks?: boolean;
 }) {
-  const sections = useMemo(buildNavSections, []);
+  const sections = useMemo(
+    () => buildNavSections(formats, brief.slug),
+    [formats, brief.slug]
+  );
   const [drawerOpen, setDrawerOpen] = useState(false);
   const pathname = usePathname();
 
@@ -54,7 +66,7 @@ export function Shell({
     return "Overview";
   }, [sections, activeId]);
 
-  const view = renderView(activeId, formats, hookCategories);
+  const view = renderView(activeId, formats, hookCategories, brief, useAllHooks);
 
   return (
     <div className="min-h-screen flex flex-col lg:flex-row bg-background">
@@ -75,18 +87,25 @@ export function Shell({
         </button>
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <div className="w-8 h-8 border-2 border-line bg-background rounded-md overflow-hidden shrink-0 flex items-center justify-center">
-            <Image
-              src="/rork-logo.png"
-              alt="Rork"
-              width={32}
-              height={32}
-              priority
-              className="w-full h-full object-contain"
-            />
+            {brief.logoUrl ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={brief.logoUrl}
+                alt={brief.name}
+                className="w-full h-full object-contain"
+              />
+            ) : (
+              <span
+                className="text-xs font-black uppercase"
+                aria-label={brief.name}
+              >
+                {brief.name.slice(0, 2)}
+              </span>
+            )}
           </div>
           <div className="min-w-0">
             <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted leading-none">
-              Rork / Brief
+              {brief.name} / Brief
             </div>
             <div className="font-black text-sm truncate leading-tight mt-0.5">
               {currentTitle}
@@ -116,6 +135,7 @@ export function Shell({
         <Sidebar
           sections={sections}
           activeId={activeId}
+          brief={brief}
           onClose={() => setDrawerOpen(false)}
         />
       </aside>
@@ -145,13 +165,33 @@ export function Shell({
 function renderView(
   activeId: string,
   formats: Format[],
-  hookCategories: HookCategory[]
+  hookCategories: HookCategory[],
+  brief: {
+    name: string;
+    overview?: import("@/lib/db").BriefOverview | null;
+  },
+  useAllHooks: boolean
 ) {
-  if (activeId === "overview") return <OverviewView />;
+  if (activeId === "overview")
+    return (
+      <OverviewView
+        briefName={brief.name}
+        overview={brief.overview ?? null}
+      />
+    );
   if (activeId.startsWith("format:")) {
     const slug = activeId.slice("format:".length);
     const f = formats.find((x) => x.slug === slug);
-    if (f) return <FormatView format={f} hookCategories={hookCategories} />;
+    if (f)
+      return (
+        <FormatView
+          format={f}
+          hookCategories={hookCategories}
+          useAllHooks={useAllHooks}
+        />
+      );
   }
-  return <OverviewView />;
+  return (
+    <OverviewView briefName={brief.name} overview={brief.overview ?? null} />
+  );
 }

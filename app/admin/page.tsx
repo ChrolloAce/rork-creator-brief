@@ -1,58 +1,78 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import type { VideoExample } from "@/lib/types";
-import { getVideoByDbId } from "@/lib/all-videos";
-import { VideoChip } from "@/components/admin/VideoChip";
-import { VideoPicker } from "@/components/admin/VideoPicker";
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { LogoUpload } from "@/components/admin/LogoUpload";
+import { FormTemplatesSection } from "@/components/admin/FormTemplatesSection";
 
-type Curation = {
-  _doc?: string;
-  exclude: string[];
-  formatPins: Record<string, string[]>;
-  formatBuckets: Record<string, string | null>;
+type Brief = {
+  slug: string;
+  name: string;
+  logoUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
-export default function AdminPage() {
-  const [cur, setCur] = useState<Curation | null>(null);
-  const [githubConnected, setGH] = useState(false);
+function slugify(input: string): string {
+  return input
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+}
+
+export default function AdminDashboard() {
+  const [briefs, setBriefs] = useState<Brief[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [createErr, setCreateErr] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const [slug, setSlug] = useState("");
+  const [logoUrl, setLogoUrl] = useState("");
+
+  async function load() {
+    const r = await fetch("/api/briefs", { cache: "no-store" });
+    const j = await r.json();
+    if (j.ok) setBriefs(j.briefs);
+    else setLoadError(j.error ?? "failed to load");
+  }
 
   useEffect(() => {
-    (async () => {
-      const r = await fetch("/api/curation");
-      const j = await r.json();
-      if (j.ok) {
-        setCur(j.curation);
-        setGH(j.githubConnected);
-      } else {
-        setLoadError(j.error ?? "failed to load");
-      }
-    })();
+    load();
   }, []);
 
-  async function onSave() {
-    if (!cur) return;
-    setSaving(true);
-    setSaveMsg(null);
-    const res = await fetch("/api/curation", {
+  async function onCreate(e: React.FormEvent) {
+    e.preventDefault();
+    setCreating(true);
+    setCreateErr(null);
+    const body = {
+      name,
+      slug: slug || slugify(name),
+      logoUrl: logoUrl.trim() || undefined,
+    };
+    const res = await fetch("/api/briefs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        curation: cur,
-        message: "chore(curation): admin edit",
-      }),
+      body: JSON.stringify(body),
     });
     const j = await res.json();
-    setSaving(false);
+    setCreating(false);
     if (res.ok) {
-      setSaveMsg(
-        `Committed → ${j.commit?.sha?.slice(0, 7) ?? "ok"}. Railway will auto-deploy in ~90s.`
-      );
+      window.location.href = `/admin/b/${j.brief.slug}`;
     } else {
-      setSaveMsg(`ERR: ${j.error ?? res.status}`);
+      setCreateErr(j.error ?? "failed to create");
+    }
+  }
+
+  async function onDelete(briefSlug: string) {
+    if (briefSlug === "rork") return;
+    if (!confirm(`Delete brief "${briefSlug}"? This can't be undone.`)) return;
+    const res = await fetch(`/api/briefs/${briefSlug}`, { method: "DELETE" });
+    if (res.ok) await load();
+    else {
+      const j = await res.json();
+      alert(`Failed: ${j.error ?? res.status}`);
     }
   }
 
@@ -61,54 +81,19 @@ export default function AdminPage() {
     window.location.href = "/admin/login";
   }
 
-  if (loadError) {
-    return (
-      <main className="p-8">
-        <p className="text-sm text-[#b91c1c]">Failed to load: {loadError}</p>
-      </main>
-    );
-  }
-  if (!cur) {
-    return (
-      <main className="p-8">
-        <p className="text-sm text-muted">Loading curation…</p>
-      </main>
-    );
-  }
-
-  const formats = Object.keys(cur.formatBuckets);
-  const allExcluded = new Set<string>(cur.exclude);
-  // Also exclude anything already pinned to ANY format (prevents duplicate pins)
-  for (const slug of formats) {
-    for (const id of cur.formatPins[slug] ?? []) allExcluded.add(id);
-  }
-
   return (
     <main className="min-h-screen bg-background text-ink">
       <header className="sticky top-0 z-20 bg-background border-b-2 border-line">
         <div className="max-w-5xl mx-auto p-4 flex items-center gap-3 flex-wrap">
           <div className="flex-1 min-w-[200px]">
             <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
-              Rork / Brief · Admin
+              Admin · Dashboard
             </div>
-            <h1 className="text-xl font-black">Curation editor</h1>
+            <h1 className="text-xl font-black">Briefs</h1>
           </div>
-          <span
-            className={`text-[10px] font-black uppercase tracking-widest px-2 py-1 border-2 border-line rounded-sm ${
-              githubConnected
-                ? "bg-[#86efac] text-[#064e2f]"
-                : "bg-paper text-muted"
-            }`}
-          >
-            GitHub {githubConnected ? "connected" : "not connected"}
+          <span className="text-[10px] font-black uppercase tracking-widest px-2 py-1 border-2 border-line rounded-sm bg-[#86efac] text-[#064e2f]">
+            DB live
           </span>
-          <button
-            onClick={onSave}
-            disabled={saving || !githubConnected}
-            className="border-2 border-line bg-ink text-background font-black uppercase tracking-widest px-3 py-1.5 rounded-md nb-press disabled:opacity-40"
-          >
-            {saving ? "…" : "Save + Deploy"}
-          </button>
           <button
             onClick={onLogout}
             className="border-2 border-line bg-background px-2 py-1.5 rounded-md nb-press text-xs font-bold uppercase tracking-widest"
@@ -116,179 +101,148 @@ export default function AdminPage() {
             Log out
           </button>
         </div>
-        {saveMsg && (
-          <div className="max-w-5xl mx-auto px-4 pb-3">
-            <p className="text-xs font-bold border-2 border-line bg-paper px-2 py-1.5 rounded-sm">
-              {saveMsg}
-            </p>
-          </div>
-        )}
       </header>
 
       <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-8">
-        {!githubConnected && (
-          <section className="border-2 border-line bg-accent text-accent-ink rounded-md p-4 text-sm leading-relaxed">
-            <div className="text-[10px] uppercase tracking-[0.2em] font-bold mb-2">
-              GitHub not connected
-            </div>
-            You can preview changes here, but Save stays disabled until{" "}
-            <code className="bg-background/30 px-1">GITHUB_TOKEN</code>,{" "}
-            <code className="bg-background/30 px-1">GITHUB_OWNER</code>,{" "}
-            <code className="bg-background/30 px-1">GITHUB_REPO</code> are set
-            on Railway.
-          </section>
+        {loadError && (
+          <p className="text-sm text-[#b91c1c] border-2 border-line bg-[#fee2e2] px-3 py-2 rounded-sm">
+            {loadError}
+          </p>
         )}
 
-        {formats.map((slug) => (
-          <FormatSection
-            key={slug}
-            slug={slug}
-            bucket={cur.formatBuckets[slug]}
-            pins={cur.formatPins[slug] ?? []}
-            allExcluded={allExcluded}
-            onChange={(nextPins) =>
-              setCur((c) =>
-                c
-                  ? {
-                      ...c,
-                      formatPins: { ...c.formatPins, [slug]: nextPins },
-                    }
-                  : c
-              )
-            }
-          />
-        ))}
+        <section>
+          <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-3">
+            Existing briefs
+          </div>
+          {!briefs ? (
+            <p className="text-sm text-muted">Loading…</p>
+          ) : briefs.length === 0 ? (
+            <p className="text-sm text-muted italic">No briefs yet.</p>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {briefs.map((b) => (
+                <div
+                  key={b.slug}
+                  className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 flex flex-col gap-3"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 border-2 border-line bg-paper rounded-sm overflow-hidden flex items-center justify-center shrink-0">
+                      {b.logoUrl ? (
+                        /* eslint-disable-next-line @next/next/no-img-element */
+                        <img
+                          src={b.logoUrl}
+                          alt=""
+                          className="w-full h-full object-contain"
+                        />
+                      ) : (
+                        <span className="text-sm font-black uppercase">
+                          {b.name.slice(0, 2)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-black text-ink truncate">
+                        {b.name}
+                      </div>
+                      <div className="text-[11px] text-muted font-mono truncate">
+                        {b.slug}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 flex-wrap">
+                    <Link
+                      href={`/admin/b/${b.slug}`}
+                      className="flex-1 text-center border-2 border-line bg-ink text-background text-xs font-black uppercase tracking-widest px-2 py-1.5 rounded-sm nb-press"
+                    >
+                      Edit
+                    </Link>
+                    <a
+                      href={`/b/${b.slug}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex-1 text-center border-2 border-line bg-background text-xs font-black uppercase tracking-widest px-2 py-1.5 rounded-sm nb-press"
+                    >
+                      View ↗
+                    </a>
+                    {b.slug !== "rork" && (
+                      <button
+                        type="button"
+                        onClick={() => onDelete(b.slug)}
+                        className="border-2 border-line bg-background text-xs font-black px-2 py-1.5 rounded-sm nb-press"
+                        aria-label={`Delete ${b.name}`}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
 
-        <ExcludeSection
-          excluded={cur.exclude}
-          pickerExcluded={allExcluded}
-          onChange={(next) => setCur((c) => (c ? { ...c, exclude: next } : c))}
-        />
+        <FormTemplatesSection briefs={briefs ?? []} />
 
-        <details className="border-2 border-line rounded-md bg-paper p-3">
-          <summary className="cursor-pointer text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
-            Raw JSON (advanced)
-          </summary>
-          <pre className="mt-3 text-xs overflow-auto whitespace-pre-wrap break-all">
-            {JSON.stringify(cur, null, 2)}
-          </pre>
-        </details>
+        <section className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 sm:p-5">
+          <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-3">
+            Create a new brief
+          </div>
+          <form onSubmit={onCreate} className="grid gap-3 sm:grid-cols-3">
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+                Name
+              </span>
+              <input
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  if (!slug || slug === slugify(name))
+                    setSlug(slugify(e.target.value));
+                }}
+                placeholder="Acme App"
+                required
+                className="mt-1 w-full border-2 border-line rounded-md px-2 py-1.5 font-black focus:outline-none focus:border-accent bg-background"
+              />
+            </label>
+            <label className="block">
+              <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+                Slug
+              </span>
+              <input
+                value={slug}
+                onChange={(e) => setSlug(slugify(e.target.value))}
+                placeholder="acme-app"
+                className="mt-1 w-full border-2 border-line rounded-md px-2 py-1.5 font-mono text-sm focus:outline-none focus:border-accent bg-background"
+              />
+            </label>
+            <div className="block sm:col-span-3">
+              <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+                Logo (optional)
+              </span>
+              <div className="mt-1">
+                <LogoUpload
+                  value={logoUrl || null}
+                  onChange={(v) => setLogoUrl(v ?? "")}
+                />
+              </div>
+            </div>
+            <div className="sm:col-span-3 flex items-center gap-3 flex-wrap">
+              <button
+                type="submit"
+                disabled={creating || !name.trim()}
+                className="border-2 border-line bg-ink text-background font-black uppercase tracking-widest px-3 py-1.5 rounded-md nb-press disabled:opacity-40"
+              >
+                {creating ? "Creating…" : "Create brief"}
+              </button>
+              {createErr && (
+                <span className="text-xs font-bold text-[#b91c1c]">
+                  {createErr}
+                </span>
+              )}
+            </div>
+          </form>
+        </section>
       </div>
     </main>
-  );
-}
-
-function FormatSection({
-  slug,
-  bucket,
-  pins,
-  allExcluded,
-  onChange,
-}: {
-  slug: string;
-  bucket: string | null;
-  pins: string[];
-  allExcluded: Set<string>;
-  onChange: (next: string[]) => void;
-}) {
-  const pinnedVideos = useMemo(
-    () =>
-      pins.map((id) => ({
-        id,
-        video: getVideoByDbId(id) as VideoExample | undefined,
-      })),
-    [pins]
-  );
-
-  return (
-    <section className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 sm:p-5">
-      <div className="flex items-baseline justify-between gap-2 flex-wrap mb-3">
-        <h2 className="text-lg font-black">{slug}</h2>
-        <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
-          bucket: {bucket ?? "— (pins only)"}  ·  {pins.length} pinned
-        </span>
-      </div>
-
-      {pinnedVideos.length > 0 ? (
-        <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1 mb-4">
-          {pinnedVideos.map(({ id, video }) => (
-            <VideoChip
-              key={id}
-              video={video}
-              fallbackId={id}
-              onRemove={() => onChange(pins.filter((x) => x !== id))}
-            />
-          ))}
-        </div>
-      ) : (
-        <p className="text-xs text-muted mb-3 italic">
-          No manual pins. Format shows the bucket&rsquo;s top-12 by views.
-        </p>
-      )}
-
-      <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-2">
-        Add a pin
-      </div>
-      <VideoPicker
-        excludedIds={allExcluded}
-        onPick={(v) => {
-          if (v.dbId && !pins.includes(v.dbId)) onChange([...pins, v.dbId]);
-        }}
-        placeholder="Search @creator or caption…"
-      />
-    </section>
-  );
-}
-
-function ExcludeSection({
-  excluded,
-  pickerExcluded,
-  onChange,
-}: {
-  excluded: string[];
-  pickerExcluded: Set<string>;
-  onChange: (next: string[]) => void;
-}) {
-  const videos = useMemo(
-    () =>
-      excluded.map((id) => ({
-        id,
-        video: getVideoByDbId(id) as VideoExample | undefined,
-      })),
-    [excluded]
-  );
-  return (
-    <section className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 sm:p-5">
-      <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-1">
-        Exclude list (global)
-      </div>
-      <p className="text-xs text-muted mb-3">
-        Removed from every format, regardless of bucket.
-      </p>
-      {videos.length > 0 ? (
-        <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1 mb-4">
-          {videos.map(({ id, video }) => (
-            <VideoChip
-              key={id}
-              video={video}
-              fallbackId={id}
-              onRemove={() => onChange(excluded.filter((x) => x !== id))}
-            />
-          ))}
-        </div>
-      ) : (
-        <p className="text-xs text-muted italic mb-3">Nothing excluded.</p>
-      )}
-      <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-2">
-        Exclude a video
-      </div>
-      <VideoPicker
-        excludedIds={pickerExcluded}
-        onPick={(v) => {
-          if (v.dbId && !excluded.includes(v.dbId)) onChange([...excluded, v.dbId]);
-        }}
-        placeholder="Search @creator or caption…"
-      />
-    </section>
   );
 }

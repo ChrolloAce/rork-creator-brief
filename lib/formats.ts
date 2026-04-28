@@ -1,19 +1,12 @@
 import type { Format } from "./types";
-import { rorkVideos } from "./rork-videos";
 
-// 7 creator-facing formats. Each pulls its examples from the best-fit bucket
-// in rork-videos.ts (ViewTrack Rork Research, sorted by views). Thumbnail =
-// top-viewed example of that bucket.
-
-const pick = (bucket: string) => rorkVideos[bucket] ?? [];
-const topThumb = (bucket: string) =>
-  rorkVideos[bucket]?.[0]?.thumbnail ?? undefined;
+// Pure metadata. `examples` + `thumbnail` are populated at request time
+// by lib/format-videos.ts (which reads curation from Postgres).
 
 export const formats: Format[] = [
   {
     slug: "talking-head",
     title: "Talking Head",
-    thumbnail: topThumb("talking-head"),
     tagline: "Your face, your hook, your voice — nothing else in the frame",
     description:
       "Pure creator-on-camera. You address the viewer, deliver a hook, and carry the whole video with your delivery. No screen-rec dependency. Lives or dies by the first 2 seconds.",
@@ -36,12 +29,11 @@ export const formats: Format[] = [
       "Keep B-roll to a supporting role — your face is the format.",
     ],
     hookCategorySlugs: ["regret-reveal", "someone-showed-me", "comparison"],
-    examples: pick("talking-head"),
+    examples: [],
   },
   {
     slug: "snapchat-hook-reaction",
     title: "Snapchat Hook + Reaction",
-    thumbnail: topThumb("snapchat-hook-reaction"),
     tagline: "Snapchat-style selfie hook → reveal → \"comment [keyword]\" CTA — 1.4M-view territory",
     description:
       "Shot in the Snapchat camera (or vertical selfie view) with a bold text-on-screen hook, then either a swap to the screen or a reveal of the product, closing with \"comment [keyword] and I'll send you the link.\" @ernestosoftware's format — his top post hit 1.4M views.",
@@ -65,13 +57,12 @@ export const formats: Format[] = [
       "Reply to every comment publicly with \"check your DMs\" — threaded replies juice the algo.",
     ],
     hookCategorySlugs: ["curious-creator", "someone-showed-me"],
-    examples: pick("snapchat-hook-reaction"),
+    examples: [],
   },
   {
     slug: "reaction-plus-demo",
     title: "Reaction + Demo",
     tagline: "You discover Rork in real time — the reaction carries the video",
-    thumbnail: topThumb("reaction-plus-demo"),
     description:
       "You open Rork \"for the first time\" on camera. Type a prompt, wait, react to what it builds. The viewer rides your surprise with you. Low production, high trust.",
     bestFor: [
@@ -93,7 +84,7 @@ export const formats: Format[] = [
       "Name the tool clearly at the end. Link in bio.",
     ],
     hookCategorySlugs: ["unintentional-find", "someone-showed-me"],
-    examples: pick("reaction-plus-demo"),
+    examples: [],
   },
   {
     slug: "split-screen",
@@ -123,37 +114,8 @@ export const formats: Format[] = [
     examples: [],
   },
   {
-    slug: "building-page",
-    title: "Building Page",
-    thumbnail: topThumb("building-page"),
-    tagline: "Full-screen build-along. Prompt in, working app out.",
-    description:
-      "100% screen recording, minimal talking. Type a prompt, watch Rork build, show the working app on device. Speed-ramp the middle. The product IS the content — @alitrek0's 1.4M-view formula.",
-    bestFor: [
-      "Technical creators who'd rather show than talk",
-      "SEO strategy — captions carrying the story",
-      "YouTube Shorts + long-form versions",
-    ],
-    structure: [
-      "0–3s: Hook frame. Timer appears. \"I'm going to build X in Y minutes.\"",
-      "3–10s: Type the prompt on camera. No edit — raw typing is the authenticity.",
-      "10–40s: Rork building. Speed up 2–3x. Keep the timer visible in the corner.",
-      "40–55s: App running on a physical device. Press buttons. Demonstrate it works.",
-      "55–60s: Timer stops. Display the final time. No voiceover needed.",
-    ],
-    tips: [
-      "The prompt you type IS the hook. Make it specific and relatable.",
-      "A visible running timer is non-negotiable — it's the proof.",
-      "Don't cut out the wait. The tension during Rork's thinking is the payoff.",
-      "Export at native vertical resolution. No letterboxing.",
-    ],
-    hookCategorySlugs: ["impossible-claim", "curious-creator"],
-    examples: pick("building-page"),
-  },
-  {
     slug: "top-three-websites",
     title: "Top Three Websites",
-    thumbnail: topThumb("top-three-websites"),
     tagline: "Numbered list, fast cuts — proven 400–700k view format",
     description:
       "Rapid-fire list of 3 tools, 5–8 seconds each. Put Rork in the #3 slot (highest conversion). Viewers commit because they know exactly how long it'll be. @1ukas.online has made this a 700k-per-video machine.",
@@ -176,12 +138,11 @@ export const formats: Format[] = [
       "Slot #3 converts best — viewers stuck around for the reveal.",
     ],
     hookCategorySlugs: ["someone-showed-me", "impossible-claim"],
-    examples: pick("top-three-websites"),
+    examples: [],
   },
   {
     slug: "visual-hook-plus-device",
     title: "Visual Hook + Device",
-    thumbnail: topThumb("visual-hook-plus-device"),
     tagline: "Big on-screen hook + device in frame — @jakeezytech's 1.5M-view pattern",
     description:
       "A phone or laptop in frame showing the Rork output, paired with a strong visual hook overlay (arrows, text, shapes). Aesthetic, punchy, scroll-stopping. @jakeezytech's \"secret website\" format lives here.",
@@ -204,6 +165,6 @@ export const formats: Format[] = [
       "Always close with a save/bookmark prompt — saves juice the algo.",
     ],
     hookCategorySlugs: ["curious-creator", "unintentional-find"],
-    examples: pick("visual-hook-plus-device"),
+    examples: [],
   },
 ];

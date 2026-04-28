@@ -7,8 +7,20 @@ import { adminCookieName, verifyToken } from "@/lib/admin-auth";
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const isAdminPage = pathname === "/admin" || pathname.startsWith("/admin/");
+  const isFormTemplatesApi =
+    pathname === "/api/form-templates" ||
+    pathname.startsWith("/api/form-templates/");
+  // public submit endpoint: /api/form-templates/[slug]/submit
+  const isPublicSubmit =
+    isFormTemplatesApi && /\/submit\/?$/.test(pathname);
   const isAdminApi =
-    pathname.startsWith("/api/admin/") || pathname === "/api/curation";
+    pathname.startsWith("/api/admin/") ||
+    pathname === "/api/curation" ||
+    pathname === "/api/briefs" ||
+    pathname.startsWith("/api/briefs/") ||
+    pathname === "/api/vt-projects" ||
+    pathname === "/api/vt-search" ||
+    (isFormTemplatesApi && !isPublicSubmit);
   if (!isAdminPage && !isAdminApi) return NextResponse.next();
 
   // allow login endpoints
@@ -31,5 +43,15 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/admin/:path*", "/api/admin/:path*", "/api/curation"],
+  matcher: [
+    "/admin/:path*",
+    "/api/admin/:path*",
+    "/api/curation",
+    "/api/briefs",
+    "/api/briefs/:path*",
+    "/api/vt-projects",
+    "/api/vt-search",
+    "/api/form-templates",
+    "/api/form-templates/:path*",
+  ],
 };

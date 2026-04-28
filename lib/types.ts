@@ -9,6 +9,10 @@ export type VideoExample = {
   caption?: string;
   thumbnail: string;
   views?: number;
+  likes?: number;
+  comments?: number;
+  shares?: number;
+  uploadDate?: string;
   creator: string;
   creatorUrl?: string;
 };

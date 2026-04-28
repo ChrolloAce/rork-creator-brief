@@ -1,44 +1,50 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import type { NavSection } from "@/lib/nav";
 
 export function Sidebar({
   sections,
   activeId,
+  brief,
   onNavigate,
   onClose,
 }: {
   sections: NavSection[];
   activeId: string;
+  brief: { slug: string; name: string; logoUrl: string | null };
   onNavigate?: () => void;
   onClose?: () => void;
 }) {
+  const briefHome = `/b/${brief.slug}`;
   return (
     <nav aria-label="Brief sections" className="flex flex-col h-full">
       <div className="flex items-center gap-3 p-4 border-b-2 border-line">
         <Link
-          href="/"
+          href={briefHome}
           onClick={onNavigate}
           className="w-10 h-10 border-2 border-line bg-background rounded-md nb-shadow-sm overflow-hidden flex items-center justify-center"
-          aria-label="Home — Rork Creator Brief"
+          aria-label={`Home — ${brief.name} Creator Brief`}
         >
-          <Image
-            src="/rork-logo.png"
-            alt=""
-            width={40}
-            height={40}
-            priority
-            className="w-full h-full object-contain"
-          />
+          {brief.logoUrl ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={brief.logoUrl}
+              alt=""
+              className="w-full h-full object-contain"
+            />
+          ) : (
+            <span className="text-base font-black uppercase">
+              {brief.name.slice(0, 2)}
+            </span>
+          )}
         </Link>
         <div className="flex-1 min-w-0">
-          <div className="font-black text-ink leading-tight text-sm">
-            RORK / BRIEF
+          <div className="font-black text-ink leading-tight text-sm truncate">
+            {brief.name.toUpperCase()} / BRIEF
           </div>
           <div className="text-[10px] uppercase tracking-[0.2em] text-muted font-bold">
-            Creator guide v2.0
+            Creator guide
           </div>
         </div>
         {onClose && (
