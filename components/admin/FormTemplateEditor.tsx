@@ -4,6 +4,65 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { FormField, FormFieldType, FormResponse } from "@/lib/db";
 
+function ResponseValue({
+  field,
+  value,
+}: {
+  field: FormField;
+  value: unknown;
+}) {
+  if (value === null || value === undefined || value === "") return <>—</>;
+  if (field.type === "image" && typeof value === "string") {
+    return (
+      <a
+        href={value}
+        target="_blank"
+        rel="noreferrer"
+        className="inline-block"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={value}
+          alt={field.label}
+          className="w-24 h-24 object-cover border-2 border-line rounded-sm"
+        />
+      </a>
+    );
+  }
+  if (field.type === "password" && typeof value === "string") {
+    return (
+      <PasswordReveal value={value} />
+    );
+  }
+  if (typeof value === "boolean") return <>{value ? "yes" : "no"}</>;
+  return <>{String(value)}</>;
+}
+
+function PasswordReveal({ value }: { value: string }) {
+  const [shown, setShown] = useState(false);
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span className="font-mono">
+        {shown ? value : "•".repeat(Math.min(value.length, 12))}
+      </span>
+      <button
+        type="button"
+        onClick={() => setShown((s) => !s)}
+        className="text-[10px] uppercase tracking-[0.2em] font-bold border-2 border-line bg-background px-1.5 py-0.5 rounded-sm nb-press"
+      >
+        {shown ? "hide" : "show"}
+      </button>
+      <button
+        type="button"
+        onClick={() => navigator.clipboard?.writeText(value)}
+        className="text-[10px] uppercase tracking-[0.2em] font-bold border-2 border-line bg-background px-1.5 py-0.5 rounded-sm nb-press"
+      >
+        copy
+      </button>
+    </span>
+  );
+}
+
 type Template = {
   slug: string;
   name: string;
@@ -21,6 +80,8 @@ const FIELD_TYPES: { value: FormFieldType; label: string }[] = [
   { value: "number", label: "Number" },
   { value: "select", label: "Dropdown (single choice)" },
   { value: "checkbox", label: "Checkbox (yes/no)" },
+  { value: "password", label: "Password (masked)" },
+  { value: "image", label: "Image upload" },
 ];
 
 function genId(): string {
@@ -505,13 +566,7 @@ function ResponsesSection({
                         {f.label}
                       </dt>
                       <dd className="font-mono text-xs whitespace-pre-wrap break-words">
-                        {v === null || v === undefined || v === ""
-                          ? "—"
-                          : typeof v === "boolean"
-                            ? v
-                              ? "yes"
-                              : "no"
-                            : String(v)}
+                        <ResponseValue field={f} value={v} />
                       </dd>
                     </div>
                   );

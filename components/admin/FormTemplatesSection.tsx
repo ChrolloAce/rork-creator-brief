@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { FORM_PRESETS, getPreset } from "@/lib/form-presets";
 
 type Template = {
   slug: string;
@@ -34,6 +35,7 @@ export function FormTemplatesSection({
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [briefSlug, setBriefSlug] = useState<string>("");
+  const [presetId, setPresetId] = useState<string>("blank");
 
   async function load() {
     const r = await fetch("/api/form-templates", { cache: "no-store" });
@@ -50,10 +52,14 @@ export function FormTemplatesSection({
     e.preventDefault();
     setCreating(true);
     setCreateErr(null);
+    const preset = getPreset(presetId);
     const body = {
       name,
       slug: slug || slugify(name),
       briefSlug: briefSlug || null,
+      description: preset?.body.description || undefined,
+      submitMessage: preset?.body.submitMessage || undefined,
+      fields: preset?.body.fields ?? [],
     };
     const res = await fetch("/api/form-templates", {
       method: "POST",
@@ -202,6 +208,28 @@ export function FormTemplatesSection({
               </option>
             ))}
           </select>
+        </label>
+        <label className="block sm:col-span-3">
+          <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+            Start from template
+          </span>
+          <select
+            value={presetId}
+            onChange={(e) => setPresetId(e.target.value)}
+            className="mt-1 w-full border-2 border-line rounded-md px-2 py-1.5 text-sm focus:outline-none focus:border-accent bg-background"
+          >
+            {FORM_PRESETS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name} — {p.description}
+              </option>
+            ))}
+          </select>
+          {presetId !== "blank" && (
+            <p className="text-[11px] text-muted mt-1">
+              {getPreset(presetId)?.body.fields.length ?? 0} fields will be
+              pre-populated. You can edit them after.
+            </p>
+          )}
         </label>
         <div className="sm:col-span-3 flex items-center gap-3 flex-wrap">
           <button

@@ -372,7 +372,9 @@ export type FormFieldType =
   | "url"
   | "number"
   | "select"
-  | "checkbox";
+  | "checkbox"
+  | "password"
+  | "image";
 
 export type FormField = {
   id: string;

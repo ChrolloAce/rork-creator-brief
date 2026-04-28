@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { FormField } from "@/lib/db";
 
 type Props = {
@@ -167,7 +167,35 @@ function FieldRow({
       </label>
     );
   }
-  const inputType =
+  if (field.type === "password") {
+    return (
+      <label className="block">
+        {baseLabel}
+        <input
+          type="password"
+          value={(value as string) ?? ""}
+          onChange={(e) => onChange(e.target.value)}
+          required={field.required}
+          placeholder={field.placeholder}
+          autoComplete="off"
+          className="mt-1 w-full border-2 border-line rounded-md px-3 py-2 text-sm focus:outline-none focus:border-accent bg-background"
+        />
+        {help}
+      </label>
+    );
+  }
+  if (field.type === "image") {
+    return (
+      <ImageField
+        label={field.label}
+        required={field.required}
+        helpText={field.helpText}
+        value={value as string | null | undefined}
+        onChange={onChange}
+      />
+    );
+  }
+  const inputType: string =
     field.type === "email"
       ? "email"
       : field.type === "url"
@@ -188,5 +216,129 @@ function FieldRow({
       />
       {help}
     </label>
+  );
+}
+
+const IMAGE_MAX_DIM = 768;
+const IMAGE_MAX_RAW_BYTES = 8 * 1024 * 1024;
+
+async function fileToResizedDataUrl(file: File): Promise<string> {
+  if (file.size > IMAGE_MAX_RAW_BYTES) {
+    throw new Error("File is larger than 8 MB.");
+  }
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(
+    1,
+    IMAGE_MAX_DIM / Math.max(bitmap.width, bitmap.height)
+  );
+  const w = Math.max(1, Math.round(bitmap.width * scale));
+  const h = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas not supported in this browser.");
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  bitmap.close?.();
+  const mime = file.type === "image/png" ? "image/png" : "image/jpeg";
+  const quality = mime === "image/jpeg" ? 0.85 : undefined;
+  return canvas.toDataURL(mime, quality);
+}
+
+function ImageField({
+  label,
+  required,
+  helpText,
+  value,
+  onChange,
+}: {
+  label: string;
+  required?: boolean;
+  helpText?: string;
+  value: string | null | undefined;
+  onChange: (v: unknown) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function onPick(file: File) {
+    setErr(null);
+    setBusy(true);
+    try {
+      const url = await fileToResizedDataUrl(file);
+      onChange(url);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="block">
+      <span className="block text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-1">
+        {label}
+        {required && <span className="text-[#b91c1c] ml-1">*</span>}
+      </span>
+      <div className="flex items-start gap-3 flex-wrap">
+        <span
+          className="w-20 h-20 border-2 border-line bg-paper rounded-sm overflow-hidden flex items-center justify-center shrink-0"
+          aria-hidden
+        >
+          {value ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img
+              src={value}
+              alt=""
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <span className="text-[10px] font-black uppercase tracking-widest text-muted">
+              None
+            </span>
+          )}
+        </span>
+        <div className="flex-1 min-w-[180px] space-y-2">
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) void onPick(f);
+              e.target.value = "";
+            }}
+          />
+          <div className="flex gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => inputRef.current?.click()}
+              disabled={busy}
+              className="border-2 border-line bg-background font-black uppercase tracking-widest px-3 py-1.5 rounded-md nb-press text-xs disabled:opacity-40"
+            >
+              {busy ? "Processing…" : value ? "Replace" : "Upload image"}
+            </button>
+            {value && (
+              <button
+                type="button"
+                onClick={() => onChange(null)}
+                className="border-2 border-line bg-background font-black uppercase tracking-widest px-3 py-1.5 rounded-md nb-press text-xs"
+              >
+                Remove
+              </button>
+            )}
+          </div>
+          <p className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+            PNG, JPG, or WEBP · resized to 768px
+          </p>
+          {helpText && (
+            <p className="text-[11px] text-muted">{helpText}</p>
+          )}
+          {err && <p className="text-xs text-[#b91c1c] font-bold">{err}</p>}
+        </div>
+      </div>
+    </div>
   );
 }
