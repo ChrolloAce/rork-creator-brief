@@ -195,6 +195,21 @@ function FieldRow({
       />
     );
   }
+  if (field.type === "account_list") {
+    return (
+      <AccountListField
+        label={field.label}
+        required={field.required}
+        helpText={field.helpText}
+        value={
+          Array.isArray(value)
+            ? (value as { platform: string; handle: string }[])
+            : []
+        }
+        onChange={onChange}
+      />
+    );
+  }
   const inputType: string =
     field.type === "email"
       ? "email"
@@ -339,6 +354,98 @@ function ImageField({
           {err && <p className="text-xs text-[#b91c1c] font-bold">{err}</p>}
         </div>
       </div>
+    </div>
+  );
+}
+
+const ACCOUNT_PLATFORMS = [
+  "Instagram",
+  "TikTok",
+  "YouTube",
+  "X / Twitter",
+  "Facebook",
+  "Snapchat",
+  "Other",
+];
+
+type AccountEntry = { platform: string; handle: string };
+
+function AccountListField({
+  label,
+  required,
+  helpText,
+  value,
+  onChange,
+}: {
+  label: string;
+  required?: boolean;
+  helpText?: string;
+  value: AccountEntry[];
+  onChange: (v: AccountEntry[]) => void;
+}) {
+  const entries = value.length > 0 ? value : [{ platform: "Instagram", handle: "" }];
+
+  function update(i: number, patch: Partial<AccountEntry>) {
+    const next = entries.map((e, idx) => (idx === i ? { ...e, ...patch } : e));
+    onChange(next);
+  }
+  function add() {
+    onChange([...entries, { platform: "Instagram", handle: "" }]);
+  }
+  function remove(i: number) {
+    const next = entries.filter((_, idx) => idx !== i);
+    onChange(next);
+  }
+
+  return (
+    <div className="block">
+      <span className="block text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-1">
+        {label}
+        {required && <span className="text-[#b91c1c] ml-1">*</span>}
+      </span>
+      <ul className="space-y-2">
+        {entries.map((e, i) => (
+          <li key={i} className="flex gap-2 items-stretch">
+            <select
+              value={e.platform}
+              onChange={(ev) => update(i, { platform: ev.target.value })}
+              className="border-2 border-line rounded-md px-2 py-2 text-sm focus:outline-none focus:border-accent bg-background w-36"
+            >
+              {ACCOUNT_PLATFORMS.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+            <input
+              type="text"
+              value={e.handle}
+              onChange={(ev) => update(i, { handle: ev.target.value })}
+              placeholder="@handle or full URL"
+              className="flex-1 border-2 border-line rounded-md px-3 py-2 text-sm focus:outline-none focus:border-accent bg-background"
+            />
+            <button
+              type="button"
+              onClick={() => remove(i)}
+              aria-label="Remove"
+              disabled={entries.length === 1}
+              className="border-2 border-line bg-background w-10 rounded-md nb-press font-black disabled:opacity-30"
+            >
+              ×
+            </button>
+          </li>
+        ))}
+      </ul>
+      <button
+        type="button"
+        onClick={add}
+        className="mt-2 border-2 border-line bg-background text-xs font-black uppercase tracking-widest px-3 py-1.5 rounded-md nb-press"
+      >
+        + Add account
+      </button>
+      {helpText && (
+        <p className="text-[11px] text-muted mt-2">{helpText}</p>
+      )}
     </div>
   );
 }

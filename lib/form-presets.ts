@@ -103,6 +103,47 @@ const IDENTITY_FIELDS: FormField[] = [
   },
 ];
 
+// Identity without the singular IG/TikTok inputs (those move into the
+// repeatable accounts list in the Full preset).
+const IDENTITY_FIELDS_BARE: FormField[] = [
+  {
+    id: "first_name",
+    type: "short_text",
+    label: "First name",
+    required: true,
+  },
+  {
+    id: "last_name",
+    type: "short_text",
+    label: "Last name",
+    required: true,
+  },
+  {
+    id: "email",
+    type: "email",
+    label: "Email",
+    required: true,
+  },
+];
+
+const CONTENT_ACCESS_FIELDS: FormField[] = [
+  {
+    id: "social_accounts",
+    type: "account_list",
+    label: "Your social accounts",
+    helpText:
+      "Add as many as you want — Instagram, TikTok, YouTube, etc. Just paste your handle or profile URL.",
+  },
+  {
+    id: "drive_video_link",
+    type: "url",
+    label: "Google Drive / Dropbox link with your content",
+    placeholder: "https://drive.google.com/...",
+    helpText:
+      "Or drop a folder link here so we can review your videos directly.",
+  },
+];
+
 const ACCOUNT_ACCESS_FIELDS: FormField[] = [
   {
     id: "account_username",
@@ -173,6 +214,22 @@ const LOCATION_FIELDS: FormField[] = [
   },
 ];
 
+const LOCATION_FIELDS_BARE: FormField[] = [
+  {
+    id: "country",
+    type: "select",
+    label: "Country",
+    required: true,
+    options: COUNTRIES,
+  },
+  {
+    id: "city",
+    type: "short_text",
+    label: "City",
+    required: true,
+  },
+];
+
 export const FORM_PRESETS: FormPreset[] = [
   {
     id: "blank",
@@ -222,17 +279,17 @@ export const FORM_PRESETS: FormPreset[] = [
     id: "full_creator_application",
     name: "Full UGC creator application",
     description:
-      "Identity, account access, demographics, headshot, and location — the whole onboarding.",
+      "Identity, demographics, headshot, location, social accounts, and a Drive content link.",
     body: {
       description:
-        "Apply to be a UGC creator on our roster. This should take ~3 minutes. You can either give us posting access or share a Drive folder — both work.",
+        "Apply to be a UGC creator on our roster. This should take a couple minutes. Add all the accounts you want, drop a Drive link with your content, or both.",
       submitMessage:
         "You're in our system. We'll review and reach out within a few days.",
       fields: [
-        ...IDENTITY_FIELDS,
+        ...IDENTITY_FIELDS_BARE,
         ...DEMOGRAPHIC_FIELDS,
-        ...LOCATION_FIELDS,
-        ...ACCOUNT_ACCESS_FIELDS,
+        ...LOCATION_FIELDS_BARE,
+        ...CONTENT_ACCESS_FIELDS,
       ],
     },
   },

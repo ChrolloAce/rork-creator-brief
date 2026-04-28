@@ -10,10 +10,22 @@ export const dynamic = "force-dynamic";
 type Params = { slug: string };
 
 function validate(field: FormField, raw: unknown): string | null {
+  const isEmptyAccountList =
+    field.type === "account_list" &&
+    (!Array.isArray(raw) ||
+      raw.every(
+        (entry) =>
+          !entry ||
+          typeof entry !== "object" ||
+          !("handle" in entry) ||
+          typeof (entry as { handle: unknown }).handle !== "string" ||
+          (entry as { handle: string }).handle.trim() === ""
+      ));
   const isEmpty =
     raw === undefined ||
     raw === null ||
-    (typeof raw === "string" && raw.trim() === "");
+    (typeof raw === "string" && raw.trim() === "") ||
+    isEmptyAccountList;
   if (field.required && isEmpty) {
     return `${field.label} is required`;
   }
@@ -51,6 +63,20 @@ function normalize(field: FormField, raw: unknown): unknown {
   if (field.type === "number" && typeof raw === "string") {
     const n = Number(raw);
     return Number.isFinite(n) ? n : null;
+  }
+  if (field.type === "account_list") {
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter(
+        (e): e is { platform?: unknown; handle?: unknown } =>
+          !!e && typeof e === "object"
+      )
+      .map((e) => ({
+        platform:
+          typeof e.platform === "string" ? e.platform.trim() : "",
+        handle: typeof e.handle === "string" ? e.handle.trim() : "",
+      }))
+      .filter((e) => e.handle !== "");
   }
   if (typeof raw === "string") return raw.trim();
   return raw;

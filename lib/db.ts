@@ -374,7 +374,8 @@ export type FormFieldType =
   | "select"
   | "checkbox"
   | "password"
-  | "image";
+  | "image"
+  | "account_list";
 
 export type FormField = {
   id: string;

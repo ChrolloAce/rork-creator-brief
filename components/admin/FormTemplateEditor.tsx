@@ -29,6 +29,22 @@ function ResponseValue({
       </a>
     );
   }
+  if (field.type === "account_list" && Array.isArray(value)) {
+    if (value.length === 0) return <>—</>;
+    return (
+      <ul className="space-y-1">
+        {value.map((entry, i) => {
+          const e = entry as { platform?: string; handle?: string };
+          return (
+            <li key={i} className="font-mono text-xs">
+              <span className="text-muted">{e.platform || "—"}:</span>{" "}
+              {e.handle || "—"}
+            </li>
+          );
+        })}
+      </ul>
+    );
+  }
   if (field.type === "password" && typeof value === "string") {
     return (
       <PasswordReveal value={value} />
@@ -82,6 +98,7 @@ const FIELD_TYPES: { value: FormFieldType; label: string }[] = [
   { value: "checkbox", label: "Checkbox (yes/no)" },
   { value: "password", label: "Password (masked)" },
   { value: "image", label: "Image upload" },
+  { value: "account_list", label: "Social accounts (multiple)" },
 ];
 
 function genId(): string {
