@@ -28,17 +28,21 @@ function ItemRow({
   badge?: React.ReactNode;
 }) {
   return (
-    <li className="flex gap-3 items-start">
-      {badge}
+    <li className="space-y-3">
+      <div className="flex gap-3 items-start">
+        {badge}
+        <span className="text-ink leading-relaxed pt-0.5 flex-1">
+          {item.text}
+        </span>
+      </div>
       {item.image && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={item.image}
           alt=""
-          className="shrink-0 w-16 h-16 object-cover border-2 border-line rounded-sm bg-paper"
+          className="block w-full max-w-2xl h-auto border-2 border-line rounded-md bg-paper ml-10"
         />
       )}
-      <span className="text-ink leading-relaxed pt-0.5">{item.text}</span>
     </li>
   );
 }

@@ -579,13 +579,13 @@ function ItemImagePicker({
             src={image}
             alt=""
             onClick={() => inputRef.current?.click()}
-            className="w-12 h-12 object-cover border-2 border-line rounded-sm bg-paper cursor-pointer"
+            className="w-28 max-h-40 object-contain border-2 border-line rounded-sm bg-paper cursor-pointer"
           />
           <button
             type="button"
             onClick={() => onChange(undefined)}
             aria-label="Remove image"
-            className="absolute -top-1 -right-1 w-4 h-4 bg-background border-2 border-line rounded-full text-[10px] font-black leading-none flex items-center justify-center"
+            className="absolute -top-1 -right-1 w-5 h-5 bg-background border-2 border-line rounded-full text-[11px] font-black leading-none flex items-center justify-center"
           >
             ×
           </button>
@@ -596,9 +596,9 @@ function ItemImagePicker({
           onClick={() => inputRef.current?.click()}
           disabled={busy}
           title="Add image"
-          className="w-12 h-12 border-2 border-dashed border-line bg-paper rounded-sm text-[10px] font-black text-muted hover:text-accent hover:border-accent disabled:opacity-40"
+          className="w-28 h-20 border-2 border-dashed border-line bg-paper rounded-sm text-[10px] font-black text-muted hover:text-accent hover:border-accent disabled:opacity-40"
         >
-          {busy ? "…" : "+ IMG"}
+          {busy ? "…" : "+ IMAGE"}
         </button>
       )}
     </div>
