@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import type { VideoExample } from "@/lib/types";
+import { useEffect, useRef, useState } from "react";
+import type { HookCategory, VideoExample } from "@/lib/types";
 import { allVideos } from "@/lib/all-videos";
 import { formats as formatsMeta } from "@/lib/formats";
+import { hookCategories as defaultHookCategories } from "@/lib/hooks";
 import type { BriefOverview, BriefHookCategory } from "@/lib/db";
 import { HooksEditor } from "@/components/admin/HooksEditor";
 import { LogoUpload } from "@/components/admin/LogoUpload";
@@ -128,6 +129,15 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
   async function onSaveAll() {
     if (!cur) return;
     await persist(cur);
+  }
+
+  const hookSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function setAndSaveHooks(next: BriefHookCategory[] | null) {
+    setBrief((b) => (b ? { ...b, hookCategories: next } : b));
+    if (hookSaveTimer.current) clearTimeout(hookSaveTimer.current);
+    hookSaveTimer.current = setTimeout(() => {
+      void saveBrief({ hookCategories: next });
+    }, 600);
   }
 
   async function onLogout() {
@@ -275,6 +285,12 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
             defaultStructure={meta.structure}
             defaultTips={meta.tips}
             defaultBestFor={meta.bestFor}
+            linkedHookSlugs={meta.hookCategorySlugs}
+            defaultHookCategories={defaultHookCategories.filter((c) =>
+              meta.hookCategorySlugs.includes(c.slug)
+            )}
+            hookCategories={brief.hookCategories ?? null}
+            onChangeHookCategories={setAndSaveHooks}
             pins={cur.formatPins[meta.slug] ?? []}
             override={cur.formatOverrides?.[meta.slug] ?? {}}
             pinnedVideos={preview[meta.slug]?.pinnedVideos ?? []}
@@ -596,6 +612,10 @@ function FormatSection({
   defaultStructure,
   defaultTips,
   defaultBestFor,
+  linkedHookSlugs,
+  defaultHookCategories,
+  hookCategories,
+  onChangeHookCategories,
   pins,
   override,
   pinnedVideos,
@@ -617,6 +637,10 @@ function FormatSection({
   defaultStructure: string[];
   defaultTips: string[];
   defaultBestFor: string[];
+  linkedHookSlugs: string[];
+  defaultHookCategories: HookCategory[];
+  hookCategories: BriefHookCategory[] | null;
+  onChangeHookCategories: (next: BriefHookCategory[] | null) => void;
   pins: string[];
   override: FormatOverride;
   pinnedVideos: VideoExample[];
@@ -829,8 +853,143 @@ function FormatSection({
             script block on the public format page.
           </p>
         </div>
+        <FormatHooksInline
+          linkedSlugs={linkedHookSlugs}
+          defaults={defaultHookCategories}
+          hookCategories={hookCategories}
+          onChange={onChangeHookCategories}
+        />
       </div>
     </section>
+  );
+}
+
+function FormatHooksInline({
+  linkedSlugs,
+  defaults,
+  hookCategories,
+  onChange,
+}: {
+  linkedSlugs: string[];
+  defaults: HookCategory[];
+  hookCategories: BriefHookCategory[] | null;
+  onChange: (next: BriefHookCategory[] | null) => void;
+}) {
+  const cats = hookCategories ?? [];
+  const linkedCats = linkedSlugs
+    .map((slug) => cats.find((c) => c.slug === slug))
+    .filter((c): c is BriefHookCategory => !!c);
+  const missing = linkedSlugs.filter((s) => !cats.find((c) => c.slug === s));
+
+  function importDefaults() {
+    const toAdd: BriefHookCategory[] = defaults
+      .filter((d) => missing.includes(d.slug))
+      .map((d) => ({
+        slug: d.slug,
+        title: d.title,
+        summary: d.summary,
+        whyItWorks: d.whyItWorks,
+        hooks: d.hooks.map((h) => ({ ...h })),
+      }));
+    onChange([...cats, ...toAdd]);
+  }
+
+  function patchHook(catSlug: string, hookIdx: number, text: string) {
+    onChange(
+      cats.map((c) => {
+        if (c.slug !== catSlug) return c;
+        const hooks = [...c.hooks];
+        hooks[hookIdx] = { ...hooks[hookIdx], text };
+        return { ...c, hooks };
+      })
+    );
+  }
+
+  function addHook(catSlug: string) {
+    onChange(
+      cats.map((c) =>
+        c.slug !== catSlug ? c : { ...c, hooks: [...c.hooks, { text: "" }] }
+      )
+    );
+  }
+
+  function removeHook(catSlug: string, hookIdx: number) {
+    onChange(
+      cats.map((c) =>
+        c.slug !== catSlug
+          ? c
+          : { ...c, hooks: c.hooks.filter((_, i) => i !== hookIdx) }
+      )
+    );
+  }
+
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-2">
+        Hooks for this format ({linkedCats.reduce((n, c) => n + c.hooks.length, 0)})
+      </div>
+      {linkedCats.length === 0 && missing.length === 0 && (
+        <p className="text-xs text-muted italic">
+          No hook categories linked to this format.
+        </p>
+      )}
+      {linkedCats.map((cat) => (
+        <div
+          key={cat.slug}
+          className="border-2 border-line bg-paper rounded-md p-3 mb-2"
+        >
+          <div className="text-sm font-black mb-2">{cat.title}</div>
+          <ul className="space-y-1">
+            {cat.hooks.map((h, hi) => (
+              <li key={hi} className="flex gap-1.5">
+                <span className="font-mono text-[10px] font-bold text-muted pt-2 w-6 text-right shrink-0">
+                  {String(hi + 1).padStart(2, "0")}
+                </span>
+                <input
+                  type="text"
+                  value={h.text}
+                  onChange={(e) => patchHook(cat.slug, hi, e.target.value)}
+                  placeholder="Hook text…"
+                  className="flex-1 border-2 border-line rounded-md px-2 py-1 text-sm focus:outline-none focus:border-accent bg-background"
+                />
+                <button
+                  type="button"
+                  onClick={() => removeHook(cat.slug, hi)}
+                  aria-label="Remove hook"
+                  className="border-2 border-line bg-background w-8 rounded-md nb-press font-black"
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            onClick={() => addHook(cat.slug)}
+            className="mt-2 border-2 border-line bg-background px-2 py-1 rounded-md nb-press text-[10px] font-black uppercase tracking-widest"
+          >
+            + Add hook
+          </button>
+        </div>
+      ))}
+      {missing.length > 0 && (
+        <div className="border-2 border-dashed border-line rounded-md p-3 text-center">
+          <p className="text-xs text-muted mb-2">
+            {missing.length} linked{" "}
+            {missing.length === 1 ? "category" : "categories"} (
+            {missing.join(", ")}) using shared defaults — not editable until
+            imported.
+          </p>
+          <button
+            type="button"
+            onClick={importDefaults}
+            className="border-2 border-line bg-background px-2 py-1 rounded-md nb-press text-[10px] font-black uppercase tracking-widest"
+          >
+            Customize for this brief
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
