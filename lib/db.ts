@@ -23,14 +23,17 @@ function getSql() {
   return globalThis.__sql;
 }
 
+export type FormatOverrideItem = { text: string; image?: string };
 export type FormatOverride = {
   title?: string;
   tagline?: string;
   description?: string;
   script?: string;
-  structure?: string[];
-  tips?: string[];
-  bestFor?: string[];
+  structure?: FormatOverrideItem[];
+  tips?: FormatOverrideItem[];
+  bestFor?: FormatOverrideItem[];
+  // Section keys hidden on the public page (e.g. "tips", "examples").
+  hiddenSections?: string[];
 };
 
 export type CurationData = {

@@ -1,9 +1,47 @@
 "use client";
 
 import { useState } from "react";
-import type { Format, Hook, HookCategory } from "@/lib/types";
+import type {
+  Format,
+  FormatListItem,
+  FormatSectionKey,
+  Hook,
+  HookCategory,
+  ListItem,
+} from "@/lib/types";
 import { Thumbnail } from "./Thumbnail";
 import { VideoCarousel } from "./VideoCarousel";
+
+function asItem(i: FormatListItem): ListItem {
+  return typeof i === "string" ? { text: i } : i;
+}
+
+function isHidden(format: Format, key: FormatSectionKey): boolean {
+  return format.hiddenSections?.includes(key) ?? false;
+}
+
+function ItemRow({
+  item,
+  badge,
+}: {
+  item: ListItem;
+  badge?: React.ReactNode;
+}) {
+  return (
+    <li className="flex gap-3 items-start">
+      {badge}
+      {item.image && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={item.image}
+          alt=""
+          className="shrink-0 w-16 h-16 object-cover border-2 border-line rounded-sm bg-paper"
+        />
+      )}
+      <span className="text-ink leading-relaxed pt-0.5">{item.text}</span>
+    </li>
+  );
+}
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
@@ -343,10 +381,12 @@ export function FormatView({
           </div>
         </div>
         <FormatDescription text={format.description} />
-        {format.script && <ScriptBlock text={format.script} />}
+        {!isHidden(format, "script") && format.script && (
+          <ScriptBlock text={format.script} />
+        )}
       </header>
 
-      {format.examples.length > 0 && (
+      {!isHidden(format, "examples") && format.examples.length > 0 && (
         <section className="space-y-3">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
@@ -358,26 +398,88 @@ export function FormatView({
         </section>
       )}
 
-      <section className="border-2 border-line bg-background rounded-md nb-shadow-sm p-5 sm:p-6">
-        <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-4">
-          Shot-by-shot structure
-        </div>
-        <ol className="space-y-3">
-          {format.structure.map((s, i) => (
-            <li key={i} className="flex gap-3 items-start">
-              <span
-                className="shrink-0 w-7 h-7 border-2 border-line bg-paper flex items-center justify-center font-mono text-xs font-bold rounded-sm"
-                aria-hidden
-              >
-                {String(i + 1).padStart(2, "0")}
-              </span>
-              <span className="text-ink leading-relaxed pt-0.5">{s}</span>
-            </li>
-          ))}
-        </ol>
-      </section>
+      {!isHidden(format, "bestFor") && format.bestFor.length > 0 && (
+        <section className="border-2 border-line bg-background rounded-md nb-shadow-sm p-5 sm:p-6">
+          <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-4">
+            Best for
+          </div>
+          <ul className="space-y-3">
+            {format.bestFor.map((raw, i) => {
+              const item = asItem(raw);
+              return (
+                <ItemRow
+                  key={i}
+                  item={item}
+                  badge={
+                    <span
+                      className="shrink-0 w-7 h-7 border-2 border-line bg-paper flex items-center justify-center font-black rounded-sm"
+                      aria-hidden
+                    >
+                      ★
+                    </span>
+                  }
+                />
+              );
+            })}
+          </ul>
+        </section>
+      )}
 
-      {matching.length > 0 && (
+      {!isHidden(format, "structure") && format.structure.length > 0 && (
+        <section className="border-2 border-line bg-background rounded-md nb-shadow-sm p-5 sm:p-6">
+          <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-4">
+            Shot-by-shot structure
+          </div>
+          <ol className="space-y-3">
+            {format.structure.map((raw, i) => {
+              const item = asItem(raw);
+              return (
+                <ItemRow
+                  key={i}
+                  item={item}
+                  badge={
+                    <span
+                      className="shrink-0 w-7 h-7 border-2 border-line bg-paper flex items-center justify-center font-mono text-xs font-bold rounded-sm"
+                      aria-hidden
+                    >
+                      {String(i + 1).padStart(2, "0")}
+                    </span>
+                  }
+                />
+              );
+            })}
+          </ol>
+        </section>
+      )}
+
+      {!isHidden(format, "tips") && format.tips.length > 0 && (
+        <section className="border-2 border-line bg-background rounded-md nb-shadow-sm p-5 sm:p-6">
+          <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-4">
+            Tips
+          </div>
+          <ul className="space-y-3">
+            {format.tips.map((raw, i) => {
+              const item = asItem(raw);
+              return (
+                <ItemRow
+                  key={i}
+                  item={item}
+                  badge={
+                    <span
+                      className="shrink-0 w-7 h-7 border-2 border-line bg-paper flex items-center justify-center font-black rounded-sm"
+                      aria-hidden
+                    >
+                      ✓
+                    </span>
+                  }
+                />
+              );
+            })}
+          </ul>
+        </section>
+      )}
+
+      {!isHidden(format, "hooks") && matching.length > 0 && (
         <section className="space-y-5">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">

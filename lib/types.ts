@@ -22,6 +22,21 @@ export type Hook = {
   note?: string;
 };
 
+// Rich list item used in editable format sections — gains an optional image.
+// Static defaults (lib/formats.ts) remain plain strings; the union below lets
+// either shape flow through without a code-wide migration.
+export type ListItem = { text: string; image?: string };
+export type FormatListItem = string | ListItem;
+
+// Sections of a format that can be hidden on the public page per brief.
+export type FormatSectionKey =
+  | "bestFor"
+  | "structure"
+  | "tips"
+  | "script"
+  | "examples"
+  | "hooks";
+
 export type Format = {
   slug: string;
   title: string;
@@ -29,11 +44,12 @@ export type Format = {
   tagline: string;
   description: string;
   script?: string;
-  bestFor: string[];
-  structure: string[];
-  tips: string[];
+  bestFor: FormatListItem[];
+  structure: FormatListItem[];
+  tips: FormatListItem[];
   hookCategorySlugs: string[];
   examples: VideoExample[];
+  hiddenSections?: FormatSectionKey[];
 };
 
 export type HookCategory = {

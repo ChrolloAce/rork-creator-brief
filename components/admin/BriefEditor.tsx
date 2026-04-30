@@ -19,9 +19,10 @@ type FormatOverride = {
   tagline?: string;
   description?: string;
   script?: string;
-  structure?: string[];
-  tips?: string[];
-  bestFor?: string[];
+  structure?: { text: string; image?: string }[];
+  tips?: { text: string; image?: string }[];
+  bestFor?: { text: string; image?: string }[];
+  hiddenSections?: string[];
 };
 
 type Curation = {
@@ -282,9 +283,15 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
             defaultTitle={meta.title}
             defaultTagline={meta.tagline}
             defaultDescription={meta.description}
-            defaultStructure={meta.structure}
-            defaultTips={meta.tips}
-            defaultBestFor={meta.bestFor}
+            defaultStructure={meta.structure.map((i) =>
+              typeof i === "string" ? i : i.text
+            )}
+            defaultTips={meta.tips.map((i) =>
+              typeof i === "string" ? i : i.text
+            )}
+            defaultBestFor={meta.bestFor.map((i) =>
+              typeof i === "string" ? i : i.text
+            )}
             linkedHookSlugs={meta.hookCategorySlugs}
             defaultHookCategories={defaultHookCategories.filter((c) =>
               meta.hookCategorySlugs.includes(c.slug)
@@ -504,6 +511,100 @@ function BriefSettings({
   );
 }
 
+// Resize an image file to a max dimension and return as a data URL.
+// Reused for inline list-item images. Larger than the logo upload since these
+// are visual references for shots/tips, not icons.
+const ITEM_IMG_MAX_DIM = 800;
+const ITEM_IMG_MAX_RAW_BYTES = 8 * 1024 * 1024;
+async function resizeImage(file: File): Promise<string> {
+  if (file.size > ITEM_IMG_MAX_RAW_BYTES) {
+    throw new Error("File is >8MB — use a smaller source.");
+  }
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(
+    1,
+    ITEM_IMG_MAX_DIM / Math.max(bitmap.width, bitmap.height)
+  );
+  const w = Math.max(1, Math.round(bitmap.width * scale));
+  const h = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas not supported");
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  bitmap.close?.();
+  const mime = file.type === "image/png" ? "image/png" : "image/jpeg";
+  const quality = mime === "image/jpeg" ? 0.85 : undefined;
+  return canvas.toDataURL(mime, quality);
+}
+
+type RowItem = { text: string; image?: string };
+
+function ItemImagePicker({
+  image,
+  onChange,
+}: {
+  image?: string;
+  onChange: (next: string | undefined) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="shrink-0">
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/webp"
+        className="hidden"
+        onChange={async (e) => {
+          const f = e.target.files?.[0];
+          e.target.value = "";
+          if (!f) return;
+          setBusy(true);
+          try {
+            const url = await resizeImage(f);
+            onChange(url);
+          } catch (err) {
+            alert((err as Error).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      />
+      {image ? (
+        <div className="relative">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={image}
+            alt=""
+            onClick={() => inputRef.current?.click()}
+            className="w-12 h-12 object-cover border-2 border-line rounded-sm bg-paper cursor-pointer"
+          />
+          <button
+            type="button"
+            onClick={() => onChange(undefined)}
+            aria-label="Remove image"
+            className="absolute -top-1 -right-1 w-4 h-4 bg-background border-2 border-line rounded-full text-[10px] font-black leading-none flex items-center justify-center"
+          >
+            ×
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          disabled={busy}
+          title="Add image"
+          className="w-12 h-12 border-2 border-dashed border-line bg-paper rounded-sm text-[10px] font-black text-muted hover:text-accent hover:border-accent disabled:opacity-40"
+        >
+          {busy ? "…" : "+ IMG"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function ListEditor({
   label,
   items,
@@ -512,39 +613,68 @@ function ListEditor({
   placeholder,
   rows = 2,
   numbered = false,
+  hidden = false,
+  onToggleHidden,
   onChange,
 }: {
   label: string;
-  items?: string[];
+  items?: RowItem[];
   defaults: string[];
   itemLabel: string;
   placeholder?: string;
   rows?: number;
   numbered?: boolean;
-  onChange: (next: string[] | undefined) => void;
+  hidden?: boolean;
+  onToggleHidden?: () => void;
+  onChange: (next: RowItem[] | undefined) => void;
 }) {
-  const effective = items ?? defaults;
-  const update = (next: string[]) => {
+  const effective: RowItem[] =
+    items ?? defaults.map((s) => ({ text: s }));
+  const update = (next: RowItem[]) => {
     onChange(next.length === 0 ? undefined : next);
   };
   return (
-    <div>
-      <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-2">
-        {label} ({effective.length})
+    <div className={hidden ? "opacity-60" : undefined}>
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+          {label} ({effective.length})
+          {hidden && (
+            <span className="ml-2 px-1.5 py-0.5 bg-paper border-2 border-line rounded-sm text-[9px]">
+              HIDDEN
+            </span>
+          )}
+        </div>
+        {onToggleHidden && (
+          <button
+            type="button"
+            onClick={onToggleHidden}
+            className="border-2 border-line bg-background px-2 py-0.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+          >
+            {hidden ? "Show" : "Hide section"}
+          </button>
+        )}
       </div>
       <div className="space-y-2">
-        {effective.map((s, i) => (
+        {effective.map((row, i) => (
           <div key={i} className="flex gap-2 items-start">
             {numbered && (
               <span className="shrink-0 w-7 h-7 border-2 border-line bg-paper flex items-center justify-center font-mono text-xs font-bold rounded-sm mt-0.5">
                 {String(i + 1).padStart(2, "0")}
               </span>
             )}
+            <ItemImagePicker
+              image={row.image}
+              onChange={(image) => {
+                const next = [...effective];
+                next[i] = { ...next[i], image };
+                update(next);
+              }}
+            />
             <textarea
-              value={s}
+              value={row.text}
               onChange={(e) => {
                 const next = [...effective];
-                next[i] = e.target.value;
+                next[i] = { ...next[i], text: e.target.value };
                 update(next);
               }}
               rows={rows}
@@ -594,7 +724,7 @@ function ListEditor({
         ))}
         <button
           type="button"
-          onClick={() => update([...effective, ""])}
+          onClick={() => update([...effective, { text: "" }])}
           className="w-full border-2 border-dashed border-line bg-background rounded-md px-2 py-1.5 text-xs font-bold uppercase tracking-widest text-muted hover:text-accent hover:border-accent"
         >
           + Add {itemLabel}
@@ -656,6 +786,19 @@ function FormatSection({
   onChangeOverride: (next: FormatOverride) => void;
 }) {
   const effectiveTitle = (override.title ?? defaultTitle) || defaultTitle;
+
+  const isSectionHidden = (key: string) =>
+    override.hiddenSections?.includes(key) ?? false;
+  const toggleSectionHidden = (key: string) => {
+    const cur = override.hiddenSections ?? [];
+    const next = cur.includes(key)
+      ? cur.filter((k) => k !== key)
+      : [...cur, key];
+    onChangeOverride({
+      ...override,
+      hiddenSections: next.length === 0 ? undefined : next,
+    });
+  };
 
   return (
     <section className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 sm:p-5">
@@ -749,7 +892,8 @@ function FormatSection({
           override.script ||
           override.structure ||
           override.tips ||
-          override.bestFor) && (
+          override.bestFor ||
+          override.hiddenSections) && (
           <button
             type="button"
             onClick={() => onChangeOverride({})}
@@ -760,7 +904,23 @@ function FormatSection({
         )}
       </div>
 
-      <h3 className="text-base font-black">{effectiveTitle}</h3>
+      <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">
+        <h3 className="text-base font-black">
+          {effectiveTitle}
+          {isSectionHidden("examples") && (
+            <span className="ml-2 px-1.5 py-0.5 bg-paper border-2 border-line rounded-sm text-[9px] font-bold uppercase tracking-widest align-middle">
+              VIDEOS HIDDEN
+            </span>
+          )}
+        </h3>
+        <button
+          type="button"
+          onClick={() => toggleSectionHidden("examples")}
+          className="border-2 border-line bg-background px-2 py-0.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+        >
+          {isSectionHidden("examples") ? "Show videos" : "Hide videos"}
+        </button>
+      </div>
       <p className="text-xs text-muted mb-3">
         {pinnedVideos.length > 0
           ? `Showing ${pinnedVideos.length} ${pinnedVideos.length === 1 ? "video" : "videos"} to viewers.`
@@ -804,6 +964,8 @@ function FormatSection({
           itemLabel="audience"
           rows={2}
           placeholder="Audience this format works for"
+          hidden={isSectionHidden("bestFor")}
+          onToggleHidden={() => toggleSectionHidden("bestFor")}
           onChange={(next) =>
             onChangeOverride({ ...override, bestFor: next })
           }
@@ -816,6 +978,8 @@ function FormatSection({
           rows={2}
           placeholder="0–2s: Hook. ..."
           numbered
+          hidden={isSectionHidden("structure")}
+          onToggleHidden={() => toggleSectionHidden("structure")}
           onChange={(next) =>
             onChangeOverride({ ...override, structure: next })
           }
@@ -827,13 +991,29 @@ function FormatSection({
           itemLabel="tip"
           rows={2}
           placeholder="Record the hook 5–10 times..."
+          hidden={isSectionHidden("tips")}
+          onToggleHidden={() => toggleSectionHidden("tips")}
           onChange={(next) =>
             onChangeOverride({ ...override, tips: next })
           }
         />
-        <div>
-          <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-2">
-            Script
+        <div className={isSectionHidden("script") ? "opacity-60" : undefined}>
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+              Script
+              {isSectionHidden("script") && (
+                <span className="ml-2 px-1.5 py-0.5 bg-paper border-2 border-line rounded-sm text-[9px]">
+                  HIDDEN
+                </span>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => toggleSectionHidden("script")}
+              className="border-2 border-line bg-background px-2 py-0.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+            >
+              {isSectionHidden("script") ? "Show" : "Hide section"}
+            </button>
           </div>
           <textarea
             value={override.script ?? ""}
@@ -853,12 +1033,28 @@ function FormatSection({
             script block on the public format page.
           </p>
         </div>
-        <FormatHooksInline
-          linkedSlugs={linkedHookSlugs}
-          defaults={defaultHookCategories}
-          hookCategories={hookCategories}
-          onChange={onChangeHookCategories}
-        />
+        <div className={isSectionHidden("hooks") ? "opacity-60" : undefined}>
+          <div className="flex items-center justify-end gap-2 mb-2">
+            {isSectionHidden("hooks") && (
+              <span className="px-1.5 py-0.5 bg-paper border-2 border-line rounded-sm text-[9px] font-bold uppercase tracking-widest">
+                HIDDEN
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => toggleSectionHidden("hooks")}
+              className="border-2 border-line bg-background px-2 py-0.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+            >
+              {isSectionHidden("hooks") ? "Show hooks" : "Hide hooks"}
+            </button>
+          </div>
+          <FormatHooksInline
+            linkedSlugs={linkedHookSlugs}
+            defaults={defaultHookCategories}
+            hookCategories={hookCategories}
+            onChange={onChangeHookCategories}
+          />
+        </div>
       </div>
     </section>
   );

@@ -1,6 +1,6 @@
 import "server-only";
 import { allVideos } from "./all-videos";
-import type { Format, VideoExample } from "./types";
+import type { Format, FormatSectionKey, VideoExample } from "./types";
 import { formats as formatsMeta } from "./formats";
 import { getCuration, type CurationData } from "./db";
 
@@ -83,6 +83,7 @@ export async function getFormatsForRender(briefSlug?: string): Promise<Format[]>
       bestFor: ov.bestFor && ov.bestFor.length > 0 ? ov.bestFor : meta.bestFor,
       thumbnail: listings[meta.slug]?.topThumb ?? meta.thumbnail,
       examples: listings[meta.slug]?.videos ?? [],
+      hiddenSections: (ov.hiddenSections ?? []) as FormatSectionKey[],
     });
   }
   return out;
