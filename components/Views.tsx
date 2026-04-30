@@ -35,6 +35,75 @@ function Pill({
   );
 }
 
+type ScriptLine = { timestamp?: string; body: string };
+
+function parseScriptLines(text: string): ScriptLine[] {
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+  const byLine = trimmed
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (byLine.length > 1) {
+    return byLine.map((line) => {
+      const m = line.match(/^(\d{1,2}:\d{2})\s*[:\-–]?\s*(.*)$/);
+      return m ? { timestamp: m[1], body: m[2] } : { body: line };
+    });
+  }
+  const re = /(\d{1,2}:\d{2})\s+/g;
+  const parts: ScriptLine[] = [];
+  let lastIndex = 0;
+  let lastTs: string | undefined;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(trimmed)) !== null) {
+    const segment = trimmed.slice(lastIndex, m.index).trim();
+    if (segment) parts.push({ timestamp: lastTs, body: segment });
+    lastTs = m[1];
+    lastIndex = m.index + m[0].length;
+  }
+  const tail = trimmed.slice(lastIndex).trim();
+  if (tail) parts.push({ timestamp: lastTs, body: tail });
+  return parts.length ? parts : [{ body: trimmed }];
+}
+
+// Renders a format description. If the text contains a script marker like
+// "USE THIS SCRIPT:" or "SCRIPT:", everything before is rendered as prose and
+// everything after is split into timestamped lines.
+function FormatDescription({ text }: { text: string }) {
+  const match = text.match(
+    /^([\s\S]*?)\b(use this script:?|script:)\s*([\s\S]*)$/i
+  );
+  if (!match) {
+    return <p className="text-ink leading-relaxed max-w-3xl">{text}</p>;
+  }
+  const prose = match[1].trim();
+  const lines = parseScriptLines(match[3]);
+  return (
+    <div className="space-y-4 max-w-3xl">
+      {prose && <p className="text-ink leading-relaxed">{prose}</p>}
+      <div className="border-2 border-line bg-paper rounded-md nb-shadow-sm p-4 sm:p-5">
+        <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-3">
+          Script
+        </div>
+        <ol className="space-y-2">
+          {lines.map((l, i) => (
+            <li key={i} className="flex gap-3 items-start">
+              {l.timestamp ? (
+                <span className="shrink-0 font-mono text-xs font-bold border-2 border-line bg-background px-1.5 py-0.5 rounded-sm">
+                  {l.timestamp}
+                </span>
+              ) : (
+                <span className="shrink-0 w-7" aria-hidden />
+              )}
+              <span className="text-ink leading-relaxed">{l.body}</span>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </div>
+  );
+}
+
 function HookRow({ hook, index }: { hook: Hook; index: number }) {
   const [copied, setCopied] = useState(false);
   const onCopy = async () => {
@@ -266,9 +335,7 @@ export function FormatView({
             </p>
           </div>
         </div>
-        <p className="text-ink leading-relaxed max-w-3xl">
-          {format.description}
-        </p>
+        <FormatDescription text={format.description} />
       </header>
 
       {format.examples.length > 0 && (

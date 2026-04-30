@@ -42,3 +42,4 @@ next-env.d.ts
 
 # local scratch — ViewTrack API dumps, not for deploy
 /tmp/
+.env*.local

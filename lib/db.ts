@@ -27,6 +27,9 @@ export type FormatOverride = {
   title?: string;
   tagline?: string;
   description?: string;
+  structure?: string[];
+  tips?: string[];
+  bestFor?: string[];
 };
 
 export type CurationData = {

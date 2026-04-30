@@ -17,6 +17,9 @@ type FormatOverride = {
   title?: string;
   tagline?: string;
   description?: string;
+  structure?: string[];
+  tips?: string[];
+  bestFor?: string[];
 };
 
 type Curation = {
@@ -268,6 +271,9 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
             defaultTitle={meta.title}
             defaultTagline={meta.tagline}
             defaultDescription={meta.description}
+            defaultStructure={meta.structure}
+            defaultTips={meta.tips}
+            defaultBestFor={meta.bestFor}
             pins={cur.formatPins[meta.slug] ?? []}
             override={cur.formatOverrides?.[meta.slug] ?? {}}
             pinnedVideos={preview[meta.slug]?.pinnedVideos ?? []}
@@ -481,11 +487,114 @@ function BriefSettings({
   );
 }
 
+function ListEditor({
+  label,
+  items,
+  defaults,
+  itemLabel,
+  placeholder,
+  rows = 2,
+  numbered = false,
+  onChange,
+}: {
+  label: string;
+  items?: string[];
+  defaults: string[];
+  itemLabel: string;
+  placeholder?: string;
+  rows?: number;
+  numbered?: boolean;
+  onChange: (next: string[] | undefined) => void;
+}) {
+  const effective = items ?? defaults;
+  const update = (next: string[]) => {
+    onChange(next.length === 0 ? undefined : next);
+  };
+  return (
+    <details className="mt-1">
+      <summary className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted cursor-pointer">
+        {label} ({effective.length})
+      </summary>
+      <div className="mt-2 space-y-2">
+        {effective.map((s, i) => (
+          <div key={i} className="flex gap-2 items-start">
+            {numbered && (
+              <span className="shrink-0 w-7 h-7 border-2 border-line bg-paper flex items-center justify-center font-mono text-xs font-bold rounded-sm mt-0.5">
+                {String(i + 1).padStart(2, "0")}
+              </span>
+            )}
+            <textarea
+              value={s}
+              onChange={(e) => {
+                const next = [...effective];
+                next[i] = e.target.value;
+                update(next);
+              }}
+              rows={rows}
+              placeholder={placeholder}
+              className="flex-1 border-2 border-line rounded-md px-2 py-1.5 text-sm focus:outline-none focus:border-accent bg-background leading-relaxed"
+            />
+            <div className="flex flex-col gap-1">
+              <button
+                type="button"
+                aria-label="Move up"
+                title="Move up"
+                disabled={i === 0}
+                onClick={() => {
+                  const next = [...effective];
+                  [next[i - 1], next[i]] = [next[i], next[i - 1]];
+                  update(next);
+                }}
+                className="w-7 h-7 border-2 border-line bg-background rounded-sm font-black nb-press disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                aria-label="Move down"
+                title="Move down"
+                disabled={i === effective.length - 1}
+                onClick={() => {
+                  const next = [...effective];
+                  [next[i], next[i + 1]] = [next[i + 1], next[i]];
+                  update(next);
+                }}
+                className="w-7 h-7 border-2 border-line bg-background rounded-sm font-black nb-press disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                ↓
+              </button>
+              <button
+                type="button"
+                aria-label="Remove"
+                title="Remove"
+                onClick={() => update(effective.filter((_, j) => j !== i))}
+                className="w-7 h-7 border-2 border-line bg-background rounded-sm font-black nb-press"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={() => update([...effective, ""])}
+          className="w-full border-2 border-dashed border-line bg-background rounded-md px-2 py-1.5 text-xs font-bold uppercase tracking-widest text-muted hover:text-accent hover:border-accent"
+        >
+          + Add {itemLabel}
+        </button>
+      </div>
+    </details>
+  );
+}
+
 function FormatSection({
   slug,
   defaultTitle,
   defaultTagline,
   defaultDescription,
+  defaultStructure,
+  defaultTips,
+  defaultBestFor,
   pins,
   override,
   pinnedVideos,
@@ -504,6 +613,9 @@ function FormatSection({
   defaultTitle: string;
   defaultTagline: string;
   defaultDescription: string;
+  defaultStructure: string[];
+  defaultTips: string[];
+  defaultBestFor: string[];
   pins: string[];
   override: FormatOverride;
   pinnedVideos: VideoExample[];
@@ -606,7 +718,46 @@ function FormatSection({
             className="mt-2 w-full border-2 border-line rounded-md px-2 py-2 text-sm focus:outline-none focus:border-accent bg-background leading-relaxed"
           />
         </details>
-        {(override.title || override.tagline || override.description) && (
+        <ListEditor
+          label="Best For"
+          items={override.bestFor}
+          defaults={defaultBestFor}
+          itemLabel="audience"
+          rows={2}
+          placeholder="Audience this format works for"
+          onChange={(next) =>
+            onChangeOverride({ ...override, bestFor: next })
+          }
+        />
+        <ListEditor
+          label="Shot-by-shot structure"
+          items={override.structure}
+          defaults={defaultStructure}
+          itemLabel="segment"
+          rows={2}
+          placeholder="0–2s: Hook. ..."
+          numbered
+          onChange={(next) =>
+            onChangeOverride({ ...override, structure: next })
+          }
+        />
+        <ListEditor
+          label="Tips"
+          items={override.tips}
+          defaults={defaultTips}
+          itemLabel="tip"
+          rows={2}
+          placeholder="Record the hook 5–10 times..."
+          onChange={(next) =>
+            onChangeOverride({ ...override, tips: next })
+          }
+        />
+        {(override.title ||
+          override.tagline ||
+          override.description ||
+          override.structure ||
+          override.tips ||
+          override.bestFor) && (
           <button
             type="button"
             onClick={() => onChangeOverride({})}
