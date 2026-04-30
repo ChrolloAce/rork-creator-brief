@@ -27,6 +27,7 @@ export type FormatOverride = {
   title?: string;
   tagline?: string;
   description?: string;
+  script?: string;
   structure?: string[];
   tips?: string[];
   bestFor?: string[];

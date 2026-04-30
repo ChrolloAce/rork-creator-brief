@@ -28,6 +28,7 @@ export type Format = {
   thumbnail?: string;
   tagline: string;
   description: string;
+  script?: string;
   bestFor: string[];
   structure: string[];
   tips: string[];

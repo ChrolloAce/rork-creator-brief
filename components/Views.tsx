@@ -66,9 +66,35 @@ function parseScriptLines(text: string): ScriptLine[] {
   return parts.length ? parts : [{ body: trimmed }];
 }
 
+function ScriptBlock({ text }: { text: string }) {
+  const lines = parseScriptLines(text);
+  if (lines.length === 0) return null;
+  return (
+    <div className="border-2 border-line bg-paper rounded-md nb-shadow-sm p-4 sm:p-5">
+      <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-3">
+        Script
+      </div>
+      <ol className="space-y-2">
+        {lines.map((l, i) => (
+          <li key={i} className="flex gap-3 items-start">
+            {l.timestamp ? (
+              <span className="shrink-0 font-mono text-xs font-bold border-2 border-line bg-background px-1.5 py-0.5 rounded-sm">
+                {l.timestamp}
+              </span>
+            ) : (
+              <span className="shrink-0 w-7" aria-hidden />
+            )}
+            <span className="text-ink leading-relaxed">{l.body}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 // Renders a format description. If the text contains a script marker like
-// "USE THIS SCRIPT:" or "SCRIPT:", everything before is rendered as prose and
-// everything after is split into timestamped lines.
+// "USE THIS SCRIPT:" or "SCRIPT:", the prose before the marker renders as a
+// paragraph and the rest renders as a timestamped script block.
 function FormatDescription({ text }: { text: string }) {
   const match = text.match(
     /^([\s\S]*?)\b(use this script:?|script:)\s*([\s\S]*)$/i
@@ -77,29 +103,10 @@ function FormatDescription({ text }: { text: string }) {
     return <p className="text-ink leading-relaxed max-w-3xl">{text}</p>;
   }
   const prose = match[1].trim();
-  const lines = parseScriptLines(match[3]);
   return (
     <div className="space-y-4 max-w-3xl">
       {prose && <p className="text-ink leading-relaxed">{prose}</p>}
-      <div className="border-2 border-line bg-paper rounded-md nb-shadow-sm p-4 sm:p-5">
-        <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-3">
-          Script
-        </div>
-        <ol className="space-y-2">
-          {lines.map((l, i) => (
-            <li key={i} className="flex gap-3 items-start">
-              {l.timestamp ? (
-                <span className="shrink-0 font-mono text-xs font-bold border-2 border-line bg-background px-1.5 py-0.5 rounded-sm">
-                  {l.timestamp}
-                </span>
-              ) : (
-                <span className="shrink-0 w-7" aria-hidden />
-              )}
-              <span className="text-ink leading-relaxed">{l.body}</span>
-            </li>
-          ))}
-        </ol>
-      </div>
+      <ScriptBlock text={match[3]} />
     </div>
   );
 }
@@ -336,6 +343,7 @@ export function FormatView({
           </div>
         </div>
         <FormatDescription text={format.description} />
+        {format.script && <ScriptBlock text={format.script} />}
       </header>
 
       {format.examples.length > 0 && (

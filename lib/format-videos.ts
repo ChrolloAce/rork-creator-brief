@@ -77,6 +77,7 @@ export async function getFormatsForRender(briefSlug?: string): Promise<Format[]>
       title: ov.title?.trim() || meta.title,
       tagline: ov.tagline?.trim() || meta.tagline,
       description: ov.description?.trim() || meta.description,
+      script: ov.script?.trim() || undefined,
       structure: ov.structure && ov.structure.length > 0 ? ov.structure : meta.structure,
       tips: ov.tips && ov.tips.length > 0 ? ov.tips : meta.tips,
       bestFor: ov.bestFor && ov.bestFor.length > 0 ? ov.bestFor : meta.bestFor,

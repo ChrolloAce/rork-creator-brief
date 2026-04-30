@@ -17,6 +17,7 @@ type FormatOverride = {
   title?: string;
   tagline?: string;
   description?: string;
+  script?: string;
   structure?: string[];
   tips?: string[];
   bestFor?: string[];
@@ -511,11 +512,11 @@ function ListEditor({
     onChange(next.length === 0 ? undefined : next);
   };
   return (
-    <details className="mt-1">
-      <summary className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted cursor-pointer">
+    <div>
+      <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-2">
         {label} ({effective.length})
-      </summary>
-      <div className="mt-2 space-y-2">
+      </div>
+      <div className="space-y-2">
         {effective.map((s, i) => (
           <div key={i} className="flex gap-2 items-start">
             {numbered && (
@@ -583,7 +584,7 @@ function ListEditor({
           + Add {itemLabel}
         </button>
       </div>
-    </details>
+    </div>
   );
 }
 
@@ -718,43 +719,10 @@ function FormatSection({
             className="mt-2 w-full border-2 border-line rounded-md px-2 py-2 text-sm focus:outline-none focus:border-accent bg-background leading-relaxed"
           />
         </details>
-        <ListEditor
-          label="Best For"
-          items={override.bestFor}
-          defaults={defaultBestFor}
-          itemLabel="audience"
-          rows={2}
-          placeholder="Audience this format works for"
-          onChange={(next) =>
-            onChangeOverride({ ...override, bestFor: next })
-          }
-        />
-        <ListEditor
-          label="Shot-by-shot structure"
-          items={override.structure}
-          defaults={defaultStructure}
-          itemLabel="segment"
-          rows={2}
-          placeholder="0–2s: Hook. ..."
-          numbered
-          onChange={(next) =>
-            onChangeOverride({ ...override, structure: next })
-          }
-        />
-        <ListEditor
-          label="Tips"
-          items={override.tips}
-          defaults={defaultTips}
-          itemLabel="tip"
-          rows={2}
-          placeholder="Record the hook 5–10 times..."
-          onChange={(next) =>
-            onChangeOverride({ ...override, tips: next })
-          }
-        />
         {(override.title ||
           override.tagline ||
           override.description ||
+          override.script ||
           override.structure ||
           override.tips ||
           override.bestFor) && (
@@ -803,6 +771,65 @@ function FormatSection({
         onPick={onPickVideo}
         placeholder="Search @creator or caption…"
       />
+
+      <div className="mt-6 pt-5 border-t-2 border-line space-y-5">
+        <ListEditor
+          label="Best For"
+          items={override.bestFor}
+          defaults={defaultBestFor}
+          itemLabel="audience"
+          rows={2}
+          placeholder="Audience this format works for"
+          onChange={(next) =>
+            onChangeOverride({ ...override, bestFor: next })
+          }
+        />
+        <ListEditor
+          label="Shot-by-shot structure"
+          items={override.structure}
+          defaults={defaultStructure}
+          itemLabel="segment"
+          rows={2}
+          placeholder="0–2s: Hook. ..."
+          numbered
+          onChange={(next) =>
+            onChangeOverride({ ...override, structure: next })
+          }
+        />
+        <ListEditor
+          label="Tips"
+          items={override.tips}
+          defaults={defaultTips}
+          itemLabel="tip"
+          rows={2}
+          placeholder="Record the hook 5–10 times..."
+          onChange={(next) =>
+            onChangeOverride({ ...override, tips: next })
+          }
+        />
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-2">
+            Script
+          </div>
+          <textarea
+            value={override.script ?? ""}
+            onChange={(e) =>
+              onChangeOverride({
+                ...override,
+                script: e.target.value || undefined,
+              })
+            }
+            rows={8}
+            placeholder={`00:00 First line of the script.\n00:03 Next line.\n00:11 ...`}
+            className="w-full border-2 border-line rounded-md px-2 py-2 text-sm focus:outline-none focus:border-accent bg-background leading-relaxed font-mono"
+          />
+          <p className="text-[10px] text-muted mt-1">
+            One line per beat — start each with a timestamp like{" "}
+            <code className="font-mono">00:03</code>. Renders as a styled
+            script block on the public format page.
+          </p>
+        </div>
+      </div>
     </section>
   );
 }
