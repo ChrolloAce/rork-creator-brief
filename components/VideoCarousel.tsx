@@ -52,17 +52,12 @@ export function VideoCarousel({ videos }: { videos: VideoExample[] }) {
         tabIndex={0}
       >
         {videos.map((v) => {
-          const analysis = v.dbId ? getAnalysis(v.dbId) : undefined;
           return (
             <div
               key={v.url}
               className="snap-start shrink-0 w-[160px] sm:w-[180px] md:w-[200px]"
             >
-              <VideoCard
-                video={v}
-                hasAnalysis={!!analysis}
-                onOpen={setActive}
-              />
+              <VideoCard video={v} onOpen={setActive} />
             </div>
           );
         })}

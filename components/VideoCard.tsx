@@ -18,11 +18,9 @@ function formatViews(n?: number) {
 
 export function VideoCard({
   video,
-  hasAnalysis,
   onOpen,
 }: {
   video: VideoExample;
-  hasAnalysis?: boolean;
   onOpen: (video: VideoExample) => void;
 }) {
   const views = formatViews(video.views);
@@ -47,11 +45,6 @@ export function VideoCard({
         {views && (
           <span className="absolute top-2 right-2 text-[10px] font-black uppercase tracking-widest bg-accent text-accent-ink px-1.5 py-0.5 border-2 border-line rounded-sm leading-none">
             {views} views
-          </span>
-        )}
-        {hasAnalysis && (
-          <span className="absolute bottom-12 left-2 text-[9px] font-black uppercase tracking-widest bg-ink text-background px-1.5 py-0.5 border-2 border-line rounded-sm leading-none">
-            Transcript ✓
           </span>
         )}
         <span className="absolute inset-x-0 bottom-0 px-2 py-2 bg-gradient-to-t from-black/80 via-black/30 to-transparent">

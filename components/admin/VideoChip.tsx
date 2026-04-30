@@ -1,7 +1,6 @@
 "use client";
 
 import type { VideoExample } from "@/lib/types";
-import { getAnalysis } from "@/lib/analyses";
 
 function formatViews(n?: number) {
   if (!n) return "";
@@ -41,7 +40,6 @@ export function VideoChip({
   }
 
   const views = formatViews(video.views);
-  const hasAnalysis = video.dbId ? !!getAnalysis(video.dbId) : false;
 
   return (
     <div className="shrink-0 w-[150px] border-2 border-line rounded-md bg-background nb-shadow-sm overflow-hidden flex flex-col">
@@ -64,11 +62,6 @@ export function VideoChip({
         {views && (
           <span className="absolute top-1 right-1 text-[9px] font-black uppercase tracking-widest bg-accent text-accent-ink px-1 py-0.5 border-2 border-line rounded-sm">
             {views}
-          </span>
-        )}
-        {hasAnalysis && (
-          <span className="absolute bottom-8 left-1 text-[9px] font-black uppercase tracking-widest bg-ink text-background px-1 py-0.5 border-2 border-line rounded-sm">
-            T ✓
           </span>
         )}
         <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent px-1.5 py-1">

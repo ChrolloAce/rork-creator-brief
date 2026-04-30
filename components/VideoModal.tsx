@@ -101,7 +101,6 @@ export function VideoModal({
             <div className="flex items-center gap-2 flex-wrap mb-1">
               <Chip tone="accent">{platformLabel[video.platform] ?? video.platform}</Chip>
               {views && <Chip>{views} views</Chip>}
-              {!analysis && <Chip tone="muted">No transcript yet</Chip>}
             </div>
             <a
               href={video.creatorUrl ?? "#"}
@@ -183,26 +182,6 @@ export function VideoModal({
                 </section>
               )}
 
-              {analysis.segments.length > 0 && (
-                <section>
-                  <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-2">
-                    Script — timestamped
-                  </div>
-                  <ol className="space-y-2">
-                    {analysis.segments.map((s, i) => (
-                      <li key={i} className="flex gap-3 items-start">
-                        <span className="shrink-0 font-mono text-xs font-bold border-2 border-line bg-paper px-1.5 py-0.5 rounded-sm min-w-[50px] text-center">
-                          {s.timestamp}
-                        </span>
-                        <span className="text-sm text-ink leading-relaxed pt-0.5">
-                          {s.text}
-                        </span>
-                      </li>
-                    ))}
-                  </ol>
-                </section>
-              )}
-
               {analysis.suggestions.length > 0 && (
                 <section>
                   <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-2">
@@ -235,12 +214,11 @@ export function VideoModal({
           ) : (
             <section className="border-2 border-line bg-paper rounded-md p-5">
               <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-2">
-                Transcript + insights
+                Insights
               </div>
               <p className="text-ink leading-relaxed">
-                This video hasn&rsquo;t been analyzed yet — Instagram
-                rate-limited the transcript pull. Ask Ernesto to re-run the
-                batch and the breakdown will appear here automatically.
+                This video hasn&rsquo;t been analyzed yet. The breakdown will
+                appear here once it&rsquo;s processed.
               </p>
             </section>
           )}
