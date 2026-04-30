@@ -36,12 +36,14 @@ function ItemRow({
         </span>
       </div>
       {item.image && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={item.image}
-          alt=""
-          className="block w-full max-w-2xl h-auto border-2 border-line rounded-md bg-paper ml-10"
-        />
+        <div className="pl-10">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={item.image}
+            alt=""
+            className="block w-full max-w-2xl h-auto border-2 border-line rounded-md bg-paper"
+          />
+        </div>
       )}
     </li>
   );
