@@ -198,6 +198,16 @@ function HookRow({ hook, index }: { hook: Hook; index: number }) {
   );
 }
 
+export type BriefAccountSetupPlatform = {
+  name: string;
+  notes?: string;
+  image?: string;
+};
+export type BriefAccountSetup = {
+  intro?: string;
+  platforms?: BriefAccountSetupPlatform[];
+};
+
 export type BriefOverview = {
   heroHeadline?: string;
   heroAccentWord?: string;
@@ -209,6 +219,7 @@ export type BriefOverview = {
   tagline?: string;
   taglineSub?: string;
   howToUse?: string;
+  accountSetup?: BriefAccountSetup;
 };
 
 function renderHeroHeadline(line?: string, accent?: string) {
@@ -256,6 +267,58 @@ export function OverviewView({
           </p>
         )}
       </header>
+
+      {o.accountSetup &&
+        (o.accountSetup.intro ||
+          (o.accountSetup.platforms ?? []).length > 0) && (
+          <section className="border-2 border-line bg-background rounded-md nb-shadow p-5 sm:p-6 space-y-5">
+            <div className="flex items-baseline justify-between gap-2 flex-wrap">
+              <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+                Account setup
+              </div>
+              {(o.accountSetup.platforms ?? []).length > 0 && (
+                <Pill>
+                  {(o.accountSetup.platforms ?? []).length}{" "}
+                  {(o.accountSetup.platforms ?? []).length === 1
+                    ? "platform"
+                    : "platforms"}
+                </Pill>
+              )}
+            </div>
+            {o.accountSetup.intro && (
+              <p className="text-ink leading-relaxed max-w-3xl whitespace-pre-line">
+                {o.accountSetup.intro}
+              </p>
+            )}
+            {(o.accountSetup.platforms ?? []).length > 0 && (
+              <div className="grid gap-5 md:grid-cols-2">
+                {(o.accountSetup.platforms ?? []).map((p, i) => (
+                  <div
+                    key={i}
+                    className="border-2 border-line bg-paper rounded-md p-4 space-y-3"
+                  >
+                    {p.name && (
+                      <h3 className="text-lg font-black">{p.name}</h3>
+                    )}
+                    {p.image && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={p.image}
+                        alt={p.name ? `${p.name} profile example` : ""}
+                        className="block w-full h-auto border-2 border-line rounded-md bg-background"
+                      />
+                    )}
+                    {p.notes && (
+                      <p className="text-sm text-ink leading-relaxed whitespace-pre-line">
+                        {p.notes}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
 
       {(o.productHeading ||
         o.productDescription ||

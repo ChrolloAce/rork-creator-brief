@@ -84,6 +84,16 @@ const DEFAULT_CURATION: CurationData = {
   },
 };
 
+export type BriefAccountSetupPlatform = {
+  name: string;
+  notes?: string;
+  image?: string;
+};
+export type BriefAccountSetup = {
+  intro?: string;
+  platforms?: BriefAccountSetupPlatform[];
+};
+
 export type BriefOverview = {
   heroHeadline?: string;
   heroAccentWord?: string;
@@ -95,6 +105,7 @@ export type BriefOverview = {
   tagline?: string;
   taglineSub?: string;
   howToUse?: string;
+  accountSetup?: BriefAccountSetup;
 };
 
 export type BriefHook = { text: string; note?: string };
