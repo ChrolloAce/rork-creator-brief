@@ -106,6 +106,9 @@ export type BriefOverview = {
   taglineSub?: string;
   howToUse?: string;
   accountSetup?: BriefAccountSetup;
+  // Optional CTA shown at the bottom of the sidebar. Hidden when either is empty.
+  ctaLabel?: string;
+  ctaUrl?: string;
 };
 
 export type BriefHook = { text: string; note?: string };

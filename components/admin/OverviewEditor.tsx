@@ -391,6 +391,33 @@ export function OverviewEditor({
             className="mt-1 w-full border-2 border-line rounded-md px-2 py-2 text-sm focus:outline-none focus:border-accent bg-background leading-relaxed"
           />
         </label>
+        <label className="block">
+          <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+            Sidebar CTA — label
+          </span>
+          <input
+            type="text"
+            value={form.ctaLabel ?? ""}
+            onChange={(e) => update("ctaLabel", e.target.value)}
+            placeholder="e.g. rork.com"
+            className="mt-1 w-full border-2 border-line rounded-md px-2 py-1.5 text-sm focus:outline-none focus:border-accent bg-background"
+          />
+        </label>
+        <label className="block">
+          <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+            Sidebar CTA — URL
+          </span>
+          <input
+            type="url"
+            value={form.ctaUrl ?? ""}
+            onChange={(e) => update("ctaUrl", e.target.value)}
+            placeholder="https://…"
+            className="mt-1 w-full border-2 border-line rounded-md px-2 py-1.5 text-sm focus:outline-none focus:border-accent bg-background"
+          />
+        </label>
+        <p className="text-[10px] text-muted sm:col-span-2 -mt-1">
+          Bottom-of-sidebar button. Leave either field empty to hide it.
+        </p>
       </div>
       {dirty && (
         <p className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mt-2">

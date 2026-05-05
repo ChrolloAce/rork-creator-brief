@@ -220,6 +220,8 @@ export type BriefOverview = {
   taglineSub?: string;
   howToUse?: string;
   accountSetup?: BriefAccountSetup;
+  ctaLabel?: string;
+  ctaUrl?: string;
 };
 
 function renderHeroHeadline(line?: string, accent?: string) {

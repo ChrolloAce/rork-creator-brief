@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { NavSection } from "@/lib/nav";
+import type { BriefOverview } from "@/lib/db";
 
 export function Sidebar({
   sections,
@@ -12,11 +13,18 @@ export function Sidebar({
 }: {
   sections: NavSection[];
   activeId: string;
-  brief: { slug: string; name: string; logoUrl: string | null };
+  brief: {
+    slug: string;
+    name: string;
+    logoUrl: string | null;
+    overview?: BriefOverview | null;
+  };
   onNavigate?: () => void;
   onClose?: () => void;
 }) {
   const briefHome = `/b/${brief.slug}`;
+  const ctaLabel = brief.overview?.ctaLabel?.trim();
+  const ctaUrl = brief.overview?.ctaUrl?.trim();
   return (
     <nav aria-label="Brief sections" className="flex flex-col h-full">
       <div className="flex items-center gap-3 p-4 border-b-2 border-line">
@@ -114,16 +122,18 @@ export function Sidebar({
         ))}
       </div>
 
-      <div className="p-3 border-t-2 border-line">
-        <a
-          href="https://rork.com"
-          target="_blank"
-          rel="noreferrer"
-          className="block border-2 border-line bg-background rounded-md px-3 py-2 text-center font-bold text-sm nb-press"
-        >
-          rork.com ↗
-        </a>
-      </div>
+      {ctaLabel && ctaUrl && (
+        <div className="p-3 border-t-2 border-line">
+          <a
+            href={ctaUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="block border-2 border-line bg-background rounded-md px-3 py-2 text-center font-bold text-sm nb-press"
+          >
+            {ctaLabel} ↗
+          </a>
+        </div>
+      )}
     </nav>
   );
 }
