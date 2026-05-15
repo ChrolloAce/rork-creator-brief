@@ -103,18 +103,13 @@ export function HooksEditor({
   const usingCustom = cats.length > 0;
 
   return (
-    <section className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 sm:p-5 space-y-4">
+    <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
-            Hook library
-          </div>
-          <p className="text-xs text-muted mt-1">
-            {usingCustom
-              ? "Custom hooks — shown on every format for this brief."
-              : "Using the shared default hook library. Add a category below to override."}
-          </p>
-        </div>
+        <p className="text-xs text-muted">
+          {usingCustom
+            ? "Custom hooks — shown on every format for this brief."
+            : "Using the shared default hook library. Add a category below to override."}
+        </p>
         <div className="flex gap-2">
           {usingCustom && (
             <button
@@ -236,6 +231,6 @@ export function HooksEditor({
           Unsaved changes
         </p>
       )}
-    </section>
+    </div>
   );
 }

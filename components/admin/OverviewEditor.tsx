@@ -258,11 +258,8 @@ export function OverviewEditor({
   }
 
   return (
-    <section className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 sm:p-5">
-      <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
-        <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
-          Overview page content
-        </div>
+    <div>
+      <div className="flex items-center justify-end flex-wrap gap-2 mb-3">
         <button
           type="button"
           onClick={submit}
@@ -424,6 +421,6 @@ export function OverviewEditor({
           Unsaved changes
         </p>
       )}
-    </section>
+    </div>
   );
 }

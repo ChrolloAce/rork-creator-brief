@@ -76,6 +76,25 @@ export default function AdminDashboard() {
     }
   }
 
+  async function onDuplicate(b: { slug: string; name: string }) {
+    const defaultName = `${b.name} (copy)`;
+    const newName = prompt(`Duplicate "${b.name}" as:`, defaultName);
+    if (newName == null) return;
+    const trimmed = newName.trim();
+    if (!trimmed) return;
+    const res = await fetch(`/api/briefs/${b.slug}/duplicate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: trimmed }),
+    });
+    const j = await res.json();
+    if (res.ok && j.brief) {
+      window.location.href = `/admin/b/${j.brief.slug}`;
+    } else {
+      alert(`Failed: ${j.error ?? res.status}`);
+    }
+  }
+
   async function onLogout() {
     await fetch("/api/admin/logout", { method: "POST" });
     window.location.href = "/admin/login";
@@ -164,6 +183,15 @@ export default function AdminDashboard() {
                     >
                       View ↗
                     </a>
+                    <button
+                      type="button"
+                      onClick={() => onDuplicate(b)}
+                      className="border-2 border-line bg-background text-xs font-black px-2 py-1.5 rounded-sm nb-press"
+                      aria-label={`Duplicate ${b.name}`}
+                      title="Duplicate brief"
+                    >
+                      ⧉
+                    </button>
                     {b.slug !== "rork" && (
                       <button
                         type="button"

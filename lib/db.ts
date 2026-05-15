@@ -342,6 +342,102 @@ export async function updateBrief(
 // Mark BRIEF_SELECT as used to keep linter happy if we remove inline SELECTs later
 export { BRIEF_SELECT };
 
+export async function duplicateBrief(input: {
+  srcSlug: string;
+  newSlug: string;
+  newName: string;
+  newLogoUrl?: string | null;
+}): Promise<Brief> {
+  await ensureSchema();
+  const sql = getSql();
+  const src = await getBrief(input.srcSlug);
+  if (!src) throw new Error("Source brief not found");
+
+  await sql`
+    INSERT INTO brief (slug, name, logo_url, overview, hook_categories)
+    VALUES (
+      ${input.newSlug},
+      ${input.newName},
+      ${input.newLogoUrl !== undefined ? input.newLogoUrl : (src.logoUrl ?? null)},
+      ${src.overview ? sql.json(src.overview as never) : null},
+      ${src.hookCategories ? sql.json(src.hookCategories as never) : null}
+    )
+  `;
+
+  // Copy curation row (per-brief pins / overrides / etc.) if present.
+  const rows = await sql<{ data: CurationData }[]>`
+    SELECT data FROM curation WHERE id = ${input.srcSlug}
+  `;
+  if (rows.length > 0) {
+    await sql`
+      INSERT INTO curation (id, data) VALUES (${input.newSlug}, ${sql.json(rows[0].data as never)})
+      ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()
+    `;
+  }
+
+  const b = await getBrief(input.newSlug);
+  if (!b) throw new Error("Failed to duplicate brief");
+  return b;
+}
+
+export async function copyFormatSection(input: {
+  srcSlug: string;
+  dstSlug: string;
+  formatSlug: string;
+}): Promise<void> {
+  await ensureSchema();
+  const sql = getSql();
+  const fSlug = input.formatSlug;
+
+  const srcRows = await sql<{ data: CurationData }[]>`
+    SELECT data FROM curation WHERE id = ${input.srcSlug}
+  `;
+  if (srcRows.length === 0) throw new Error("source curation not found");
+  const src = srcRows[0].data;
+
+  const dstRows = await sql<{ data: CurationData }[]>`
+    SELECT data FROM curation WHERE id = ${input.dstSlug}
+  `;
+  if (dstRows.length === 0) throw new Error("destination curation not found");
+  const dst = dstRows[0].data;
+
+  const srcPins = src.formatPins?.[fSlug] ?? [];
+  const next: CurationData = {
+    ...dst,
+    formatPins: { ...(dst.formatPins ?? {}), [fSlug]: [...srcPins] },
+    formatBuckets: { ...(dst.formatBuckets ?? {}), [fSlug]: src.formatBuckets?.[fSlug] ?? null },
+  };
+
+  if (src.formatOverrides?.[fSlug] !== undefined) {
+    next.formatOverrides = {
+      ...(dst.formatOverrides ?? {}),
+      [fSlug]: src.formatOverrides[fSlug],
+    };
+  }
+
+  // Bring along video metadata referenced by the copied pins.
+  if (srcPins.length && src.videoMetadata) {
+    const mergedMeta = { ...(dst.videoMetadata ?? {}) };
+    for (const id of srcPins) {
+      if (src.videoMetadata[id] && !mergedMeta[id]) {
+        mergedMeta[id] = src.videoMetadata[id];
+      }
+    }
+    next.videoMetadata = mergedMeta;
+  }
+
+  // Ensure the section is visible in dst's order. If dst has an explicit
+  // formatOrder and this slug isn't in it, append it.
+  if (Array.isArray(dst.formatOrder) && !dst.formatOrder.includes(fSlug)) {
+    next.formatOrder = [...dst.formatOrder, fSlug];
+  }
+
+  await sql`
+    UPDATE curation SET data = ${sql.json(next as never)}, updated_at = NOW()
+    WHERE id = ${input.dstSlug}
+  `;
+}
+
 export async function deleteBrief(slug: string): Promise<void> {
   await ensureSchema();
   const sql = getSql();

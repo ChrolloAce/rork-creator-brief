@@ -7,6 +7,7 @@ import { allVideos } from "@/lib/all-videos";
 import { formats as formatsMeta } from "@/lib/formats";
 import { hookCategories as defaultHookCategories } from "@/lib/hooks";
 import type { BriefOverview, BriefHookCategory } from "@/lib/db";
+import { CollapsibleCard } from "@/components/admin/CollapsibleCard";
 import { HooksEditor } from "@/components/admin/HooksEditor";
 import { LogoUpload } from "@/components/admin/LogoUpload";
 import { OverviewEditor } from "@/components/admin/OverviewEditor";
@@ -55,18 +56,23 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [allBriefs, setAllBriefs] = useState<
+    Array<{ slug: string; name: string }>
+  >([]);
 
   async function load() {
-    const [r1, r2] = await Promise.all([
+    const [r1, r2, r3] = await Promise.all([
       fetch(`/api/curation?brief=${encodeURIComponent(briefSlug)}`, {
         cache: "no-store",
       }),
       fetch(`/api/briefs/${encodeURIComponent(briefSlug)}`, {
         cache: "no-store",
       }),
+      fetch(`/api/briefs`, { cache: "no-store" }),
     ]);
     const j1 = await r1.json();
     const j2 = await r2.json();
+    const j3 = await r3.json();
     if (j1.ok) {
       setCur(j1.curation);
       setPreview(j1.preview ?? {});
@@ -74,6 +80,31 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
       setLoadError(j1.error ?? "failed to load");
     }
     if (j2.ok) setBrief(j2.brief);
+    if (j3.ok && Array.isArray(j3.briefs)) {
+      setAllBriefs(
+        j3.briefs.map((b: { slug: string; name: string }) => ({
+          slug: b.slug,
+          name: b.name,
+        }))
+      );
+    }
+  }
+
+  async function copySectionToBrief(
+    targetSlug: string,
+    formatSlug: string
+  ): Promise<{ ok: boolean; error?: string }> {
+    const res = await fetch(
+      `/api/briefs/${encodeURIComponent(briefSlug)}/copy-format`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetSlug, formatSlug }),
+      }
+    );
+    const j = await res.json();
+    if (!res.ok) return { ok: false, error: j.error ?? `HTTP ${res.status}` };
+    return { ok: true };
   }
 
   useEffect(() => {
@@ -246,40 +277,73 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
         )}
       </header>
 
-      <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-8">
-        <BriefSettings brief={brief} onSave={saveBrief} />
+      <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-4">
+        <CollapsibleCard
+          storageKey={`brief-editor:${briefSlug}:brief-settings`}
+          title="Brief settings"
+        >
+          <BriefSettings brief={brief} onSave={saveBrief} />
+        </CollapsibleCard>
 
-        <OverviewEditor
-          value={brief.overview}
-          onSave={async (overview) => {
-            await saveBrief({ overview });
-          }}
-        />
+        <CollapsibleCard
+          storageKey={`brief-editor:${briefSlug}:overview`}
+          title="Overview page content"
+        >
+          <OverviewEditor
+            value={brief.overview}
+            onSave={async (overview) => {
+              await saveBrief({ overview });
+            }}
+          />
+        </CollapsibleCard>
 
-        <HooksEditor
-          value={brief.hookCategories}
-          onSave={async (hookCategories) => {
-            await saveBrief({ hookCategories });
-          }}
-        />
+        <CollapsibleCard
+          storageKey={`brief-editor:${briefSlug}:hooks`}
+          title="Hook library"
+        >
+          <HooksEditor
+            value={brief.hookCategories}
+            onSave={async (hookCategories) => {
+              await saveBrief({ hookCategories });
+            }}
+          />
+        </CollapsibleCard>
 
-        <ProjectSources
-          value={cur.scopedProjectIds ?? []}
-          onChange={(next) => {
-            if (!cur) return;
-            const nextCur: Curation = { ...cur, scopedProjectIds: next };
-            setCur(nextCur);
-            void persist(nextCur);
-          }}
-        />
+        <CollapsibleCard
+          storageKey={`brief-editor:${briefSlug}:sources`}
+          title="ViewTrack sources"
+          meta={`${(cur.scopedProjectIds ?? []).length} selected`}
+        >
+          <ProjectSources
+            value={cur.scopedProjectIds ?? []}
+            onChange={(next) => {
+              if (!cur) return;
+              const nextCur: Curation = { ...cur, scopedProjectIds: next };
+              setCur(nextCur);
+              void persist(nextCur);
+            }}
+          />
+        </CollapsibleCard>
 
         {effectiveOrder.map((slug, idx) => {
           const meta = formatsMeta.find((f) => f.slug === slug);
           if (!meta) return null;
+          const override = cur.formatOverrides?.[meta.slug] ?? {};
+          const effectiveTitle = override.title ?? meta.title;
+          const pinCount = (cur.formatPins[meta.slug] ?? []).length;
           return (
-          <FormatSection
+          <CollapsibleCard
             key={meta.slug}
+            storageKey={`brief-editor:${briefSlug}:format:${meta.slug}`}
+            title={effectiveTitle}
+            meta={`${pinCount} ${pinCount === 1 ? "video" : "videos"}`}
+          >
+          <FormatSection
             slug={meta.slug}
+            availableBriefs={allBriefs.filter((b) => b.slug !== briefSlug)}
+            onCopyToBrief={(targetSlug) =>
+              copySectionToBrief(targetSlug, meta.slug)
+            }
             defaultTitle={meta.title}
             defaultTagline={meta.tagline}
             defaultDescription={meta.description}
@@ -377,14 +441,16 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
               )
             }
           />
+          </CollapsibleCard>
           );
         })}
 
         {hiddenSlugs.length > 0 && (
-          <section className="border-2 border-line bg-paper rounded-md p-4 sm:p-5">
-            <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-3">
-              Hidden formats ({hiddenSlugs.length})
-            </div>
+          <CollapsibleCard
+            storageKey={`brief-editor:${briefSlug}:hidden-formats`}
+            title="Hidden formats"
+            meta={`${hiddenSlugs.length} hidden`}
+          >
             <p className="text-xs text-muted mb-3">
               Not shown on this brief. Tap to bring a section back.
             </p>
@@ -404,20 +470,26 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
                 );
               })}
             </div>
-          </section>
+          </CollapsibleCard>
         )}
 
-        <ExcludeSection
-          excluded={cur.exclude}
-          pickerExcluded={allExcluded}
-          scopedProjectIds={cur.scopedProjectIds}
-          onChange={(next) => {
-            if (!cur) return;
-            const nextCur: Curation = { ...cur, exclude: next };
-            setCur(nextCur);
-            void persist(nextCur);
-          }}
-        />
+        <CollapsibleCard
+          storageKey={`brief-editor:${briefSlug}:excluded`}
+          title="Excluded globally"
+          meta={`${cur.exclude.length} excluded`}
+        >
+          <ExcludeSection
+            excluded={cur.exclude}
+            pickerExcluded={allExcluded}
+            scopedProjectIds={cur.scopedProjectIds}
+            onChange={(next) => {
+              if (!cur) return;
+              const nextCur: Curation = { ...cur, exclude: next };
+              setCur(nextCur);
+              void persist(nextCur);
+            }}
+          />
+        </CollapsibleCard>
 
         <details className="border-2 border-line rounded-md bg-paper p-3">
           <summary className="cursor-pointer text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
@@ -455,10 +527,7 @@ function BriefSettings({
     (logoUrl || null) !== (brief.logoUrl || null);
 
   return (
-    <section className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 sm:p-5">
-      <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-3">
-        Brief settings
-      </div>
+    <div>
       <div className="grid gap-3 sm:grid-cols-3">
         <label className="block">
           <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
@@ -507,7 +576,7 @@ function BriefSettings({
           </button>
         </div>
       )}
-    </section>
+    </div>
   );
 }
 
@@ -736,6 +805,8 @@ function ListEditor({
 
 function FormatSection({
   slug,
+  availableBriefs,
+  onCopyToBrief,
   defaultTitle,
   defaultTagline,
   defaultDescription,
@@ -761,6 +832,8 @@ function FormatSection({
   onChangeOverride,
 }: {
   slug: string;
+  availableBriefs: Array<{ slug: string; name: string }>;
+  onCopyToBrief: (targetSlug: string) => Promise<{ ok: boolean; error?: string }>;
   defaultTitle: string;
   defaultTagline: string;
   defaultDescription: string;
@@ -785,6 +858,29 @@ function FormatSection({
   onPickVideo: (v: VideoExample) => void;
   onChangeOverride: (next: FormatOverride) => void;
 }) {
+  const [copyOpen, setCopyOpen] = useState(false);
+  const [copyMsg, setCopyMsg] = useState<string | null>(null);
+  const [copyBusy, setCopyBusy] = useState(false);
+
+  async function handleCopyTo(targetSlug: string, targetName: string) {
+    if (copyBusy) return;
+    if (!confirm(
+      `Copy this section's pins, overrides, and bucket into "${targetName}"? This will overwrite that brief's existing data for this format.`
+    )) {
+      return;
+    }
+    setCopyBusy(true);
+    setCopyMsg(null);
+    const res = await onCopyToBrief(targetSlug);
+    setCopyBusy(false);
+    if (res.ok) {
+      setCopyMsg(`Copied to ${targetName} ✓`);
+      setCopyOpen(false);
+      setTimeout(() => setCopyMsg(null), 2500);
+    } else {
+      setCopyMsg(`Failed: ${res.error}`);
+    }
+  }
   const effectiveTitle = (override.title ?? defaultTitle) || defaultTitle;
 
   const isSectionHidden = (key: string) =>
@@ -801,7 +897,7 @@ function FormatSection({
   };
 
   return (
-    <section className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 sm:p-5">
+    <div>
       <div className="flex items-baseline justify-between gap-2 flex-wrap mb-3">
         <div className="flex items-center gap-2 flex-wrap">
           <code className="font-mono text-[11px] text-muted border-2 border-line bg-paper px-1.5 py-0.5 rounded-sm">
@@ -832,6 +928,37 @@ function FormatSection({
           >
             ↓
           </button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setCopyOpen((o) => !o)}
+              disabled={!availableBriefs.length}
+              aria-label="Copy section to another brief"
+              title={availableBriefs.length ? "Copy section to another brief" : "No other briefs available"}
+              className="w-8 h-8 border-2 border-line bg-background rounded-sm font-black nb-press disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              ⧉
+            </button>
+            {copyOpen && availableBriefs.length > 0 && (
+              <div className="absolute right-0 top-full mt-1 z-10 border-2 border-line bg-background rounded-md nb-shadow-sm min-w-[200px] max-h-[280px] overflow-y-auto">
+                <div className="px-3 py-2 text-[9px] uppercase tracking-[0.2em] font-bold text-muted border-b-2 border-line">
+                  Copy section to…
+                </div>
+                {availableBriefs.map((b) => (
+                  <button
+                    key={b.slug}
+                    type="button"
+                    disabled={copyBusy}
+                    onClick={() => handleCopyTo(b.slug, b.name)}
+                    className="w-full text-left px-3 py-2 text-xs font-bold hover:bg-paper border-b border-line last:border-b-0 disabled:opacity-50"
+                  >
+                    <div className="truncate">{b.name}</div>
+                    <div className="text-[10px] text-muted font-mono truncate">{b.slug}</div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button
             type="button"
             onClick={() => {
@@ -845,6 +972,11 @@ function FormatSection({
           </button>
         </div>
       </div>
+      {copyMsg && (
+        <p className="text-[11px] font-bold border-2 border-line bg-paper px-2 py-1 rounded-sm mb-3">
+          {copyMsg}
+        </p>
+      )}
 
       <div className="space-y-2 mb-4">
         <label className="block">
@@ -1056,7 +1188,7 @@ function FormatSection({
           />
         </div>
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -1201,10 +1333,7 @@ function ExcludeSection({
   onChange: (next: string[]) => void;
 }) {
   return (
-    <section className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 sm:p-5">
-      <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-1">
-        Excluded globally ({excluded.length})
-      </div>
+    <div>
       <p className="text-xs text-muted mb-3">
         Videos here are removed from every format on this brief.
       </p>
@@ -1241,6 +1370,6 @@ function ExcludeSection({
         }}
         placeholder="Search @creator or caption…"
       />
-    </section>
+    </div>
   );
 }
