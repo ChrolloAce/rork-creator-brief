@@ -20,7 +20,10 @@ type VtVideo = {
 };
 
 const PAGE_LIMIT = 100;
-const MAX_PAGES = 4; // 400 videos per project — enough for interactive filtering
+// 2000 videos per project — covers most projects' full history. The
+// underlying ViewTrack endpoint sorts by views desc, so increasing this
+// catches lower-view (often older) videos that previously fell off.
+const MAX_PAGES = 20;
 
 async function fetchProjectVideos(
   key: string,

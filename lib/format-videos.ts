@@ -128,5 +128,14 @@ export async function getAdminPreview(
       autoVideos: [],
     };
   }
+  // Cloned sections live alongside base formats — their pins are stored
+  // under their own slug, so build a listing for each.
+  for (const cloneSlug of Object.keys(curation.formatClones ?? {})) {
+    const listing = buildListing(cloneSlug, curation);
+    out[cloneSlug] = {
+      pinnedVideos: listing.videos,
+      autoVideos: [],
+    };
+  }
   return out;
 }

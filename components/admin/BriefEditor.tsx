@@ -223,9 +223,14 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
     return formatsMeta.find((f) => f.slug === cloneSource);
   }
 
-  const allExcluded = new Set<string>(cur.exclude);
+  // Global exclude set — videos manually excluded brand-wide.
+  const globalExcluded = new Set<string>(cur.exclude);
+  // Wider "in use somewhere" set — only used by the ExcludeSection picker so
+  // it doesn't suggest re-excluding already-handled videos. Per-section
+  // pickers use a narrower set built inline below.
+  const allInUse = new Set<string>(cur.exclude);
   for (const slug of allSlugs) {
-    for (const id of cur.formatPins[slug] ?? []) allExcluded.add(id);
+    for (const id of cur.formatPins[slug] ?? []) allInUse.add(id);
   }
 
   // Effective ordering + which formats are hidden on this brief
@@ -403,7 +408,7 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
             pins={cur.formatPins[slug] ?? []}
             override={cur.formatOverrides?.[slug] ?? {}}
             pinnedVideos={preview[slug]?.pinnedVideos ?? []}
-            allExcluded={allExcluded}
+            globalExcluded={globalExcluded}
             scopedProjectIds={cur.scopedProjectIds}
             canMoveUp={idx > 0}
             canMoveDown={idx < effectiveOrder.length - 1}
@@ -522,7 +527,7 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
         >
           <ExcludeSection
             excluded={cur.exclude}
-            pickerExcluded={allExcluded}
+            pickerExcluded={allInUse}
             scopedProjectIds={cur.scopedProjectIds}
             onChange={(next) => {
               if (!cur) return;
@@ -863,7 +868,7 @@ function FormatSection({
   pins,
   override,
   pinnedVideos,
-  allExcluded,
+  globalExcluded,
   scopedProjectIds,
   canMoveUp,
   canMoveDown,
@@ -891,7 +896,7 @@ function FormatSection({
   pins: string[];
   override: FormatOverride;
   pinnedVideos: VideoExample[];
-  allExcluded: Set<string>;
+  globalExcluded: Set<string>;
   scopedProjectIds?: string[];
   canMoveUp: boolean;
   canMoveDown: boolean;
@@ -905,6 +910,13 @@ function FormatSection({
   const [copyOpen, setCopyOpen] = useState(false);
   const [copyMsg, setCopyMsg] = useState<string | null>(null);
   const [copyBusy, setCopyBusy] = useState(false);
+
+  // Picker excludes globally-blocked videos + the current section's own pins
+  // (to prevent duplicate pin in the same section). Pins in OTHER sections
+  // are intentionally allowed — the same video can appear in multiple
+  // sections of the same brief.
+  const sectionExcluded = new Set<string>(globalExcluded);
+  for (const id of pins) sectionExcluded.add(id);
 
   async function handleCopyTo(targetSlug: string, targetName: string) {
     if (copyBusy) return;
@@ -1158,7 +1170,7 @@ function FormatSection({
         Add a video
       </div>
       <VideoPicker
-        excludedIds={allExcluded}
+        excludedIds={sectionExcluded}
         scopedProjectIds={scopedProjectIds}
         onPick={onPickVideo}
         placeholder="Search @creator or caption…"
