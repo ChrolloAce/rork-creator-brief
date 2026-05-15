@@ -34,6 +34,7 @@ type Curation = {
   formatOrder?: string[];
   scopedProjectIds?: string[];
   videoMetadata?: Record<string, VideoExample>;
+  formatClones?: Record<string, string>;
 };
 
 type Preview = Record<
@@ -105,6 +106,23 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
     const j = await res.json();
     if (!res.ok) return { ok: false, error: j.error ?? `HTTP ${res.status}` };
     return { ok: true };
+  }
+
+  async function cloneSectionInBrief(
+    formatSlug: string
+  ): Promise<{ ok: boolean; error?: string; newSlug?: string }> {
+    const res = await fetch(
+      `/api/briefs/${encodeURIComponent(briefSlug)}/clone-section`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ formatSlug }),
+      }
+    );
+    const j = await res.json();
+    if (!res.ok) return { ok: false, error: j.error ?? `HTTP ${res.status}` };
+    await load(); // refresh state so the new clone shows up
+    return { ok: true, newSlug: j.newSlug };
   }
 
   useEffect(() => {
@@ -192,18 +210,30 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
     );
   }
 
-  const slugs = formatsMeta.map((f) => f.slug);
+  const baseSlugs = formatsMeta.map((f) => f.slug);
+  const cloneSlugs = Object.keys(cur.formatClones ?? {});
+  const allSlugs = [...baseSlugs, ...cloneSlugs];
+
+  // Resolve a (base OR clone) slug to its meta source.
+  function metaFor(slug: string) {
+    const direct = formatsMeta.find((f) => f.slug === slug);
+    if (direct) return direct;
+    const cloneSource = cur?.formatClones?.[slug];
+    if (!cloneSource) return undefined;
+    return formatsMeta.find((f) => f.slug === cloneSource);
+  }
+
   const allExcluded = new Set<string>(cur.exclude);
-  for (const slug of slugs) {
+  for (const slug of allSlugs) {
     for (const id of cur.formatPins[slug] ?? []) allExcluded.add(id);
   }
 
   // Effective ordering + which formats are hidden on this brief
   const effectiveOrder: string[] =
     cur.formatOrder && cur.formatOrder.length > 0
-      ? cur.formatOrder.filter((s) => slugs.includes(s))
-      : slugs;
-  const hiddenSlugs = slugs.filter((s) => !effectiveOrder.includes(s));
+      ? cur.formatOrder.filter((s) => allSlugs.includes(s))
+      : allSlugs;
+  const hiddenSlugs = allSlugs.filter((s) => !effectiveOrder.includes(s));
 
   function applyOrder(nextOrder: string[]) {
     if (!cur) return;
@@ -278,6 +308,9 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
       </header>
 
       <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-4">
+        <div className="text-[10px] uppercase tracking-[0.3em] font-bold text-muted">
+          Settings
+        </div>
         <CollapsibleCard
           storageKey={`brief-editor:${briefSlug}:brief-settings`}
           title="Brief settings"
@@ -325,25 +358,30 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
           />
         </CollapsibleCard>
 
+        <div className="text-[10px] uppercase tracking-[0.3em] font-bold text-muted pt-2">
+          Sections
+        </div>
         {effectiveOrder.map((slug, idx) => {
-          const meta = formatsMeta.find((f) => f.slug === slug);
+          const meta = metaFor(slug);
           if (!meta) return null;
-          const override = cur.formatOverrides?.[meta.slug] ?? {};
+          const override = cur.formatOverrides?.[slug] ?? {};
           const effectiveTitle = override.title ?? meta.title;
-          const pinCount = (cur.formatPins[meta.slug] ?? []).length;
+          const pinCount = (cur.formatPins[slug] ?? []).length;
+          const isClone = !!cur.formatClones?.[slug];
           return (
           <CollapsibleCard
-            key={meta.slug}
-            storageKey={`brief-editor:${briefSlug}:format:${meta.slug}`}
+            key={slug}
+            storageKey={`brief-editor:${briefSlug}:format:${slug}`}
             title={effectiveTitle}
-            meta={`${pinCount} ${pinCount === 1 ? "video" : "videos"}`}
+            meta={`${isClone ? "COPY · " : ""}${pinCount} ${pinCount === 1 ? "video" : "videos"}`}
           >
           <FormatSection
-            slug={meta.slug}
+            slug={slug}
             availableBriefs={allBriefs.filter((b) => b.slug !== briefSlug)}
             onCopyToBrief={(targetSlug) =>
-              copySectionToBrief(targetSlug, meta.slug)
+              copySectionToBrief(targetSlug, slug)
             }
+            onCloneInBrief={() => cloneSectionInBrief(slug)}
             defaultTitle={meta.title}
             defaultTagline={meta.tagline}
             defaultDescription={meta.description}
@@ -362,19 +400,19 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
             )}
             hookCategories={brief.hookCategories ?? null}
             onChangeHookCategories={setAndSaveHooks}
-            pins={cur.formatPins[meta.slug] ?? []}
-            override={cur.formatOverrides?.[meta.slug] ?? {}}
-            pinnedVideos={preview[meta.slug]?.pinnedVideos ?? []}
+            pins={cur.formatPins[slug] ?? []}
+            override={cur.formatOverrides?.[slug] ?? {}}
+            pinnedVideos={preview[slug]?.pinnedVideos ?? []}
             allExcluded={allExcluded}
             scopedProjectIds={cur.scopedProjectIds}
             canMoveUp={idx > 0}
             canMoveDown={idx < effectiveOrder.length - 1}
-            onMoveUp={() => moveFormat(meta.slug, -1)}
-            onMoveDown={() => moveFormat(meta.slug, 1)}
-            onHide={() => hideFormat(meta.slug)}
+            onMoveUp={() => moveFormat(slug, -1)}
+            onMoveDown={() => moveFormat(slug, 1)}
+            onHide={() => hideFormat(slug)}
             onPickVideo={(v) => {
               if (!cur || !v.dbId) return;
-              const existingPins = cur.formatPins[meta.slug] ?? [];
+              const existingPins = cur.formatPins[slug] ?? [];
               if (existingPins.includes(v.dbId)) return;
               const nextPins = [...existingPins, v.dbId];
               const inStaticPool = allVideos.some((x) => x.dbId === v.dbId);
@@ -382,19 +420,18 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
                 ...cur,
                 formatPins: {
                   ...cur.formatPins,
-                  [meta.slug]: nextPins,
+                  [slug]: nextPins,
                 },
                 videoMetadata: inStaticPool
                   ? cur.videoMetadata
                   : { ...(cur.videoMetadata ?? {}), [v.dbId]: v },
               };
               setCur(nextCur);
-              // optimistic: add to preview
               setPreview((p) => {
-                const c = p[meta.slug] ?? { pinnedVideos: [], autoVideos: [] };
+                const c = p[slug] ?? { pinnedVideos: [], autoVideos: [] };
                 return {
                   ...p,
-                  [meta.slug]: {
+                  [slug]: {
                     ...c,
                     pinnedVideos: [...c.pinnedVideos, v],
                   },
@@ -408,16 +445,16 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
                 ...cur,
                 formatPins: {
                   ...cur.formatPins,
-                  [meta.slug]: nextPins,
+                  [slug]: nextPins,
                 },
               };
               setCur(nextCur);
               setPreview((p) => {
-                const c = p[meta.slug];
+                const c = p[slug];
                 if (!c) return p;
                 return {
                   ...p,
-                  [meta.slug]: {
+                  [slug]: {
                     ...c,
                     pinnedVideos: c.pinnedVideos.filter(
                       (v) => v.dbId && nextPins.includes(v.dbId)
@@ -434,7 +471,7 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
                       ...c,
                       formatOverrides: {
                         ...(c.formatOverrides ?? {}),
-                        [meta.slug]: next,
+                        [slug]: next,
                       },
                     }
                   : c
@@ -456,8 +493,10 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
             </p>
             <div className="flex flex-wrap gap-2">
               {hiddenSlugs.map((slug) => {
-                const meta = formatsMeta.find((f) => f.slug === slug);
+                const meta = metaFor(slug);
                 if (!meta) return null;
+                const overrideTitle = cur.formatOverrides?.[slug]?.title;
+                const isClone = !!cur.formatClones?.[slug];
                 return (
                   <button
                     key={slug}
@@ -465,7 +504,10 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
                     onClick={() => showFormat(slug)}
                     className="border-2 border-line bg-background px-3 py-1.5 rounded-md nb-press text-xs font-bold"
                   >
-                    + {meta.title}
+                    + {overrideTitle || meta.title}
+                    {isClone && (
+                      <span className="ml-1 text-[9px] uppercase tracking-widest text-muted">copy</span>
+                    )}
                   </button>
                 );
               })}
@@ -807,6 +849,7 @@ function FormatSection({
   slug,
   availableBriefs,
   onCopyToBrief,
+  onCloneInBrief,
   defaultTitle,
   defaultTagline,
   defaultDescription,
@@ -834,6 +877,7 @@ function FormatSection({
   slug: string;
   availableBriefs: Array<{ slug: string; name: string }>;
   onCopyToBrief: (targetSlug: string) => Promise<{ ok: boolean; error?: string }>;
+  onCloneInBrief: () => Promise<{ ok: boolean; error?: string; newSlug?: string }>;
   defaultTitle: string;
   defaultTagline: string;
   defaultDescription: string;
@@ -932,30 +976,62 @@ function FormatSection({
             <button
               type="button"
               onClick={() => setCopyOpen((o) => !o)}
-              disabled={!availableBriefs.length}
-              aria-label="Copy section to another brief"
-              title={availableBriefs.length ? "Copy section to another brief" : "No other briefs available"}
-              className="w-8 h-8 border-2 border-line bg-background rounded-sm font-black nb-press disabled:opacity-30 disabled:cursor-not-allowed"
+              aria-label="Duplicate section"
+              title="Duplicate section"
+              className="w-8 h-8 border-2 border-line bg-background rounded-sm font-black nb-press"
             >
               ⧉
             </button>
-            {copyOpen && availableBriefs.length > 0 && (
-              <div className="absolute right-0 top-full mt-1 z-10 border-2 border-line bg-background rounded-md nb-shadow-sm min-w-[200px] max-h-[280px] overflow-y-auto">
+            {copyOpen && (
+              <div className="absolute right-0 top-full mt-1 z-10 border-2 border-line bg-background rounded-md nb-shadow-sm min-w-[220px] max-h-[320px] overflow-y-auto">
                 <div className="px-3 py-2 text-[9px] uppercase tracking-[0.2em] font-bold text-muted border-b-2 border-line">
-                  Copy section to…
+                  Duplicate this section
                 </div>
-                {availableBriefs.map((b) => (
-                  <button
-                    key={b.slug}
-                    type="button"
-                    disabled={copyBusy}
-                    onClick={() => handleCopyTo(b.slug, b.name)}
-                    className="w-full text-left px-3 py-2 text-xs font-bold hover:bg-paper border-b border-line last:border-b-0 disabled:opacity-50"
-                  >
-                    <div className="truncate">{b.name}</div>
-                    <div className="text-[10px] text-muted font-mono truncate">{b.slug}</div>
-                  </button>
-                ))}
+                <button
+                  type="button"
+                  disabled={copyBusy}
+                  onClick={async () => {
+                    if (copyBusy) return;
+                    setCopyBusy(true);
+                    setCopyMsg(null);
+                    const res = await onCloneInBrief();
+                    setCopyBusy(false);
+                    if (res.ok) {
+                      setCopyMsg(`Duplicated in this brief ✓`);
+                      setCopyOpen(false);
+                      setTimeout(() => setCopyMsg(null), 2500);
+                    } else {
+                      setCopyMsg(`Failed: ${res.error}`);
+                    }
+                  }}
+                  className="w-full text-left px-3 py-2 text-xs font-bold hover:bg-paper border-b-2 border-line disabled:opacity-50"
+                >
+                  <div>+ Duplicate here</div>
+                  <div className="text-[10px] text-muted font-normal">
+                    Copy pins + overrides into a new section in this brief
+                  </div>
+                </button>
+                {availableBriefs.length > 0 && (
+                  <>
+                    <div className="px-3 py-2 text-[9px] uppercase tracking-[0.2em] font-bold text-muted border-b-2 border-line bg-paper">
+                      …or copy to another brief
+                    </div>
+                    {availableBriefs.map((b) => (
+                      <button
+                        key={b.slug}
+                        type="button"
+                        disabled={copyBusy}
+                        onClick={() => handleCopyTo(b.slug, b.name)}
+                        className="w-full text-left px-3 py-2 text-xs font-bold hover:bg-paper border-b border-line last:border-b-0 disabled:opacity-50"
+                      >
+                        <div className="truncate">{b.name}</div>
+                        <div className="text-[10px] text-muted font-mono truncate">
+                          {b.slug}
+                        </div>
+                      </button>
+                    ))}
+                  </>
+                )}
               </div>
             )}
           </div>

@@ -1,5 +1,6 @@
 import "server-only";
 import postgres from "postgres";
+import { formats as formatsMeta } from "./formats";
 
 declare global {
   // eslint-disable-next-line no-var
@@ -48,6 +49,10 @@ export type CurationData = {
   // Metadata cache for videos pinned from projects outside the static pool.
   // Keyed by dbId (e.g. "instagram_instagram_user_ABC").
   videoMetadata?: Record<string, CachedVideo>;
+  // Clones map: { "<new-slug>": "<source-slug-from-formatsMeta>" }. A clone
+  // is a per-brief duplicate of a base format. It has its own pins/overrides
+  // but inherits structure/tips/etc. from the source's static meta.
+  formatClones?: Record<string, string>;
 };
 
 export type CachedVideo = {
@@ -436,6 +441,82 @@ export async function copyFormatSection(input: {
     UPDATE curation SET data = ${sql.json(next as never)}, updated_at = NOW()
     WHERE id = ${input.dstSlug}
   `;
+}
+
+export async function cloneFormatInBrief(input: {
+  briefSlug: string;
+  sourceSlug: string;
+}): Promise<{ newSlug: string }> {
+  await ensureSchema();
+  const sql = getSql();
+  const rows = await sql<{ data: CurationData }[]>`
+    SELECT data FROM curation WHERE id = ${input.briefSlug}
+  `;
+  if (rows.length === 0) throw new Error("brief curation not found");
+  const cur = rows[0].data;
+
+  // Resolve the *base* meta source. Cloning a clone still references the
+  // original static meta.
+  const baseSourceSlug =
+    cur.formatClones?.[input.sourceSlug] ?? input.sourceSlug;
+
+  // Generate a unique slug.
+  const taken = new Set<string>([
+    ...Object.keys(cur.formatPins ?? {}),
+    ...Object.keys(cur.formatOverrides ?? {}),
+    ...Object.keys(cur.formatClones ?? {}),
+    ...(cur.formatOrder ?? []),
+    ...formatsMeta.map((f) => f.slug),
+  ]);
+  let newSlug = `${baseSourceSlug}-copy`;
+  let n = 2;
+  while (taken.has(newSlug)) {
+    newSlug = `${baseSourceSlug}-copy-${n}`;
+    n += 1;
+  }
+
+  const srcPins = cur.formatPins?.[input.sourceSlug] ?? [];
+  const next: CurationData = {
+    ...cur,
+    formatPins: { ...(cur.formatPins ?? {}), [newSlug]: [...srcPins] },
+    formatBuckets: {
+      ...(cur.formatBuckets ?? {}),
+      [newSlug]: cur.formatBuckets?.[input.sourceSlug] ?? null,
+    },
+    formatClones: {
+      ...(cur.formatClones ?? {}),
+      [newSlug]: baseSourceSlug,
+    },
+  };
+
+  const srcOverride = cur.formatOverrides?.[input.sourceSlug];
+  if (srcOverride !== undefined) {
+    next.formatOverrides = {
+      ...(cur.formatOverrides ?? {}),
+      [newSlug]: srcOverride,
+    };
+  }
+
+  // Build a full effective order so the clone appears immediately after
+  // its source. If no explicit order exists, materialize one from
+  // formatsMeta (the renderer's default).
+  const baseOrder =
+    cur.formatOrder && cur.formatOrder.length > 0
+      ? cur.formatOrder
+      : formatsMeta.map((f) => f.slug);
+  const idx = baseOrder.indexOf(input.sourceSlug);
+  const insertAt = idx === -1 ? baseOrder.length : idx + 1;
+  next.formatOrder = [
+    ...baseOrder.slice(0, insertAt),
+    newSlug,
+    ...baseOrder.slice(insertAt),
+  ];
+
+  await sql`
+    UPDATE curation SET data = ${sql.json(next as never)}, updated_at = NOW()
+    WHERE id = ${input.briefSlug}
+  `;
+  return { newSlug };
 }
 
 export async function deleteBrief(slug: string): Promise<void> {

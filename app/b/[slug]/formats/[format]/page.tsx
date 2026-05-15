@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Shell } from "@/components/Shell";
 import { hookCategories as defaultHooks } from "@/lib/hooks";
-import { formats as formatsMeta } from "@/lib/formats";
 import { formatId } from "@/lib/nav";
 import { getBrief } from "@/lib/db";
 import type { HookCategory } from "@/lib/types";
@@ -19,8 +18,11 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { slug, format } = await params;
   const brief = await getBrief(slug);
-  const f = formatsMeta.find((x) => x.slug === format);
-  if (!brief || !f) return { title: "Not found" };
+  if (!brief) return { title: "Not found" };
+  // Look it up in the rendered format list so clones resolve too.
+  const formats = await getFormatsForRender(brief.slug);
+  const f = formats.find((x) => x.slug === format);
+  if (!f) return { title: "Not found" };
   return {
     title: `${f.title} — ${brief.name} Creator Brief`,
     description: f.description,
@@ -33,11 +35,8 @@ export default async function BriefFormatPage({
   params: Promise<Params>;
 }) {
   const { slug, format } = await params;
-  const [brief, meta] = await Promise.all([
-    getBrief(slug),
-    Promise.resolve(formatsMeta.find((x) => x.slug === format)),
-  ]);
-  if (!brief || !meta) notFound();
+  const brief = await getBrief(slug);
+  if (!brief) notFound();
   const formats = await getFormatsForRender(brief.slug);
   // Format hidden on this brief — 404 so it doesn't leak via direct link.
   if (!formats.some((f) => f.slug === format)) notFound();

@@ -47,6 +47,16 @@ export async function getFormatListing(
   return buildListing(formatSlug, curation);
 }
 
+// Resolve a slug (which may be a clone) to its static base meta. Returns
+// undefined if the slug doesn't map to any known format.
+function resolveBaseMeta(slug: string, curation: CurationData) {
+  const direct = formatsMeta.find((f) => f.slug === slug);
+  if (direct) return direct;
+  const cloneSource = curation.formatClones?.[slug];
+  if (!cloneSource) return undefined;
+  return formatsMeta.find((f) => f.slug === cloneSource);
+}
+
 export async function getAllFormatListings(
   briefSlug?: string
 ): Promise<Record<string, FormatListing>> {
@@ -55,25 +65,34 @@ export async function getAllFormatListings(
   for (const meta of formatsMeta) {
     out[meta.slug] = buildListing(meta.slug, curation);
   }
+  // Clone slugs use their own pins, not the source's.
+  for (const cloneSlug of Object.keys(curation.formatClones ?? {})) {
+    out[cloneSlug] = buildListing(cloneSlug, curation);
+  }
   return out;
 }
 
 // Merge static metadata with freshly-read pins + admin-set overrides,
-// filtered + ordered by the per-brief formatOrder.
+// filtered + ordered by the per-brief formatOrder. Cloned format slugs
+// inherit their base meta (structure/tips/etc.) from the source format.
 export async function getFormatsForRender(briefSlug?: string): Promise<Format[]> {
   const curation = await getCuration(briefSlug);
   const listings = await getAllFormatListings(briefSlug);
   const order =
     curation.formatOrder && curation.formatOrder.length > 0
       ? curation.formatOrder
-      : formatsMeta.map((f) => f.slug);
+      : [
+          ...formatsMeta.map((f) => f.slug),
+          ...Object.keys(curation.formatClones ?? {}),
+        ];
   const out: Format[] = [];
   for (const slug of order) {
-    const meta = formatsMeta.find((f) => f.slug === slug);
+    const meta = resolveBaseMeta(slug, curation);
     if (!meta) continue;
-    const ov = curation.formatOverrides?.[meta.slug] ?? {};
+    const ov = curation.formatOverrides?.[slug] ?? {};
     out.push({
       ...meta,
+      slug,
       title: ov.title?.trim() || meta.title,
       tagline: ov.tagline?.trim() || meta.tagline,
       description: ov.description?.trim() || meta.description,
@@ -81,8 +100,8 @@ export async function getFormatsForRender(briefSlug?: string): Promise<Format[]>
       structure: ov.structure && ov.structure.length > 0 ? ov.structure : meta.structure,
       tips: ov.tips && ov.tips.length > 0 ? ov.tips : meta.tips,
       bestFor: ov.bestFor && ov.bestFor.length > 0 ? ov.bestFor : meta.bestFor,
-      thumbnail: listings[meta.slug]?.topThumb ?? meta.thumbnail,
-      examples: listings[meta.slug]?.videos ?? [],
+      thumbnail: listings[slug]?.topThumb ?? meta.thumbnail,
+      examples: listings[slug]?.videos ?? [],
       hiddenSections: (ov.hiddenSections ?? []) as FormatSectionKey[],
     });
   }
