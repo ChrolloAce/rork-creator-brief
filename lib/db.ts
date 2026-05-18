@@ -61,6 +61,10 @@ export type CurationData = {
     // db type stays decoupled from the UI enum.
     visible?: string[];
   };
+  // When true the public /b/[slug] root page redirects to the first format
+  // and the sidebar's "Overview" entry is dropped. Use when a brief doesn't
+  // have a meaningful overview to show.
+  hideOverview?: boolean;
 };
 
 export type CachedVideo = {

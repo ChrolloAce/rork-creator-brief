@@ -44,6 +44,7 @@ type Curation = {
   videoMetadata?: Record<string, VideoExample>;
   formatClones?: Record<string, string>;
   publicStats?: { enabled: boolean; visible?: string[] };
+  hideOverview?: boolean;
 };
 
 type Preview = Record<
@@ -453,7 +454,20 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
         <CollapsibleCard
           storageKey={`brief-editor:${briefSlug}:overview`}
           title="Overview page content"
+          meta={cur.hideOverview ? "Hidden" : undefined}
         >
+          <label className="flex items-center gap-2 mb-4 text-xs font-bold cursor-pointer">
+            <input
+              type="checkbox"
+              checked={!!cur.hideOverview}
+              onChange={(e) => {
+                const next: Curation = { ...cur, hideOverview: e.target.checked };
+                setCur(next);
+                void persist(next);
+              }}
+            />
+            <span>Hide overview page (visitors jump straight to the first format)</span>
+          </label>
           <OverviewEditor
             value={brief.overview}
             onSave={async (overview) => {

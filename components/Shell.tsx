@@ -15,6 +15,7 @@ export function Shell({
   brief,
   useAllHooks = false,
   publicStats,
+  hideOverview = false,
 }: {
   formats: Format[];
   hookCategories: HookCategory[];
@@ -27,10 +28,11 @@ export function Shell({
   };
   useAllHooks?: boolean;
   publicStats?: { enabled: boolean; visible?: string[] };
+  hideOverview?: boolean;
 }) {
   const sections = useMemo(
-    () => buildNavSections(formats, brief.slug),
-    [formats, brief.slug]
+    () => buildNavSections(formats, brief.slug, { includeOverview: !hideOverview }),
+    [formats, brief.slug, hideOverview]
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
   const pathname = usePathname();

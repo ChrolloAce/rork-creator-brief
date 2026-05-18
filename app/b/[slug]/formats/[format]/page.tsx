@@ -68,6 +68,7 @@ export default async function BriefFormatPage({
         !!(brief.hookCategories && brief.hookCategories.length > 0)
       }
       publicStats={curation.publicStats}
+      hideOverview={curation.hideOverview}
     />
   );
 }

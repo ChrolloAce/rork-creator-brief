@@ -16,11 +16,14 @@ export const formatId = (slug: string) => `format:${slug}`;
 
 export function buildNavSections(
   formats: Format[],
-  briefSlug: string
+  briefSlug: string,
+  options?: { includeOverview?: boolean }
 ): NavSection[] {
   const base = `/b/${briefSlug}`;
-  return [
-    {
+  const includeOverview = options?.includeOverview !== false;
+  const sections: NavSection[] = [];
+  if (includeOverview) {
+    sections.push({
       label: "Start here",
       items: [
         {
@@ -30,16 +33,17 @@ export function buildNavSections(
           meta: "The brief",
         },
       ],
-    },
-    {
-      label: "Formats",
-      items: formats.map((f) => ({
-        id: formatId(f.slug),
-        href: `${base}/formats/${f.slug}`,
-        title: f.title,
-        meta: f.tagline,
-        thumbnail: f.thumbnail,
-      })),
-    },
-  ];
+    });
+  }
+  sections.push({
+    label: "Formats",
+    items: formats.map((f) => ({
+      id: formatId(f.slug),
+      href: `${base}/formats/${f.slug}`,
+      title: f.title,
+      meta: f.tagline,
+      thumbnail: f.thumbnail,
+    })),
+  });
+  return sections;
 }

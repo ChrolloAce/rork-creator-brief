@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { Shell } from "@/components/Shell";
 import { hookCategories as defaultHooks } from "@/lib/hooks";
 import { overviewId } from "@/lib/nav";
@@ -38,6 +38,11 @@ export default async function BriefOverview({
     getFormatsForRender(brief.slug),
     getCuration(brief.slug),
   ]);
+  // If the overview page is hidden for this brief, jump straight to the
+  // first visible format so users don't land on a blank shell.
+  if (curation.hideOverview && formats.length > 0) {
+    redirect(`/b/${brief.slug}/formats/${formats[0].slug}`);
+  }
   const hooks: HookCategory[] =
     brief.hookCategories && brief.hookCategories.length > 0
       ? brief.hookCategories.map((c) => ({
@@ -63,6 +68,7 @@ export default async function BriefOverview({
         !!(brief.hookCategories && brief.hookCategories.length > 0)
       }
       publicStats={curation.publicStats}
+      hideOverview={curation.hideOverview}
     />
   );
 }
