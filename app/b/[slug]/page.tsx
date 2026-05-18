@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { Shell } from "@/components/Shell";
 import { hookCategories as defaultHooks } from "@/lib/hooks";
 import { overviewId } from "@/lib/nav";
-import { getBrief } from "@/lib/db";
+import { getBrief, getCuration } from "@/lib/db";
 import type { HookCategory } from "@/lib/types";
 import { getFormatsForRender } from "@/lib/format-videos";
 
@@ -34,7 +34,10 @@ export default async function BriefOverview({
   const { slug } = await params;
   const brief = await getBrief(slug);
   if (!brief) notFound();
-  const formats = await getFormatsForRender(brief.slug);
+  const [formats, curation] = await Promise.all([
+    getFormatsForRender(brief.slug),
+    getCuration(brief.slug),
+  ]);
   const hooks: HookCategory[] =
     brief.hookCategories && brief.hookCategories.length > 0
       ? brief.hookCategories.map((c) => ({
@@ -59,6 +62,7 @@ export default async function BriefOverview({
       useAllHooks={
         !!(brief.hookCategories && brief.hookCategories.length > 0)
       }
+      publicStats={curation.publicStats}
     />
   );
 }

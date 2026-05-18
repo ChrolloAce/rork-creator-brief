@@ -53,6 +53,14 @@ export type CurationData = {
   // is a per-brief duplicate of a base format. It has its own pins/overrides
   // but inherits structure/tips/etc. from the source's static meta.
   formatClones?: Record<string, string>;
+  // Public preview stats config. When enabled, the public /b/[slug] pages
+  // render an aggregate stats bar at the top of each format section.
+  publicStats?: {
+    enabled: boolean;
+    // Stat keys (mirrors SECTION_STAT_KEYS in BriefEditor). Free-form so the
+    // db type stays decoupled from the UI enum.
+    visible?: string[];
+  };
 };
 
 export type CachedVideo = {

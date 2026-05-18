@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { Shell } from "@/components/Shell";
 import { hookCategories as defaultHooks } from "@/lib/hooks";
 import { formatId } from "@/lib/nav";
-import { getBrief } from "@/lib/db";
+import { getBrief, getCuration } from "@/lib/db";
 import type { HookCategory } from "@/lib/types";
 import { getFormatsForRender } from "@/lib/format-videos";
 
@@ -37,7 +37,10 @@ export default async function BriefFormatPage({
   const { slug, format } = await params;
   const brief = await getBrief(slug);
   if (!brief) notFound();
-  const formats = await getFormatsForRender(brief.slug);
+  const [formats, curation] = await Promise.all([
+    getFormatsForRender(brief.slug),
+    getCuration(brief.slug),
+  ]);
   // Format hidden on this brief — 404 so it doesn't leak via direct link.
   if (!formats.some((f) => f.slug === format)) notFound();
   const hooks: HookCategory[] =
@@ -64,6 +67,7 @@ export default async function BriefFormatPage({
       useAllHooks={
         !!(brief.hookCategories && brief.hookCategories.length > 0)
       }
+      publicStats={curation.publicStats}
     />
   );
 }

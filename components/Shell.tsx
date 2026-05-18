@@ -14,6 +14,7 @@ export function Shell({
   activeId,
   brief,
   useAllHooks = false,
+  publicStats,
 }: {
   formats: Format[];
   hookCategories: HookCategory[];
@@ -25,6 +26,7 @@ export function Shell({
     overview?: import("@/lib/db").BriefOverview | null;
   };
   useAllHooks?: boolean;
+  publicStats?: { enabled: boolean; visible?: string[] };
 }) {
   const sections = useMemo(
     () => buildNavSections(formats, brief.slug),
@@ -66,7 +68,7 @@ export function Shell({
     return "Overview";
   }, [sections, activeId]);
 
-  const view = renderView(activeId, formats, hookCategories, brief, useAllHooks);
+  const view = renderView(activeId, formats, hookCategories, brief, useAllHooks, publicStats);
 
   return (
     <div className="min-h-screen flex flex-col lg:flex-row bg-background">
@@ -170,7 +172,8 @@ function renderView(
     name: string;
     overview?: import("@/lib/db").BriefOverview | null;
   },
-  useAllHooks: boolean
+  useAllHooks: boolean,
+  publicStats?: { enabled: boolean; visible?: string[] }
 ) {
   if (activeId === "overview")
     return (
@@ -188,6 +191,7 @@ function renderView(
           format={f}
           hookCategories={hookCategories}
           useAllHooks={useAllHooks}
+          publicStats={publicStats}
         />
       );
   }

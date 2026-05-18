@@ -11,6 +11,12 @@ import type {
 } from "@/lib/types";
 import { Thumbnail } from "./Thumbnail";
 import { VideoCarousel } from "./VideoCarousel";
+import {
+  computeSectionStat,
+  sanitizeVisibleStats,
+  SECTION_STAT_LABELS,
+  SECTION_STAT_DEFAULTS,
+} from "@/lib/section-stats";
 
 function asItem(i: FormatListItem): ListItem {
   return typeof i === "string" ? { text: i } : i;
@@ -417,10 +423,12 @@ export function FormatView({
   format,
   hookCategories,
   useAllHooks = false,
+  publicStats,
 }: {
   format: Format;
   hookCategories: HookCategory[];
   useAllHooks?: boolean;
+  publicStats?: { enabled: boolean; visible?: string[] };
 }) {
   const matching = useAllHooks
     ? hookCategories
@@ -454,6 +462,25 @@ export function FormatView({
         <FormatDescription text={format.description} />
         {!isHidden(format, "script") && format.script && (
           <ScriptBlock text={format.script} />
+        )}
+        {publicStats?.enabled && format.examples.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {sanitizeVisibleStats(
+              publicStats.visible ?? SECTION_STAT_DEFAULTS
+            ).map((k) => (
+              <div
+                key={k}
+                className="border-2 border-line bg-paper px-2.5 py-1.5 rounded-sm min-w-[80px]"
+              >
+                <div className="text-base font-black leading-none">
+                  {computeSectionStat(k, format.examples)}
+                </div>
+                <div className="text-[9px] uppercase tracking-widest font-bold text-muted mt-1 leading-none">
+                  {SECTION_STAT_LABELS[k]}
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </header>
 

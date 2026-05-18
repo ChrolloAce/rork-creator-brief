@@ -1,8 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { HookCategory, VideoExample } from "@/lib/types";
+import {
+  SECTION_STAT_KEYS,
+  SECTION_STAT_LABELS,
+  SECTION_STAT_DEFAULTS,
+  computeSectionStat,
+  sanitizeVisibleStats,
+  type SectionStatKey,
+} from "@/lib/section-stats";
 import { allVideos } from "@/lib/all-videos";
 import { formats as formatsMeta } from "@/lib/formats";
 import { hookCategories as defaultHookCategories } from "@/lib/hooks";
@@ -35,6 +43,7 @@ type Curation = {
   scopedProjectIds?: string[];
   videoMetadata?: Record<string, VideoExample>;
   formatClones?: Record<string, string>;
+  publicStats?: { enabled: boolean; visible?: string[] };
 };
 
 type Preview = Record<
@@ -50,132 +59,26 @@ type BriefRecord = {
   hookCategories?: BriefHookCategory[] | null;
 };
 
-// ---- Per-section aggregate stats ----------------------------------------
-// Per-section stats computed from the pinned videos, displayed at the top
-// of each format section. Visibility is global (one setting for all
-// sections) and persisted in localStorage so it survives reloads.
-
-const SECTION_STAT_KEYS = [
-  "videos",
-  "views",
-  "likes",
-  "comments",
-  "shares",
-  "engagementRate",
-  "commentPct",
-  "likePct",
-  "avgViews",
-] as const;
-type SectionStatKey = (typeof SECTION_STAT_KEYS)[number];
-
-const SECTION_STAT_LABELS: Record<SectionStatKey, string> = {
-  videos: "Videos",
-  views: "Total Views",
-  likes: "Total Likes",
-  comments: "Total Comments",
-  shares: "Total Shares",
-  engagementRate: "Engagement %",
-  commentPct: "Comment %",
-  likePct: "Like %",
-  avgViews: "Avg Views",
-};
-
-const SECTION_STAT_DEFAULTS: SectionStatKey[] = [
-  "videos",
-  "views",
-  "comments",
-  "commentPct",
-  "engagementRate",
-];
-
-const SECTION_STATS_KEY = "brief-editor:section-stats:visible";
-const statListeners = new Set<() => void>();
-function statsSubscribe(cb: () => void) {
-  statListeners.add(cb);
-  return () => statListeners.delete(cb);
-}
-function statsNotify() {
-  for (const cb of statListeners) cb();
-}
-function readVisibleStats(): SectionStatKey[] {
-  try {
-    const raw = localStorage.getItem(SECTION_STATS_KEY);
-    if (!raw) return SECTION_STAT_DEFAULTS;
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return SECTION_STAT_DEFAULTS;
-    return (parsed as unknown[]).filter((k): k is SectionStatKey =>
-      typeof k === "string" && (SECTION_STAT_KEYS as readonly string[]).includes(k)
-    );
-  } catch {
-    return SECTION_STAT_DEFAULTS;
-  }
-}
-function writeVisibleStats(next: SectionStatKey[]) {
-  try {
-    localStorage.setItem(SECTION_STATS_KEY, JSON.stringify(next));
-  } catch {
-    // ignore quota / private-mode errors
-  }
-  statsNotify();
-}
-
-function compactNumber(n: number): string {
-  if (!isFinite(n) || n === 0) return "0";
-  if (n >= 1e9) return (n / 1e9).toFixed(1).replace(/\.0$/, "") + "B";
-  if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
-  if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "K";
-  return String(Math.round(n));
-}
-
-function computeSectionStat(
-  key: SectionStatKey,
-  vids: VideoExample[]
-): string {
-  if (vids.length === 0) return "—";
-  const sum = (k: "views" | "likes" | "comments" | "shares") =>
-    vids.reduce((s, v) => s + ((v as unknown as Record<string, number>)[k] ?? 0), 0);
-  const tv = sum("views");
-  const tl = sum("likes");
-  const tc = sum("comments");
-  const ts = sum("shares");
-  switch (key) {
-    case "videos":
-      return String(vids.length);
-    case "views":
-      return compactNumber(tv);
-    case "likes":
-      return compactNumber(tl);
-    case "comments":
-      return compactNumber(tc);
-    case "shares":
-      return compactNumber(ts);
-    case "engagementRate":
-      return tv > 0 ? (((tl + tc + ts) / tv) * 100).toFixed(2) + "%" : "—";
-    case "commentPct":
-      return tv > 0 ? ((tc / tv) * 100).toFixed(2) + "%" : "—";
-    case "likePct":
-      return tv > 0 ? ((tl / tv) * 100).toFixed(2) + "%" : "—";
-    case "avgViews":
-      return compactNumber(tv / vids.length);
-  }
-}
-
-function SectionStats({ videos }: { videos: VideoExample[] }) {
-  const visible = useSyncExternalStore(
-    statsSubscribe,
-    () => readVisibleStats(),
-    () => SECTION_STAT_DEFAULTS
-  );
+function SectionStats({
+  videos,
+  visible,
+  publicEnabled,
+  onChange,
+}: {
+  videos: VideoExample[];
+  visible: SectionStatKey[];
+  publicEnabled: boolean;
+  onChange: (patch: { visible?: SectionStatKey[]; publicEnabled?: boolean }) => void;
+}) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const visibleSet = new Set(visible);
 
-  const toggle = useCallback((k: SectionStatKey) => {
-    const cur = readVisibleStats();
-    const next = cur.includes(k)
-      ? cur.filter((x) => x !== k)
-      : [...cur, k];
-    writeVisibleStats(next);
-  }, []);
+  function toggleStat(k: SectionStatKey) {
+    const next = visible.includes(k)
+      ? visible.filter((x) => x !== k)
+      : [...visible, k];
+    onChange({ visible: next });
+  }
 
   return (
     <div className="mb-3">
@@ -203,7 +106,7 @@ function SectionStats({ videos }: { videos: VideoExample[] }) {
             ⚙
           </button>
           {pickerOpen && (
-            <div className="absolute right-0 top-full mt-1 z-10 border-2 border-line bg-background rounded-md nb-shadow-sm min-w-[200px]">
+            <div className="absolute right-0 top-full mt-1 z-10 border-2 border-line bg-background rounded-md nb-shadow-sm min-w-[220px]">
               <div className="px-3 py-2 text-[9px] uppercase tracking-[0.2em] font-bold text-muted border-b-2 border-line">
                 Show stats
               </div>
@@ -215,18 +118,30 @@ function SectionStats({ videos }: { videos: VideoExample[] }) {
                   <input
                     type="checkbox"
                     checked={visibleSet.has(k)}
-                    onChange={() => toggle(k)}
+                    onChange={() => toggleStat(k)}
                   />
                   <span>{SECTION_STAT_LABELS[k]}</span>
                 </label>
               ))}
+              <label className="flex items-center gap-2 px-3 py-2 text-xs font-bold hover:bg-paper cursor-pointer border-t-2 border-line bg-paper/50">
+                <input
+                  type="checkbox"
+                  checked={publicEnabled}
+                  onChange={() =>
+                    onChange({ publicEnabled: !publicEnabled })
+                  }
+                />
+                <span>Show on public preview</span>
+              </label>
               <div className="px-3 py-1.5 border-t-2 border-line">
                 <button
                   type="button"
-                  onClick={() => writeVisibleStats(SECTION_STAT_DEFAULTS)}
+                  onClick={() =>
+                    onChange({ visible: SECTION_STAT_DEFAULTS })
+                  }
                   className="w-full text-[10px] uppercase tracking-widest font-bold text-muted hover:text-ink"
                 >
-                  Reset to defaults
+                  Reset stats to defaults
                 </button>
               </div>
             </div>
@@ -410,6 +325,31 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
     return formatsMeta.find((f) => f.slug === cloneSource);
   }
 
+  // Public preview stats config (server-backed via curation). Defaults
+  // applied if the brief hasn't been configured yet.
+  const publicStatsVisible = sanitizeVisibleStats(
+    cur.publicStats?.visible ?? SECTION_STAT_DEFAULTS
+  );
+  const publicStatsEnabled = !!cur.publicStats?.enabled;
+
+  function updatePublicStats(patch: {
+    visible?: SectionStatKey[];
+    publicEnabled?: boolean;
+  }) {
+    if (!cur) return;
+    const nextStats = {
+      enabled:
+        patch.publicEnabled !== undefined
+          ? patch.publicEnabled
+          : publicStatsEnabled,
+      visible:
+        patch.visible !== undefined ? patch.visible : publicStatsVisible,
+    };
+    const nextCur: Curation = { ...cur, publicStats: nextStats };
+    setCur(nextCur);
+    void persist(nextCur);
+  }
+
   // Global exclude set — videos manually excluded brand-wide.
   const globalExcluded = new Set<string>(cur.exclude);
   // Wider "in use somewhere" set — only used by the ExcludeSection picker so
@@ -574,6 +514,9 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
               copySectionToBrief(targetSlug, slug)
             }
             onCloneInBrief={() => cloneSectionInBrief(slug)}
+            publicStatsVisible={publicStatsVisible}
+            publicStatsEnabled={publicStatsEnabled}
+            onPublicStatsChange={updatePublicStats}
             defaultTitle={meta.title}
             defaultTagline={meta.tagline}
             defaultDescription={meta.description}
@@ -1042,6 +985,9 @@ function FormatSection({
   availableBriefs,
   onCopyToBrief,
   onCloneInBrief,
+  publicStatsVisible,
+  publicStatsEnabled,
+  onPublicStatsChange,
   defaultTitle,
   defaultTagline,
   defaultDescription,
@@ -1070,6 +1016,9 @@ function FormatSection({
   availableBriefs: Array<{ slug: string; name: string }>;
   onCopyToBrief: (targetSlug: string) => Promise<{ ok: boolean; error?: string }>;
   onCloneInBrief: () => Promise<{ ok: boolean; error?: string; newSlug?: string }>;
+  publicStatsVisible: SectionStatKey[];
+  publicStatsEnabled: boolean;
+  onPublicStatsChange: (patch: { visible?: SectionStatKey[]; publicEnabled?: boolean }) => void;
   defaultTitle: string;
   defaultTagline: string;
   defaultDescription: string;
@@ -1253,7 +1202,12 @@ function FormatSection({
         </p>
       )}
 
-      <SectionStats videos={pinnedVideos} />
+      <SectionStats
+        videos={pinnedVideos}
+        visible={publicStatsVisible}
+        publicEnabled={publicStatsEnabled}
+        onChange={onPublicStatsChange}
+      />
 
       <div className="space-y-2 mb-4">
         <label className="block">
