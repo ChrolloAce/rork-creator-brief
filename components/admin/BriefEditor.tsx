@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { HookCategory, VideoExample } from "@/lib/types";
 import { allVideos } from "@/lib/all-videos";
 import { formats as formatsMeta } from "@/lib/formats";
@@ -49,6 +49,193 @@ type BriefRecord = {
   overview?: BriefOverview | null;
   hookCategories?: BriefHookCategory[] | null;
 };
+
+// ---- Per-section aggregate stats ----------------------------------------
+// Per-section stats computed from the pinned videos, displayed at the top
+// of each format section. Visibility is global (one setting for all
+// sections) and persisted in localStorage so it survives reloads.
+
+const SECTION_STAT_KEYS = [
+  "videos",
+  "views",
+  "likes",
+  "comments",
+  "shares",
+  "engagementRate",
+  "commentPct",
+  "likePct",
+  "avgViews",
+] as const;
+type SectionStatKey = (typeof SECTION_STAT_KEYS)[number];
+
+const SECTION_STAT_LABELS: Record<SectionStatKey, string> = {
+  videos: "Videos",
+  views: "Total Views",
+  likes: "Total Likes",
+  comments: "Total Comments",
+  shares: "Total Shares",
+  engagementRate: "Engagement %",
+  commentPct: "Comment %",
+  likePct: "Like %",
+  avgViews: "Avg Views",
+};
+
+const SECTION_STAT_DEFAULTS: SectionStatKey[] = [
+  "videos",
+  "views",
+  "comments",
+  "commentPct",
+  "engagementRate",
+];
+
+const SECTION_STATS_KEY = "brief-editor:section-stats:visible";
+const statListeners = new Set<() => void>();
+function statsSubscribe(cb: () => void) {
+  statListeners.add(cb);
+  return () => statListeners.delete(cb);
+}
+function statsNotify() {
+  for (const cb of statListeners) cb();
+}
+function readVisibleStats(): SectionStatKey[] {
+  try {
+    const raw = localStorage.getItem(SECTION_STATS_KEY);
+    if (!raw) return SECTION_STAT_DEFAULTS;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return SECTION_STAT_DEFAULTS;
+    return (parsed as unknown[]).filter((k): k is SectionStatKey =>
+      typeof k === "string" && (SECTION_STAT_KEYS as readonly string[]).includes(k)
+    );
+  } catch {
+    return SECTION_STAT_DEFAULTS;
+  }
+}
+function writeVisibleStats(next: SectionStatKey[]) {
+  try {
+    localStorage.setItem(SECTION_STATS_KEY, JSON.stringify(next));
+  } catch {
+    // ignore quota / private-mode errors
+  }
+  statsNotify();
+}
+
+function compactNumber(n: number): string {
+  if (!isFinite(n) || n === 0) return "0";
+  if (n >= 1e9) return (n / 1e9).toFixed(1).replace(/\.0$/, "") + "B";
+  if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
+  if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "K";
+  return String(Math.round(n));
+}
+
+function computeSectionStat(
+  key: SectionStatKey,
+  vids: VideoExample[]
+): string {
+  if (vids.length === 0) return "—";
+  const sum = (k: "views" | "likes" | "comments" | "shares") =>
+    vids.reduce((s, v) => s + ((v as unknown as Record<string, number>)[k] ?? 0), 0);
+  const tv = sum("views");
+  const tl = sum("likes");
+  const tc = sum("comments");
+  const ts = sum("shares");
+  switch (key) {
+    case "videos":
+      return String(vids.length);
+    case "views":
+      return compactNumber(tv);
+    case "likes":
+      return compactNumber(tl);
+    case "comments":
+      return compactNumber(tc);
+    case "shares":
+      return compactNumber(ts);
+    case "engagementRate":
+      return tv > 0 ? (((tl + tc + ts) / tv) * 100).toFixed(2) + "%" : "—";
+    case "commentPct":
+      return tv > 0 ? ((tc / tv) * 100).toFixed(2) + "%" : "—";
+    case "likePct":
+      return tv > 0 ? ((tl / tv) * 100).toFixed(2) + "%" : "—";
+    case "avgViews":
+      return compactNumber(tv / vids.length);
+  }
+}
+
+function SectionStats({ videos }: { videos: VideoExample[] }) {
+  const visible = useSyncExternalStore(
+    statsSubscribe,
+    () => readVisibleStats(),
+    () => SECTION_STAT_DEFAULTS
+  );
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const visibleSet = new Set(visible);
+
+  const toggle = useCallback((k: SectionStatKey) => {
+    const cur = readVisibleStats();
+    const next = cur.includes(k)
+      ? cur.filter((x) => x !== k)
+      : [...cur, k];
+    writeVisibleStats(next);
+  }, []);
+
+  return (
+    <div className="mb-3">
+      <div className="flex flex-wrap gap-1.5 items-stretch">
+        {visible.map((k) => (
+          <div
+            key={k}
+            className="border-2 border-line bg-paper px-2 py-1 rounded-sm min-w-[64px]"
+          >
+            <div className="text-sm font-black leading-none">
+              {computeSectionStat(k, videos)}
+            </div>
+            <div className="text-[9px] uppercase tracking-widest font-bold text-muted mt-1 leading-none">
+              {SECTION_STAT_LABELS[k]}
+            </div>
+          </div>
+        ))}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setPickerOpen((o) => !o)}
+            title="Toggle which stats are shown"
+            className="h-full border-2 border-line bg-background px-2 py-1 rounded-sm font-black nb-press text-xs"
+          >
+            ⚙
+          </button>
+          {pickerOpen && (
+            <div className="absolute right-0 top-full mt-1 z-10 border-2 border-line bg-background rounded-md nb-shadow-sm min-w-[200px]">
+              <div className="px-3 py-2 text-[9px] uppercase tracking-[0.2em] font-bold text-muted border-b-2 border-line">
+                Show stats
+              </div>
+              {SECTION_STAT_KEYS.map((k) => (
+                <label
+                  key={k}
+                  className="flex items-center gap-2 px-3 py-1.5 text-xs font-bold hover:bg-paper cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={visibleSet.has(k)}
+                    onChange={() => toggle(k)}
+                  />
+                  <span>{SECTION_STAT_LABELS[k]}</span>
+                </label>
+              ))}
+              <div className="px-3 py-1.5 border-t-2 border-line">
+                <button
+                  type="button"
+                  onClick={() => writeVisibleStats(SECTION_STAT_DEFAULTS)}
+                  className="w-full text-[10px] uppercase tracking-widest font-bold text-muted hover:text-ink"
+                >
+                  Reset to defaults
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function BriefEditor({ briefSlug }: { briefSlug: string }) {
   const [brief, setBrief] = useState<BriefRecord | null>(null);
@@ -1065,6 +1252,8 @@ function FormatSection({
           {copyMsg}
         </p>
       )}
+
+      <SectionStats videos={pinnedVideos} />
 
       <div className="space-y-2 mb-4">
         <label className="block">
