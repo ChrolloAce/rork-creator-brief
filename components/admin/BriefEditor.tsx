@@ -858,6 +858,21 @@ async function resizeImage(file: File): Promise<string> {
   return canvas.toDataURL(mime, quality);
 }
 
+// Upload a data URL to the image_blob table, return a stable URL. Keeps
+// the curation JSON small (~50 KB instead of 10+ MB of inline base64).
+async function uploadDataUrl(dataUrl: string): Promise<string> {
+  const res = await fetch("/api/uploads", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ dataUrl }),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || !j.url) {
+    throw new Error(j.error ?? `upload failed: HTTP ${res.status}`);
+  }
+  return j.url as string;
+}
+
 type RowItem = { text: string; image?: string; hidden?: boolean };
 
 function EyeIcon({ off }: { off?: boolean }) {
@@ -898,7 +913,8 @@ function ItemImagePicker({
           if (!f) return;
           setBusy(true);
           try {
-            const url = await resizeImage(f);
+            const dataUrl = await resizeImage(f);
+            const url = await uploadDataUrl(dataUrl);
             onChange(url);
           } catch (err) {
             alert((err as Error).message);

@@ -44,8 +44,17 @@ export function LogoUpload({
     setErr(null);
     setBusy(true);
     try {
-      const url = await fileToResizedDataUrl(file);
-      onChange(url);
+      const dataUrl = await fileToResizedDataUrl(file);
+      const res = await fetch("/api/uploads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataUrl }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j.url) {
+        throw new Error(j.error ?? `upload failed: HTTP ${res.status}`);
+      }
+      onChange(j.url as string);
     } catch (e) {
       setErr((e as Error).message);
     } finally {

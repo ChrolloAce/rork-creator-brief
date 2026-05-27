@@ -238,6 +238,14 @@ async function runSchema() {
     )
   `;
   await sql`CREATE INDEX IF NOT EXISTS form_response_template_idx ON form_response (template_slug, created_at DESC)`;
+  await sql`
+    CREATE TABLE IF NOT EXISTS image_blob (
+      id TEXT PRIMARY KEY,
+      mime TEXT NOT NULL,
+      bytes BYTEA NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `;
   // Seed Rork brief if none exists
   const existing = await sql`SELECT slug FROM brief`;
   if (existing.length === 0) {
@@ -810,6 +818,74 @@ export async function deleteFormResponse(id: string): Promise<void> {
   await ensureSchema();
   const sql = getSql();
   await sql`DELETE FROM form_response WHERE id = ${id}`;
+}
+
+// One-shot migration: walk a curation, extract any inline `data:` image
+// URLs in formatOverrides, upload them to image_blob, replace with stable
+// /api/uploads/{id} URLs. Returns the (possibly identical) curation and a
+// count of images migrated. Idempotent — clean curations are a no-op.
+export async function migrateInlineImagesInCuration(
+  curation: CurationData
+): Promise<{ curation: CurationData; migrated: number }> {
+  const overrides = curation.formatOverrides;
+  if (!overrides) return { curation, migrated: 0 };
+  let migrated = 0;
+  const nextOverrides: Record<string, FormatOverride> = {};
+  for (const [slug, ov] of Object.entries(overrides)) {
+    const cleanedOv: FormatOverride = { ...ov };
+    for (const field of ["structure", "tips", "bestFor"] as const) {
+      const items = ov[field];
+      if (!Array.isArray(items)) continue;
+      const newItems: FormatOverrideItem[] = [];
+      for (const item of items) {
+        if (item.image && item.image.startsWith("data:")) {
+          const m = item.image.match(/^data:([\w./+-]+);base64,(.+)$/);
+          if (m) {
+            const bytes = Buffer.from(m[2], "base64");
+            const { id } = await createImage(m[1], bytes);
+            migrated++;
+            newItems.push({ ...item, image: `/api/uploads/${id}` });
+            continue;
+          }
+        }
+        newItems.push(item);
+      }
+      cleanedOv[field] = newItems;
+    }
+    nextOverrides[slug] = cleanedOv;
+  }
+  return {
+    curation: { ...curation, formatOverrides: nextOverrides },
+    migrated,
+  };
+}
+
+// ---------- Image blob storage ----------
+// Stores images out-of-band so the curation JSON stays small. Inline
+// base64 data URLs in curation/brief documents balloon the JSONB row to
+// many MB, which makes every save/load round-trip slow.
+
+export async function createImage(
+  mime: string,
+  bytes: Buffer
+): Promise<{ id: string }> {
+  await ensureSchema();
+  const sql = getSql();
+  const id = `img_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+  await sql`INSERT INTO image_blob (id, mime, bytes) VALUES (${id}, ${mime}, ${bytes})`;
+  return { id };
+}
+
+export async function getImage(
+  id: string
+): Promise<{ mime: string; bytes: Buffer } | null> {
+  await ensureSchema();
+  const sql = getSql();
+  const rows = await sql<
+    { mime: string; bytes: Buffer }[]
+  >`SELECT mime, bytes FROM image_blob WHERE id = ${id}`;
+  if (rows.length === 0) return null;
+  return { mime: rows[0].mime, bytes: rows[0].bytes };
 }
 
 async function readSeedFromFile(): Promise<CurationData> {

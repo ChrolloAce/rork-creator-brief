@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import {
   DEFAULT_BRIEF_SLUG,
   getCuration,
+  migrateInlineImagesInCuration,
   setCuration,
   type CurationData,
 } from "@/lib/db";
@@ -19,10 +20,17 @@ function briefFromUrl(url: string): string {
 export async function GET(req: Request) {
   try {
     const briefSlug = briefFromUrl(req.url);
-    const [curation, preview] = await Promise.all([
-      getCuration(briefSlug),
-      getAdminPreview(briefSlug),
-    ]);
+    let curation = await getCuration(briefSlug);
+    // Migrate any legacy inline base64 images out of the curation JSON the
+    // first time an admin loads the brief after this fix shipped. Idempotent
+    // — clean curations skip the write.
+    const { curation: cleaned, migrated } =
+      await migrateInlineImagesInCuration(curation);
+    if (migrated > 0) {
+      await setCuration(cleaned, briefSlug);
+      curation = cleaned;
+    }
+    const preview = await getAdminPreview(briefSlug);
     return NextResponse.json({ ok: true, curation, preview, briefSlug });
   } catch (e) {
     return NextResponse.json(
