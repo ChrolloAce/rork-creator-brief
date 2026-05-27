@@ -236,21 +236,27 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
 
   async function persist(next: Curation) {
     setSaving(true);
-    const res = await fetch(
-      `/api/curation?brief=${encodeURIComponent(briefSlug)}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ curation: next }),
+    try {
+      const res = await fetch(
+        `/api/curation?brief=${encodeURIComponent(briefSlug)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ curation: next }),
+        }
+      );
+      const j = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setSaveMsg(`Saved ✓  ${new Date(j.savedAt).toLocaleTimeString()}`);
+        setTimeout(() => setSaveMsg(null), 2500);
+      } else {
+        setSaveMsg(`SAVE FAILED: ${j.error ?? `HTTP ${res.status}`}`);
+        // Don't auto-dismiss errors — user needs to see them.
       }
-    );
-    const j = await res.json();
-    setSaving(false);
-    if (res.ok) {
-      setSaveMsg(`Saved ✓  ${new Date(j.savedAt).toLocaleTimeString()}`);
-      setTimeout(() => setSaveMsg(null), 2500);
-    } else {
-      setSaveMsg(`ERR: ${j.error ?? res.status}`);
+    } catch (e) {
+      setSaveMsg(`SAVE FAILED: ${(e as Error).message}`);
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -445,10 +451,15 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
           </a>
           <button
             onClick={onSaveAll}
-            disabled={saving}
-            className="border-2 border-line bg-ink text-background font-black uppercase tracking-widest px-3 py-1.5 rounded-md nb-press disabled:opacity-40"
+            className="border-2 border-line bg-ink text-background font-black uppercase tracking-widest px-3 py-1.5 rounded-md nb-press inline-flex items-center gap-1.5"
           >
-            {saving ? "…" : "Save"}
+            Save
+            {saving && (
+              <span
+                aria-label="Saving"
+                className="inline-block w-2 h-2 rounded-full bg-background animate-pulse"
+              />
+            )}
           </button>
           <button
             onClick={onLogout}
@@ -459,9 +470,23 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
         </div>
         {saveMsg && (
           <div className="max-w-5xl mx-auto px-4 pb-3">
-            <p className="text-xs font-bold border-2 border-line bg-paper px-2 py-1.5 rounded-sm">
-              {saveMsg}
-            </p>
+            <div
+              className={`flex items-center justify-between gap-2 text-xs font-bold border-2 border-line px-2 py-1.5 rounded-sm ${
+                saveMsg.startsWith("SAVE FAILED")
+                  ? "bg-[#fee2e2] text-[#7f1d1d]"
+                  : "bg-paper"
+              }`}
+            >
+              <span>{saveMsg}</span>
+              <button
+                type="button"
+                onClick={() => setSaveMsg(null)}
+                aria-label="Dismiss"
+                className="font-black px-1.5"
+              >
+                ×
+              </button>
+            </div>
           </div>
         )}
       </header>
@@ -547,6 +572,21 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
             storageKey={`brief-editor:${briefSlug}:format:${slug}`}
             title={effectiveTitle}
             meta={`${isHidden ? "HIDDEN · " : ""}${isClone ? "COPY · " : ""}${pinCount} ${pinCount === 1 ? "video" : "videos"}`}
+            action={
+              <button
+                type="button"
+                onClick={() => toggleFormatHidden(slug)}
+                aria-label={isHidden ? "Show on public brief" : "Hide from public brief"}
+                title={
+                  isHidden
+                    ? "Hidden from public brief — click to publish"
+                    : "Hide from public brief (still editable here)"
+                }
+                className={`w-8 h-8 border-2 border-line rounded-sm font-black nb-press flex items-center justify-center shrink-0 ${isHidden ? "bg-paper text-muted" : "bg-background"}`}
+              >
+                <EyeIcon off={isHidden} />
+              </button>
+            }
           >
           <FormatSection
             slug={slug}
@@ -586,8 +626,6 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
             canMoveDown={idx < effectiveOrder.length - 1}
             onMoveUp={() => moveFormat(slug, -1)}
             onMoveDown={() => moveFormat(slug, 1)}
-            isHidden={isHidden}
-            onHide={() => toggleFormatHidden(slug)}
             onPickVideo={(v) => {
               if (!cur || !v.dbId) return;
               const existingPins = cur.formatPins[slug] ?? [];
@@ -1243,8 +1281,6 @@ function FormatSection({
   canMoveDown,
   onMoveUp,
   onMoveDown,
-  isHidden,
-  onHide,
   onChangePins,
   onPickVideo,
   onChangeOverride,
@@ -1276,8 +1312,6 @@ function FormatSection({
   canMoveDown: boolean;
   onMoveUp: () => void;
   onMoveDown: () => void;
-  isHidden: boolean;
-  onHide: () => void;
   onChangePins: (next: string[]) => void;
   onPickVideo: (v: VideoExample) => void;
   onChangeOverride: (next: FormatOverride) => void;
@@ -1422,19 +1456,6 @@ function FormatSection({
               </div>
             )}
           </div>
-          <button
-            type="button"
-            onClick={onHide}
-            aria-label={isHidden ? "Show on public brief" : "Hide from public brief"}
-            title={
-              isHidden
-                ? "Hidden — click to publish this format again"
-                : "Hide from public brief (still editable here)"
-            }
-            className={`w-8 h-8 border-2 border-line rounded-sm font-black nb-press flex items-center justify-center ${isHidden ? "bg-paper text-muted" : "bg-background"}`}
-          >
-            <EyeIcon off={isHidden} />
-          </button>
         </div>
       </div>
       {copyMsg && (

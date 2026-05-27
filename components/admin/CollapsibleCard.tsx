@@ -28,12 +28,14 @@ export function CollapsibleCard({
   storageKey,
   title,
   meta,
+  action,
   defaultOpen = false,
   children,
 }: {
   storageKey: string;
   title: string;
   meta?: ReactNode;
+  action?: ReactNode;
   defaultOpen?: boolean;
   children: ReactNode;
 }) {
@@ -52,13 +54,13 @@ export function CollapsibleCard({
 
   return (
     <section className="border-2 border-line bg-background rounded-md nb-shadow-sm overflow-hidden">
-      <button
-        type="button"
-        onClick={toggle}
-        aria-expanded={open}
-        className="w-full flex items-center justify-between gap-3 px-4 sm:px-5 py-3 text-left hover:bg-paper"
-      >
-        <div className="flex items-baseline gap-2 flex-wrap min-w-0">
+      <div className="w-full flex items-center justify-between gap-3 px-4 sm:px-5 py-3 hover:bg-paper">
+        <button
+          type="button"
+          onClick={toggle}
+          aria-expanded={open}
+          className="flex-1 flex items-baseline gap-2 flex-wrap min-w-0 text-left"
+        >
           <span className="text-sm font-black uppercase tracking-widest truncate">
             {title}
           </span>
@@ -67,16 +69,21 @@ export function CollapsibleCard({
               {meta}
             </span>
           )}
-        </div>
-        <span
-          aria-hidden
+        </button>
+        {action && (
+          <div onClick={(e) => e.stopPropagation()}>{action}</div>
+        )}
+        <button
+          type="button"
+          onClick={toggle}
+          aria-label={open ? "Collapse" : "Expand"}
           className={`font-black text-base leading-none transition-transform ${
             open ? "rotate-180" : ""
           }`}
         >
           ▾
-        </span>
-      </button>
+        </button>
+      </div>
       {open && (
         <div className="border-t-2 border-line p-4 sm:p-5">{children}</div>
       )}
