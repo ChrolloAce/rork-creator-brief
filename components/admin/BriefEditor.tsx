@@ -165,10 +165,13 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
     Array<{ slug: string; name: string }>
   >([]);
 
-  // Track the videoMetadata object reference we last persisted, so we can
-  // omit it from subsequent save payloads when nothing changed (it can be
-  // multi-MB and exceeds proxy body limits otherwise).
+  // Track object references for heavy fields we last persisted, so we can
+  // omit them from subsequent save payloads when nothing changed.
+  // videoMetadata caches pinned-video data; formatOverrides holds inline
+  // base64 image uploads — together they can be 10+ MB and exceed proxy
+  // body limits otherwise.
   const lastSentMetaRef = useRef<unknown>(undefined);
+  const lastSentOverridesRef = useRef<unknown>(undefined);
 
   async function load() {
     const [r1, r2, r3] = await Promise.all([
@@ -186,6 +189,7 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
     if (j1.ok) {
       setCur(j1.curation);
       lastSentMetaRef.current = j1.curation?.videoMetadata;
+      lastSentOverridesRef.current = j1.curation?.formatOverrides;
       setPreview(j1.preview ?? {});
     } else {
       setLoadError(j1.error ?? "failed to load");
@@ -243,14 +247,19 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
   async function persist(next: Curation) {
     setSaving(true);
     try {
-      // Omit videoMetadata when the reference hasn't changed since load —
-      // it's often multi-MB (cached video data) and would otherwise be
-      // round-tripped on every toggle/edit, hitting proxy body limits.
+      // Omit heavy fields when their reference hasn't changed since load.
+      // videoMetadata + formatOverrides (inline base64 images) can be 10+
+      // MB combined and would otherwise be round-tripped on every save.
       const payload: Partial<Curation> = { ...next };
       if (next.videoMetadata === lastSentMetaRef.current) {
         delete payload.videoMetadata;
       } else {
         lastSentMetaRef.current = next.videoMetadata;
+      }
+      if (next.formatOverrides === lastSentOverridesRef.current) {
+        delete payload.formatOverrides;
+      } else {
+        lastSentOverridesRef.current = next.formatOverrides;
       }
       const res = await fetch(
         `/api/curation?brief=${encodeURIComponent(briefSlug)}`,

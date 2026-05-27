@@ -54,12 +54,18 @@ export async function POST(req: Request) {
     );
   }
   try {
-    // Heavy `videoMetadata` (often multi-MB) is omitted by the admin client
-    // on routine saves to stay under proxy body limits — preserve whatever
-    // is already in the DB when it isn't sent.
-    if (next.videoMetadata === undefined) {
+    // Heavy fields (videoMetadata cache, formatOverrides with inline
+    // base64 images) are omitted by the admin client on routine saves to
+    // stay under proxy body limits — preserve whatever's already in the
+    // DB when they aren't sent.
+    if (next.videoMetadata === undefined || next.formatOverrides === undefined) {
       const existing = await getCuration(briefSlug);
-      if (existing.videoMetadata) next.videoMetadata = existing.videoMetadata;
+      if (next.videoMetadata === undefined && existing.videoMetadata) {
+        next.videoMetadata = existing.videoMetadata;
+      }
+      if (next.formatOverrides === undefined && existing.formatOverrides) {
+        next.formatOverrides = existing.formatOverrides;
+      }
     }
     await setCuration(next, briefSlug);
     revalidatePath(`/b/${briefSlug}`);
