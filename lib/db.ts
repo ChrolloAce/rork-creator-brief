@@ -24,7 +24,7 @@ function getSql() {
   return globalThis.__sql;
 }
 
-export type FormatOverrideItem = { text: string; image?: string };
+export type FormatOverrideItem = { text: string; image?: string; hidden?: boolean };
 export type FormatOverride = {
   title?: string;
   tagline?: string;
@@ -128,7 +128,7 @@ export type BriefOverview = {
   ctaUrl?: string;
 };
 
-export type BriefHook = { text: string; note?: string };
+export type BriefHook = { text: string; note?: string; hidden?: boolean };
 export type BriefHookCategory = {
   slug: string;
   title: string;

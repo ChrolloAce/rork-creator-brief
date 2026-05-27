@@ -20,6 +20,7 @@ export async function middleware(req: NextRequest) {
     pathname.startsWith("/api/briefs/") ||
     pathname === "/api/vt-projects" ||
     pathname === "/api/vt-search" ||
+    pathname.startsWith("/api/ai/") ||
     (isFormTemplatesApi && !isPublicSubmit);
   if (!isAdminPage && !isAdminApi) return NextResponse.next();
 
@@ -51,6 +52,7 @@ export const config = {
     "/api/briefs/:path*",
     "/api/vt-projects",
     "/api/vt-search",
+    "/api/ai/:path*",
     "/api/form-templates",
     "/api/form-templates/:path*",
   ],

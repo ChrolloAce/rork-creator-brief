@@ -28,9 +28,9 @@ type FormatOverride = {
   tagline?: string;
   description?: string;
   script?: string;
-  structure?: { text: string; image?: string }[];
-  tips?: { text: string; image?: string }[];
-  bestFor?: { text: string; image?: string }[];
+  structure?: { text: string; image?: string; hidden?: boolean }[];
+  tips?: { text: string; image?: string; hidden?: boolean }[];
+  bestFor?: { text: string; image?: string; hidden?: boolean }[];
   hiddenSections?: string[];
 };
 
@@ -523,6 +523,7 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
           >
           <FormatSection
             slug={slug}
+            briefName={brief.name}
             availableBriefs={allBriefs.filter((b) => b.slug !== briefSlug)}
             onCopyToBrief={(targetSlug) =>
               copySectionToBrief(targetSlug, slug)
@@ -799,7 +800,23 @@ async function resizeImage(file: File): Promise<string> {
   return canvas.toDataURL(mime, quality);
 }
 
-type RowItem = { text: string; image?: string };
+type RowItem = { text: string; image?: string; hidden?: boolean };
+
+function EyeIcon({ off }: { off?: boolean }) {
+  return off ? (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M9.88 9.88a3 3 0 1 0 4.24 4.24" />
+      <path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68" />
+      <path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61" />
+      <line x1="2" y1="2" x2="22" y2="22" />
+    </svg>
+  ) : (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
 
 function ItemImagePicker({
   image,
@@ -916,7 +933,10 @@ function ListEditor({
       </div>
       <div className="space-y-2">
         {effective.map((row, i) => (
-          <div key={i} className="flex gap-2 items-start">
+          <div
+            key={i}
+            className={`flex gap-2 items-start ${row.hidden ? "opacity-50" : ""}`}
+          >
             {numbered && (
               <span className="shrink-0 w-7 h-7 border-2 border-line bg-paper flex items-center justify-center font-mono text-xs font-bold rounded-sm mt-0.5">
                 {String(i + 1).padStart(2, "0")}
@@ -942,6 +962,19 @@ function ListEditor({
               className="flex-1 border-2 border-line rounded-md px-2 py-1.5 text-sm focus:outline-none focus:border-accent bg-background leading-relaxed"
             />
             <div className="flex flex-col gap-1">
+              <button
+                type="button"
+                aria-label={row.hidden ? "Show on public page" : "Hide from public page"}
+                title={row.hidden ? "Hidden — click to show" : "Visible — click to hide"}
+                onClick={() => {
+                  const next = [...effective];
+                  next[i] = { ...next[i], hidden: !next[i].hidden };
+                  update(next);
+                }}
+                className={`w-7 h-7 border-2 border-line rounded-sm font-black nb-press flex items-center justify-center ${row.hidden ? "bg-paper text-muted" : "bg-background"}`}
+              >
+                <EyeIcon off={row.hidden} />
+              </button>
               <button
                 type="button"
                 aria-label="Move up"
@@ -994,8 +1027,201 @@ function ListEditor({
   );
 }
 
+function AskClaude({
+  briefName,
+  formatTitle,
+  formatTagline,
+  formatDescription,
+  structure,
+  tips,
+  hooks,
+  currentScript,
+  onApply,
+}: {
+  briefName: string;
+  formatTitle: string;
+  formatTagline: string;
+  formatDescription: string;
+  structure: string[];
+  tips: string[];
+  hooks: string[];
+  currentScript: string;
+  onApply: (text: string, mode: "replace" | "append") => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [prompt, setPrompt] = useState("");
+  const [streaming, setStreaming] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+
+  async function generate() {
+    if (!prompt.trim() || streaming) return;
+    setError(null);
+    setDraft("");
+    setStreaming(true);
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    try {
+      const res = await fetch("/api/ai/script", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: ctrl.signal,
+        body: JSON.stringify({
+          briefName,
+          formatTitle,
+          formatTagline,
+          formatDescription,
+          structure,
+          tips,
+          hooks,
+          currentScript,
+          userPrompt: prompt,
+        }),
+      });
+      if (!res.ok || !res.body) {
+        const msg = await res.text().catch(() => `HTTP ${res.status}`);
+        setError(msg || `HTTP ${res.status}`);
+        setStreaming(false);
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        setDraft((d) => d + chunk);
+      }
+    } catch (e) {
+      if ((e as Error).name !== "AbortError") {
+        setError((e as Error).message);
+      }
+    } finally {
+      setStreaming(false);
+      abortRef.current = null;
+    }
+  }
+
+  function cancel() {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setStreaming(false);
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="mt-2 border-2 border-line bg-accent text-accent-ink px-3 py-1.5 rounded-md nb-press text-xs font-black uppercase tracking-widest"
+      >
+        ✦ Ask Claude
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-3 border-2 border-line bg-paper rounded-md p-3 nb-shadow-sm">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+          ✦ Ask Claude · script writer
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            cancel();
+            setOpen(false);
+            setDraft("");
+            setError(null);
+          }}
+          className="text-xs font-bold text-muted hover:text-ink"
+        >
+          Close
+        </button>
+      </div>
+      <textarea
+        value={prompt}
+        onChange={(e) => setPrompt(e.target.value)}
+        rows={2}
+        placeholder="e.g. Write a 30s script highlighting the no-code angle, lead with a curiosity hook"
+        className="w-full border-2 border-line rounded-md px-2 py-1.5 text-sm focus:outline-none focus:border-accent bg-background"
+        onKeyDown={(e) => {
+          if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+            e.preventDefault();
+            void generate();
+          }
+        }}
+      />
+      <div className="flex items-center gap-2 mt-2 flex-wrap">
+        {streaming ? (
+          <button
+            type="button"
+            onClick={cancel}
+            className="border-2 border-line bg-background px-3 py-1 rounded-md nb-press text-xs font-black uppercase tracking-widest"
+          >
+            Stop
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={generate}
+            disabled={!prompt.trim()}
+            className="border-2 border-line bg-ink text-background px-3 py-1 rounded-md nb-press text-xs font-black uppercase tracking-widest disabled:opacity-40"
+          >
+            Generate ⌘↵
+          </button>
+        )}
+        {draft && !streaming && (
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                onApply(draft, "replace");
+                setDraft("");
+              }}
+              className="border-2 border-line bg-accent text-accent-ink px-3 py-1 rounded-md nb-press text-xs font-black uppercase tracking-widest"
+            >
+              Replace script
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onApply(draft, "append");
+                setDraft("");
+              }}
+              className="border-2 border-line bg-background px-3 py-1 rounded-md nb-press text-xs font-black uppercase tracking-widest"
+            >
+              Append
+            </button>
+            <button
+              type="button"
+              onClick={() => setDraft("")}
+              className="border-2 border-line bg-background px-3 py-1 rounded-md nb-press text-xs font-black uppercase tracking-widest"
+            >
+              Discard
+            </button>
+          </>
+        )}
+      </div>
+      {error && (
+        <p className="mt-2 text-xs font-bold text-[#b91c1c] border-2 border-line bg-background px-2 py-1 rounded-sm whitespace-pre-wrap">
+          {error}
+        </p>
+      )}
+      {(draft || streaming) && (
+        <pre className="mt-2 text-xs font-mono whitespace-pre-wrap leading-relaxed border-2 border-line bg-background rounded-md p-2 max-h-[260px] overflow-auto">
+          {draft}
+          {streaming && <span className="opacity-50">▍</span>}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 function FormatSection({
   slug,
+  briefName,
   availableBriefs,
   onCopyToBrief,
   onCloneInBrief,
@@ -1027,6 +1253,7 @@ function FormatSection({
   onChangeOverride,
 }: {
   slug: string;
+  briefName: string;
   availableBriefs: Array<{ slug: string; name: string }>;
   onCopyToBrief: (targetSlug: string) => Promise<{ ok: boolean; error?: string }>;
   onCloneInBrief: () => Promise<{ ok: boolean; error?: string; newSlug?: string }>;
@@ -1409,6 +1636,41 @@ function FormatSection({
             <code className="font-mono">00:03</code>. Renders as a styled
             script block on the public format page.
           </p>
+          <AskClaude
+            briefName={briefName}
+            formatTitle={effectiveTitle}
+            formatTagline={override.tagline ?? defaultTagline}
+            formatDescription={override.description ?? defaultDescription}
+            structure={(override.structure ?? defaultStructure.map((t) => ({ text: t })))
+              .filter((i) => !("hidden" in i ? i.hidden : false))
+              .map((i) => (typeof i === "string" ? i : i.text))
+              .filter(Boolean)}
+            tips={(override.tips ?? defaultTips.map((t) => ({ text: t })))
+              .filter((i) => !("hidden" in i ? i.hidden : false))
+              .map((i) => (typeof i === "string" ? i : i.text))
+              .filter(Boolean)}
+            hooks={(() => {
+              const cats = hookCategories ?? [];
+              const linked = linkedHookSlugs
+                .map((s) => cats.find((c) => c.slug === s))
+                .filter((c): c is BriefHookCategory => !!c);
+              const fromBrief = linked.flatMap((c) =>
+                c.hooks.filter((h) => !h.hidden).map((h) => h.text)
+              );
+              if (fromBrief.length > 0) return fromBrief.filter(Boolean);
+              return defaultHookCategories
+                .flatMap((c) => c.hooks.map((h) => h.text))
+                .filter(Boolean);
+            })()}
+            currentScript={override.script ?? ""}
+            onApply={(text, mode) => {
+              const next =
+                mode === "replace"
+                  ? text
+                  : `${(override.script ?? "").trim()}\n${text}`.trim();
+              onChangeOverride({ ...override, script: next || undefined });
+            }}
+          />
         </div>
         <div className={isSectionHidden("hooks") ? "opacity-60" : undefined}>
           <div className="flex items-center justify-end gap-2 mb-2">
@@ -1478,6 +1740,17 @@ function FormatHooksInline({
     );
   }
 
+  function toggleHookHidden(catSlug: string, hookIdx: number) {
+    onChange(
+      cats.map((c) => {
+        if (c.slug !== catSlug) return c;
+        const hooks = [...c.hooks];
+        hooks[hookIdx] = { ...hooks[hookIdx], hidden: !hooks[hookIdx].hidden };
+        return { ...c, hooks };
+      })
+    );
+  }
+
   function addHook(catSlug: string) {
     onChange(
       cats.map((c) =>
@@ -1514,7 +1787,7 @@ function FormatHooksInline({
           <div className="text-sm font-black mb-2">{cat.title}</div>
           <ul className="space-y-1">
             {cat.hooks.map((h, hi) => (
-              <li key={hi} className="flex gap-1.5">
+              <li key={hi} className={`flex gap-1.5 ${h.hidden ? "opacity-50" : ""}`}>
                 <span className="font-mono text-[10px] font-bold text-muted pt-2 w-6 text-right shrink-0">
                   {String(hi + 1).padStart(2, "0")}
                 </span>
@@ -1525,6 +1798,15 @@ function FormatHooksInline({
                   placeholder="Hook text…"
                   className="flex-1 border-2 border-line rounded-md px-2 py-1 text-sm focus:outline-none focus:border-accent bg-background"
                 />
+                <button
+                  type="button"
+                  onClick={() => toggleHookHidden(cat.slug, hi)}
+                  aria-label={h.hidden ? "Show on public page" : "Hide from public page"}
+                  title={h.hidden ? "Hidden — click to show" : "Visible — click to hide"}
+                  className={`border-2 border-line w-8 rounded-md nb-press font-black flex items-center justify-center ${h.hidden ? "bg-paper text-muted" : "bg-background"}`}
+                >
+                  <EyeIcon off={h.hidden} />
+                </button>
                 <button
                   type="button"
                   onClick={() => removeHook(cat.slug, hi)}

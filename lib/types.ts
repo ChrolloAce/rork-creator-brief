@@ -20,12 +20,13 @@ export type VideoExample = {
 export type Hook = {
   text: string;
   note?: string;
+  hidden?: boolean;
 };
 
 // Rich list item used in editable format sections — gains an optional image.
 // Static defaults (lib/formats.ts) remain plain strings; the union below lets
 // either shape flow through without a code-wide migration.
-export type ListItem = { text: string; image?: string };
+export type ListItem = { text: string; image?: string; hidden?: boolean };
 export type FormatListItem = string | ListItem;
 
 // Sections of a format that can be hidden on the public page per brief.
