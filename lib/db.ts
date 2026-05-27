@@ -65,6 +65,10 @@ export type CurationData = {
   // and the sidebar's "Overview" entry is dropped. Use when a brief doesn't
   // have a meaningful overview to show.
   hideOverview?: boolean;
+  // Format slugs hidden from the public brief. Hidden formats remain in the
+  // admin editor (grayed out) so they can still be edited offline. Separate
+  // from `formatOrder`, which now controls ordering only.
+  hiddenFormats?: string[];
 };
 
 export type CachedVideo = {

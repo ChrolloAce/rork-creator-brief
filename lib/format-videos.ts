@@ -78,15 +78,28 @@ export async function getAllFormatListings(
 export async function getFormatsForRender(briefSlug?: string): Promise<Format[]> {
   const curation = await getCuration(briefSlug);
   const listings = await getAllFormatListings(briefSlug);
+  const allSlugs = [
+    ...formatsMeta.map((f) => f.slug),
+    ...Object.keys(curation.formatClones ?? {}),
+  ];
+  // Legacy: before hiddenFormats existed, hide was implemented by removing
+  // the slug from formatOrder. Preserve that for old briefs that haven't
+  // re-saved yet.
+  const legacyHidden =
+    curation.formatOrder && curation.formatOrder.length > 0
+      ? allSlugs.filter((s) => !curation.formatOrder!.includes(s))
+      : [];
+  const hiddenSet = new Set<string>([
+    ...(curation.hiddenFormats ?? []),
+    ...legacyHidden,
+  ]);
   const order =
     curation.formatOrder && curation.formatOrder.length > 0
-      ? curation.formatOrder
-      : [
-          ...formatsMeta.map((f) => f.slug),
-          ...Object.keys(curation.formatClones ?? {}),
-        ];
+      ? [...curation.formatOrder, ...allSlugs.filter((s) => !curation.formatOrder!.includes(s))]
+      : allSlugs;
   const out: Format[] = [];
   for (const slug of order) {
+    if (hiddenSet.has(slug)) continue;
     const meta = resolveBaseMeta(slug, curation);
     if (!meta) continue;
     const ov = curation.formatOverrides?.[slug] ?? {};

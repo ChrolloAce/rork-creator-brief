@@ -45,6 +45,7 @@ type Curation = {
   formatClones?: Record<string, string>;
   publicStats?: { enabled: boolean; visible?: string[] };
   hideOverview?: boolean;
+  hiddenFormats?: string[];
 };
 
 type Preview = Record<
@@ -361,12 +362,26 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
     for (const id of cur.formatPins[slug] ?? []) allInUse.add(id);
   }
 
-  // Effective ordering + which formats are hidden on this brief
-  const effectiveOrder: string[] =
+  // Order all formats (visible + hidden). formatOrder is order-only; hidden
+  // is tracked separately so hidden formats stay in the admin list and only
+  // disappear from the public brief.
+  const orderSource =
+    cur.formatOrder && cur.formatOrder.length > 0 ? cur.formatOrder : allSlugs;
+  const effectiveOrder: string[] = [
+    ...orderSource.filter((s) => allSlugs.includes(s)),
+    ...allSlugs.filter((s) => !orderSource.includes(s)),
+  ];
+  // Legacy: slugs missing from a non-empty formatOrder were hidden under the
+  // old "remove from order to hide" model. Treat them as hidden until the
+  // brief re-saves with the new schema.
+  const legacyHidden =
     cur.formatOrder && cur.formatOrder.length > 0
-      ? cur.formatOrder.filter((s) => allSlugs.includes(s))
-      : allSlugs;
-  const hiddenSlugs = allSlugs.filter((s) => !effectiveOrder.includes(s));
+      ? allSlugs.filter((s) => !cur.formatOrder!.includes(s))
+      : [];
+  const hiddenSet = new Set<string>([
+    ...(cur.hiddenFormats ?? []),
+    ...legacyHidden,
+  ]);
 
   function applyOrder(nextOrder: string[]) {
     if (!cur) return;
@@ -385,12 +400,23 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
     applyOrder(next);
   }
 
-  function hideFormat(slug: string) {
-    applyOrder(effectiveOrder.filter((s) => s !== slug));
-  }
-
-  function showFormat(slug: string) {
-    applyOrder([...effectiveOrder, slug]);
+  function toggleFormatHidden(slug: string) {
+    if (!cur) return;
+    const merged = new Set<string>([
+      ...(cur.hiddenFormats ?? []),
+      ...legacyHidden,
+    ]);
+    if (merged.has(slug)) merged.delete(slug);
+    else merged.add(slug);
+    // Migrate to the new schema: persist the merged hidden set + the full
+    // order, so legacyHidden becomes a no-op on subsequent reads.
+    const nextCur: Curation = {
+      ...cur,
+      hiddenFormats: [...merged],
+      formatOrder: effectiveOrder,
+    };
+    setCur(nextCur);
+    void persist(nextCur);
   }
 
   return (
@@ -514,12 +540,13 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
           const effectiveTitle = override.title ?? meta.title;
           const pinCount = (cur.formatPins[slug] ?? []).length;
           const isClone = !!cur.formatClones?.[slug];
+          const isHidden = hiddenSet.has(slug);
           return (
+          <div key={slug} className={isHidden ? "opacity-50" : undefined}>
           <CollapsibleCard
-            key={slug}
             storageKey={`brief-editor:${briefSlug}:format:${slug}`}
             title={effectiveTitle}
-            meta={`${isClone ? "COPY · " : ""}${pinCount} ${pinCount === 1 ? "video" : "videos"}`}
+            meta={`${isHidden ? "HIDDEN · " : ""}${isClone ? "COPY · " : ""}${pinCount} ${pinCount === 1 ? "video" : "videos"}`}
           >
           <FormatSection
             slug={slug}
@@ -559,7 +586,8 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
             canMoveDown={idx < effectiveOrder.length - 1}
             onMoveUp={() => moveFormat(slug, -1)}
             onMoveDown={() => moveFormat(slug, 1)}
-            onHide={() => hideFormat(slug)}
+            isHidden={isHidden}
+            onHide={() => toggleFormatHidden(slug)}
             onPickVideo={(v) => {
               if (!cur || !v.dbId) return;
               const existingPins = cur.formatPins[slug] ?? [];
@@ -629,41 +657,9 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
             }
           />
           </CollapsibleCard>
+          </div>
           );
         })}
-
-        {hiddenSlugs.length > 0 && (
-          <CollapsibleCard
-            storageKey={`brief-editor:${briefSlug}:hidden-formats`}
-            title="Hidden formats"
-            meta={`${hiddenSlugs.length} hidden`}
-          >
-            <p className="text-xs text-muted mb-3">
-              Not shown on this brief. Tap to bring a section back.
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {hiddenSlugs.map((slug) => {
-                const meta = metaFor(slug);
-                if (!meta) return null;
-                const overrideTitle = cur.formatOverrides?.[slug]?.title;
-                const isClone = !!cur.formatClones?.[slug];
-                return (
-                  <button
-                    key={slug}
-                    type="button"
-                    onClick={() => showFormat(slug)}
-                    className="border-2 border-line bg-background px-3 py-1.5 rounded-md nb-press text-xs font-bold"
-                  >
-                    + {overrideTitle || meta.title}
-                    {isClone && (
-                      <span className="ml-1 text-[9px] uppercase tracking-widest text-muted">copy</span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </CollapsibleCard>
-        )}
 
         <CollapsibleCard
           storageKey={`brief-editor:${briefSlug}:excluded`}
@@ -1247,6 +1243,7 @@ function FormatSection({
   canMoveDown,
   onMoveUp,
   onMoveDown,
+  isHidden,
   onHide,
   onChangePins,
   onPickVideo,
@@ -1279,6 +1276,7 @@ function FormatSection({
   canMoveDown: boolean;
   onMoveUp: () => void;
   onMoveDown: () => void;
+  isHidden: boolean;
   onHide: () => void;
   onChangePins: (next: string[]) => void;
   onPickVideo: (v: VideoExample) => void;
@@ -1427,11 +1425,15 @@ function FormatSection({
           <button
             type="button"
             onClick={onHide}
-            aria-label="Hide this format from the public brief"
-            title="Hide this whole format from the public brief (kept here for editing)"
-            className="w-8 h-8 border-2 border-line bg-background rounded-sm font-black nb-press flex items-center justify-center"
+            aria-label={isHidden ? "Show on public brief" : "Hide from public brief"}
+            title={
+              isHidden
+                ? "Hidden — click to publish this format again"
+                : "Hide from public brief (still editable here)"
+            }
+            className={`w-8 h-8 border-2 border-line rounded-sm font-black nb-press flex items-center justify-center ${isHidden ? "bg-paper text-muted" : "bg-background"}`}
           >
-            <EyeIcon />
+            <EyeIcon off={isHidden} />
           </button>
         </div>
       </div>
