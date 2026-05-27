@@ -1426,14 +1426,12 @@ function FormatSection({
           </div>
           <button
             type="button"
-            onClick={() => {
-              if (confirm(`Hide "${effectiveTitle}" from this brief?`)) onHide();
-            }}
-            aria-label="Hide section"
-            title="Hide section"
-            className="w-8 h-8 border-2 border-line bg-background rounded-sm font-black nb-press"
+            onClick={onHide}
+            aria-label="Hide this format from the public brief"
+            title="Hide this whole format from the public brief (kept here for editing)"
+            className="w-8 h-8 border-2 border-line bg-background rounded-sm font-black nb-press flex items-center justify-center"
           >
-            ×
+            <EyeIcon />
           </button>
         </div>
       </div>
