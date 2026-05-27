@@ -54,6 +54,13 @@ export async function POST(req: Request) {
     );
   }
   try {
+    // Heavy `videoMetadata` (often multi-MB) is omitted by the admin client
+    // on routine saves to stay under proxy body limits — preserve whatever
+    // is already in the DB when it isn't sent.
+    if (next.videoMetadata === undefined) {
+      const existing = await getCuration(briefSlug);
+      if (existing.videoMetadata) next.videoMetadata = existing.videoMetadata;
+    }
     await setCuration(next, briefSlug);
     revalidatePath(`/b/${briefSlug}`);
     for (const f of formatsMeta)

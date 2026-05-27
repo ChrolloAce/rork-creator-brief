@@ -165,6 +165,11 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
     Array<{ slug: string; name: string }>
   >([]);
 
+  // Track the videoMetadata object reference we last persisted, so we can
+  // omit it from subsequent save payloads when nothing changed (it can be
+  // multi-MB and exceeds proxy body limits otherwise).
+  const lastSentMetaRef = useRef<unknown>(undefined);
+
   async function load() {
     const [r1, r2, r3] = await Promise.all([
       fetch(`/api/curation?brief=${encodeURIComponent(briefSlug)}`, {
@@ -180,6 +185,7 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
     const j3 = await r3.json();
     if (j1.ok) {
       setCur(j1.curation);
+      lastSentMetaRef.current = j1.curation?.videoMetadata;
       setPreview(j1.preview ?? {});
     } else {
       setLoadError(j1.error ?? "failed to load");
@@ -237,12 +243,21 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
   async function persist(next: Curation) {
     setSaving(true);
     try {
+      // Omit videoMetadata when the reference hasn't changed since load —
+      // it's often multi-MB (cached video data) and would otherwise be
+      // round-tripped on every toggle/edit, hitting proxy body limits.
+      const payload: Partial<Curation> = { ...next };
+      if (next.videoMetadata === lastSentMetaRef.current) {
+        delete payload.videoMetadata;
+      } else {
+        lastSentMetaRef.current = next.videoMetadata;
+      }
       const res = await fetch(
         `/api/curation?brief=${encodeURIComponent(briefSlug)}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ curation: next }),
+          body: JSON.stringify({ curation: payload }),
         }
       );
       const j = await res.json().catch(() => ({}));
