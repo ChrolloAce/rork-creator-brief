@@ -38,6 +38,20 @@ export type FormatSectionKey =
   | "examples"
   | "hooks";
 
+// Downloadable per-format reference asset — videos showing overlay style,
+// reference images, b-roll, etc. Stored out-of-band in image_blob; the
+// `url` field points to /api/uploads/{id}.
+export type FormatAsset = {
+  url: string;
+  mime: string;
+  filename?: string;
+  label?: string;
+  // "overlay" assets render inline as a player on the public page so
+  // creators can see the overlay style in context. Plain assets just
+  // get a download button.
+  kind?: "overlay" | "asset";
+};
+
 export type Format = {
   slug: string;
   title: string;
@@ -51,6 +65,7 @@ export type Format = {
   hookCategorySlugs: string[];
   examples: VideoExample[];
   hiddenSections?: FormatSectionKey[];
+  assets?: FormatAsset[];
 };
 
 export type HookCategory = {

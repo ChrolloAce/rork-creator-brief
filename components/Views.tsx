@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type {
   Format,
+  FormatAsset,
   FormatListItem,
   FormatSectionKey,
   Hook,
@@ -617,7 +618,106 @@ export function FormatView({
           </div>
         </section>
       )}
+
+      {(format.assets?.length ?? 0) > 0 && (
+        <AssetsBlock assets={format.assets!} />
+      )}
     </article>
+  );
+}
+
+function AssetsBlock({ assets }: { assets: FormatAsset[] }) {
+  const overlay = assets.find((a) => a.kind === "overlay");
+  const rest = assets.filter((a) => a !== overlay);
+  return (
+    <section className="space-y-5">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+          Assets to use
+        </div>
+        <Pill tone="accent">{assets.length} {assets.length === 1 ? "file" : "files"}</Pill>
+      </div>
+
+      {overlay && (
+        <div className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 sm:p-5">
+          <div className="flex items-baseline justify-between gap-2 flex-wrap mb-3">
+            <h3 className="text-base font-black text-ink">
+              ▶ Overlay example
+            </h3>
+            <a
+              href={`${overlay.url}?download=1`}
+              className="border-2 border-line bg-background px-2 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+            >
+              Download
+            </a>
+          </div>
+          {overlay.label && (
+            <p className="text-sm text-ink-soft leading-relaxed mb-3">
+              {overlay.label}
+            </p>
+          )}
+          <video
+            src={overlay.url}
+            controls
+            playsInline
+            preload="metadata"
+            className="w-full max-w-md mx-auto border-2 border-line rounded-sm bg-black"
+          />
+        </div>
+      )}
+
+      {rest.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {rest.map((a, i) => (
+            <AssetCard key={i} asset={a} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function AssetCard({ asset }: { asset: FormatAsset }) {
+  const isImage = asset.mime.startsWith("image/");
+  const isVideo = asset.mime.startsWith("video/");
+  const name = asset.label || asset.filename || "Asset";
+  return (
+    <div className="border-2 border-line bg-background rounded-md nb-shadow-sm overflow-hidden flex flex-col">
+      <div className="aspect-video bg-paper border-b-2 border-line flex items-center justify-center overflow-hidden">
+        {isImage ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img src={asset.url} alt={name} className="w-full h-full object-cover" />
+        ) : isVideo ? (
+          <video
+            src={asset.url}
+            controls
+            playsInline
+            preload="metadata"
+            className="w-full h-full object-contain bg-black"
+          />
+        ) : (
+          <span className="text-xs font-black uppercase tracking-widest text-muted">
+            {asset.mime}
+          </span>
+        )}
+      </div>
+      <div className="p-3 flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-sm font-bold truncate">{name}</div>
+          {asset.filename && asset.label && (
+            <div className="text-[10px] font-mono text-muted truncate">
+              {asset.filename}
+            </div>
+          )}
+        </div>
+        <a
+          href={`${asset.url}?download=1`}
+          className="shrink-0 border-2 border-line bg-background px-2 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+        >
+          Download
+        </a>
+      </div>
+    </div>
   );
 }
 

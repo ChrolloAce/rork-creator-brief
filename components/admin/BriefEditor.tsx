@@ -32,6 +32,15 @@ type FormatOverride = {
   tips?: { text: string; image?: string; hidden?: boolean }[];
   bestFor?: { text: string; image?: string; hidden?: boolean }[];
   hiddenSections?: string[];
+  assets?: FormatAssetRow[];
+};
+
+type FormatAssetRow = {
+  url: string;
+  mime: string;
+  filename?: string;
+  label?: string;
+  kind?: "overlay" | "asset";
 };
 
 type Curation = {
@@ -1101,6 +1110,202 @@ function ListEditor({
   );
 }
 
+function AssetManager({
+  assets,
+  onChange,
+}: {
+  assets: FormatAssetRow[];
+  onChange: (next: FormatAssetRow[] | undefined) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  function update(next: FormatAssetRow[]) {
+    onChange(next.length === 0 ? undefined : next);
+  }
+
+  async function uploadFile(file: File) {
+    setErr(null);
+    setBusy(true);
+    setProgress(`Uploading ${file.name} (${Math.round(file.size / (1024 * 1024))} MB)…`);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/uploads", { method: "POST", body: form });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j.url) {
+        throw new Error(j.error ?? `upload failed: HTTP ${res.status}`);
+      }
+      const isOverlay = file.type.startsWith("video/") && assets.every((a) => a.kind !== "overlay");
+      const newAsset: FormatAssetRow = {
+        url: j.url,
+        mime: j.mime ?? file.type,
+        filename: j.filename ?? file.name,
+        label: "",
+        kind: isOverlay ? "overlay" : "asset",
+      };
+      update([...assets, newAsset]);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+      setProgress(null);
+    }
+  }
+
+  function patch(i: number, p: Partial<FormatAssetRow>) {
+    const next = [...assets];
+    next[i] = { ...next[i], ...p };
+    update(next);
+  }
+
+  function toggleOverlay(i: number) {
+    const next = assets.map((a, j) => {
+      if (j === i) return { ...a, kind: a.kind === "overlay" ? "asset" : "overlay" } as FormatAssetRow;
+      // Only one overlay per format — demote others when promoting this one.
+      if (assets[i].kind !== "overlay") return { ...a, kind: "asset" } as FormatAssetRow;
+      return a;
+    });
+    update(next);
+  }
+
+  function remove(i: number) {
+    update(assets.filter((_, j) => j !== i));
+  }
+
+  function move(i: number, dir: -1 | 1) {
+    const target = i + dir;
+    if (target < 0 || target >= assets.length) return;
+    const next = [...assets];
+    [next[i], next[target]] = [next[target], next[i]];
+    update(next);
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+          Downloadable assets ({assets.length})
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        {assets.map((a, i) => {
+          const isVideo = a.mime.startsWith("video/");
+          const isImage = a.mime.startsWith("image/");
+          const isOverlay = a.kind === "overlay";
+          return (
+            <div
+              key={i}
+              className={`flex gap-2 items-start border-2 rounded-md p-2 ${
+                isOverlay ? "border-accent bg-accent/10" : "border-line bg-paper"
+              }`}
+            >
+              <div className="shrink-0 w-20 h-20 border-2 border-line bg-background rounded-sm overflow-hidden flex items-center justify-center">
+                {isImage ? (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img src={a.url} alt="" className="w-full h-full object-cover" />
+                ) : isVideo ? (
+                  <video src={a.url} className="w-full h-full object-cover" muted preload="metadata" />
+                ) : (
+                  <span className="text-[10px] font-black text-muted">FILE</span>
+                )}
+              </div>
+              <div className="flex-1 min-w-0 space-y-1">
+                <div className="text-[10px] font-mono truncate text-muted">{a.filename ?? a.url}</div>
+                <input
+                  type="text"
+                  value={a.label ?? ""}
+                  onChange={(e) => patch(i, { label: e.target.value })}
+                  placeholder="Label (e.g. 'TikTok-safe vertical cut')"
+                  className="w-full border-2 border-line rounded-md px-2 py-1 text-sm focus:outline-none focus:border-accent bg-background"
+                />
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[9px] uppercase tracking-widest font-bold text-muted">
+                    {a.mime}
+                  </span>
+                  {isVideo && (
+                    <label className="text-[10px] font-black uppercase tracking-widest flex items-center gap-1 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={isOverlay}
+                        onChange={() => toggleOverlay(i)}
+                      />
+                      <span className={isOverlay ? "text-accent" : ""}>
+                        Overlay example
+                      </span>
+                    </label>
+                  )}
+                </div>
+              </div>
+              <div className="flex flex-col gap-1">
+                <button
+                  type="button"
+                  aria-label="Move up"
+                  disabled={i === 0}
+                  onClick={() => move(i, -1)}
+                  className="w-7 h-7 border-2 border-line bg-background rounded-sm font-black nb-press disabled:opacity-30"
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  aria-label="Move down"
+                  disabled={i === assets.length - 1}
+                  onClick={() => move(i, 1)}
+                  className="w-7 h-7 border-2 border-line bg-background rounded-sm font-black nb-press disabled:opacity-30"
+                >
+                  ↓
+                </button>
+                <button
+                  type="button"
+                  aria-label="Remove"
+                  onClick={() => remove(i)}
+                  className="w-7 h-7 border-2 border-line bg-background rounded-sm font-black nb-press"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*,video/*"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = "";
+          if (f) void uploadFile(f);
+        }}
+      />
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        disabled={busy}
+        className="mt-2 w-full border-2 border-dashed border-line bg-background rounded-md px-2 py-2 text-xs font-bold uppercase tracking-widest text-muted hover:text-accent hover:border-accent disabled:opacity-40"
+      >
+        {busy ? progress ?? "Uploading…" : "+ Add asset (image or video, up to 100 MB)"}
+      </button>
+      {err && (
+        <p className="mt-2 text-xs font-bold text-[#b91c1c] border-2 border-line bg-background px-2 py-1 rounded-sm">
+          {err}
+        </p>
+      )}
+      <p className="text-[10px] text-muted mt-1">
+        Public viewers see these as download buttons under the script. Mark one
+        video as <span className="font-bold">Overlay example</span> to play it
+        inline on the brief page.
+      </p>
+    </div>
+  );
+}
+
 function AskClaude({
   briefName,
   formatTitle,
@@ -1697,6 +1902,14 @@ function FormatSection({
             <code className="font-mono">00:03</code>. Renders as a styled
             script block on the public format page.
           </p>
+          <div className="mt-6 pt-5 border-t-2 border-line">
+            <AssetManager
+              assets={override.assets ?? []}
+              onChange={(next) =>
+                onChangeOverride({ ...override, assets: next })
+              }
+            />
+          </div>
           <AskClaude
             briefName={briefName}
             formatTitle={effectiveTitle}

@@ -25,6 +25,13 @@ function getSql() {
 }
 
 export type FormatOverrideItem = { text: string; image?: string; hidden?: boolean };
+export type FormatOverrideAsset = {
+  url: string;
+  mime: string;
+  filename?: string;
+  label?: string;
+  kind?: "overlay" | "asset";
+};
 export type FormatOverride = {
   title?: string;
   tagline?: string;
@@ -35,6 +42,9 @@ export type FormatOverride = {
   bestFor?: FormatOverrideItem[];
   // Section keys hidden on the public page (e.g. "tips", "examples").
   hiddenSections?: string[];
+  // Per-format downloadable assets (videos, images, etc.) shown on the
+  // public brief page.
+  assets?: FormatOverrideAsset[];
 };
 
 export type CurationData = {
@@ -243,9 +253,11 @@ async function runSchema() {
       id TEXT PRIMARY KEY,
       mime TEXT NOT NULL,
       bytes BYTEA NOT NULL,
+      filename TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `;
+  await sql`ALTER TABLE image_blob ADD COLUMN IF NOT EXISTS filename TEXT`;
   // Seed Rork brief if none exists
   const existing = await sql`SELECT slug FROM brief`;
   if (existing.length === 0) {
@@ -867,25 +879,26 @@ export async function migrateInlineImagesInCuration(
 
 export async function createImage(
   mime: string,
-  bytes: Buffer
+  bytes: Buffer,
+  filename?: string
 ): Promise<{ id: string }> {
   await ensureSchema();
   const sql = getSql();
   const id = `img_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
-  await sql`INSERT INTO image_blob (id, mime, bytes) VALUES (${id}, ${mime}, ${bytes})`;
+  await sql`INSERT INTO image_blob (id, mime, bytes, filename) VALUES (${id}, ${mime}, ${bytes}, ${filename ?? null})`;
   return { id };
 }
 
 export async function getImage(
   id: string
-): Promise<{ mime: string; bytes: Buffer } | null> {
+): Promise<{ mime: string; bytes: Buffer; filename: string | null } | null> {
   await ensureSchema();
   const sql = getSql();
   const rows = await sql<
-    { mime: string; bytes: Buffer }[]
-  >`SELECT mime, bytes FROM image_blob WHERE id = ${id}`;
+    { mime: string; bytes: Buffer; filename: string | null }[]
+  >`SELECT mime, bytes, filename FROM image_blob WHERE id = ${id}`;
   if (rows.length === 0) return null;
-  return { mime: rows[0].mime, bytes: rows[0].bytes };
+  return rows[0];
 }
 
 async function readSeedFromFile(): Promise<CurationData> {
