@@ -13,16 +13,20 @@ export async function middleware(req: NextRequest) {
   // public submit endpoint: /api/form-templates/[slug]/submit
   const isPublicSubmit =
     isFormTemplatesApi && /\/submit\/?$/.test(pathname);
+  // /api/v1/* is the external bearer-token API; it does its own auth and
+  // must NOT be gated by the admin cookie.
+  const isV1Api = pathname.startsWith("/api/v1/");
   const isAdminApi =
-    pathname.startsWith("/api/admin/") ||
-    pathname === "/api/curation" ||
-    pathname === "/api/briefs" ||
-    pathname.startsWith("/api/briefs/") ||
-    pathname === "/api/vt-projects" ||
-    pathname === "/api/vt-search" ||
-    pathname.startsWith("/api/ai/") ||
-    pathname === "/api/uploads" ||
-    (isFormTemplatesApi && !isPublicSubmit);
+    !isV1Api &&
+    (pathname.startsWith("/api/admin/") ||
+      pathname === "/api/curation" ||
+      pathname === "/api/briefs" ||
+      pathname.startsWith("/api/briefs/") ||
+      pathname === "/api/vt-projects" ||
+      pathname === "/api/vt-search" ||
+      pathname.startsWith("/api/ai/") ||
+      pathname === "/api/uploads" ||
+      (isFormTemplatesApi && !isPublicSubmit));
   if (!isAdminPage && !isAdminApi) return NextResponse.next();
 
   // allow login endpoints
