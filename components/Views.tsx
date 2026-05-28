@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import type {
   Format,
   FormatAsset,
@@ -10,6 +10,27 @@ import type {
   HookCategory,
   ListItem,
 } from "@/lib/types";
+import { DEFAULT_SECTION_ORDER } from "@/lib/types";
+
+// Resolve the effective section order: user's custom order with any
+// missing keys appended in default order, invalid keys dropped.
+export function effectiveSectionOrder(
+  custom: FormatSectionKey[] | undefined
+): FormatSectionKey[] {
+  if (!custom || custom.length === 0) return DEFAULT_SECTION_ORDER;
+  const seen = new Set<FormatSectionKey>();
+  const out: FormatSectionKey[] = [];
+  for (const k of custom) {
+    if (DEFAULT_SECTION_ORDER.includes(k) && !seen.has(k)) {
+      seen.add(k);
+      out.push(k);
+    }
+  }
+  for (const k of DEFAULT_SECTION_ORDER) {
+    if (!seen.has(k)) out.push(k);
+  }
+  return out;
+}
 import { Thumbnail } from "./Thumbnail";
 import { VideoCarousel } from "./VideoCarousel";
 import {
@@ -445,54 +466,13 @@ export function FormatView({
     .filter((c) => c.hooks.length > 0);
   const totalHooks = matching.reduce((n, c) => n + c.hooks.length, 0);
 
-  return (
-    <article className="space-y-8">
-      <header className="space-y-4">
-        <div className="flex items-center gap-2 flex-wrap">
-          <SectionLabel>Format</SectionLabel>
-          <Pill>{format.examples.length} references</Pill>
-        </div>
-        <div className="flex items-start gap-4">
-          <Thumbnail
-            src={format.thumbnail}
-            slug={format.slug}
-            size="lg"
-          />
-          <div className="min-w-0">
-            <h1 className="text-3xl sm:text-4xl font-black tracking-tight leading-tight">
-              {format.title}
-            </h1>
-            <p className="text-ink-soft mt-1 text-sm sm:text-base">
-              {format.tagline}
-            </p>
-          </div>
-        </div>
-        <FormatDescription text={format.description} />
-        {!isHidden(format, "script") && format.script && (
-          <ScriptBlock text={format.script} />
-        )}
-        {publicStats?.enabled && format.examples.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {sanitizeVisibleStats(
-              publicStats.visible ?? SECTION_STAT_DEFAULTS
-            ).map((k) => (
-              <div
-                key={k}
-                className="border-2 border-line bg-paper px-2.5 py-1.5 rounded-sm min-w-[80px]"
-              >
-                <div className="text-base font-black leading-none">
-                  {computeSectionStat(k, format.examples)}
-                </div>
-                <div className="text-[9px] uppercase tracking-widest font-bold text-muted mt-1 leading-none">
-                  {SECTION_STAT_LABELS[k]}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </header>
-
-      {!isHidden(format, "examples") && format.examples.length > 0 && (
+  const sections: Record<FormatSectionKey, React.ReactNode> = {
+    script:
+      !isHidden(format, "script") && format.script ? (
+        <ScriptBlock text={format.script} />
+      ) : null,
+    examples:
+      !isHidden(format, "examples") && format.examples.length > 0 ? (
         <section className="space-y-3">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
@@ -502,9 +482,9 @@ export function FormatView({
           </div>
           <VideoCarousel videos={format.examples} />
         </section>
-      )}
-
-      {!isHidden(format, "bestFor") && visibleItems(format.bestFor).length > 0 && (
+      ) : null,
+    bestFor:
+      !isHidden(format, "bestFor") && visibleItems(format.bestFor).length > 0 ? (
         <section className="border-2 border-line bg-background rounded-md nb-shadow-sm p-5 sm:p-6">
           <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-4">
             Best for
@@ -526,9 +506,9 @@ export function FormatView({
             ))}
           </ul>
         </section>
-      )}
-
-      {!isHidden(format, "structure") && visibleItems(format.structure).length > 0 && (
+      ) : null,
+    structure:
+      !isHidden(format, "structure") && visibleItems(format.structure).length > 0 ? (
         <section className="border-2 border-line bg-background rounded-md nb-shadow-sm p-5 sm:p-6">
           <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-4">
             Shot-by-shot structure
@@ -550,9 +530,9 @@ export function FormatView({
             ))}
           </ol>
         </section>
-      )}
-
-      {!isHidden(format, "tips") && visibleItems(format.tips).length > 0 && (
+      ) : null,
+    tips:
+      !isHidden(format, "tips") && visibleItems(format.tips).length > 0 ? (
         <section className="border-2 border-line bg-background rounded-md nb-shadow-sm p-5 sm:p-6">
           <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-4">
             Tips
@@ -574,9 +554,9 @@ export function FormatView({
             ))}
           </ul>
         </section>
-      )}
-
-      {!isHidden(format, "hooks") && matching.length > 0 && (
+      ) : null,
+    hooks:
+      !isHidden(format, "hooks") && matching.length > 0 ? (
         <section className="space-y-5">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
@@ -617,11 +597,62 @@ export function FormatView({
             ))}
           </div>
         </section>
-      )}
-
-      {(format.assets?.length ?? 0) > 0 && (
+      ) : null,
+    assets:
+      (format.assets?.length ?? 0) > 0 ? (
         <AssetsBlock assets={format.assets!} />
-      )}
+      ) : null,
+  };
+
+  const order = effectiveSectionOrder(format.sectionOrder);
+
+  return (
+    <article className="space-y-8">
+      <header className="space-y-4">
+        <div className="flex items-center gap-2 flex-wrap">
+          <SectionLabel>Format</SectionLabel>
+          <Pill>{format.examples.length} references</Pill>
+        </div>
+        <div className="flex items-start gap-4">
+          <Thumbnail
+            src={format.thumbnail}
+            slug={format.slug}
+            size="lg"
+          />
+          <div className="min-w-0">
+            <h1 className="text-3xl sm:text-4xl font-black tracking-tight leading-tight">
+              {format.title}
+            </h1>
+            <p className="text-ink-soft mt-1 text-sm sm:text-base">
+              {format.tagline}
+            </p>
+          </div>
+        </div>
+        <FormatDescription text={format.description} />
+        {publicStats?.enabled && format.examples.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {sanitizeVisibleStats(
+              publicStats.visible ?? SECTION_STAT_DEFAULTS
+            ).map((k) => (
+              <div
+                key={k}
+                className="border-2 border-line bg-paper px-2.5 py-1.5 rounded-sm min-w-[80px]"
+              >
+                <div className="text-base font-black leading-none">
+                  {computeSectionStat(k, format.examples)}
+                </div>
+                <div className="text-[9px] uppercase tracking-widest font-bold text-muted mt-1 leading-none">
+                  {SECTION_STAT_LABELS[k]}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </header>
+
+      {order.map((key) => (
+        <React.Fragment key={key}>{sections[key]}</React.Fragment>
+      ))}
     </article>
   );
 }

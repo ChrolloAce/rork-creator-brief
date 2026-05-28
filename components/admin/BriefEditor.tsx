@@ -32,6 +32,7 @@ type FormatOverride = {
   tips?: { text: string; image?: string; hidden?: boolean }[];
   bestFor?: { text: string; image?: string; hidden?: boolean }[];
   hiddenSections?: string[];
+  sectionOrder?: string[];
   assets?: FormatAssetRow[];
 };
 
@@ -1110,6 +1111,148 @@ function ListEditor({
   );
 }
 
+// Editable section order with HTML5 drag-and-drop + up/down buttons.
+const SECTION_LABELS: Record<string, string> = {
+  script: "Script",
+  examples: "Example videos",
+  bestFor: "Best For",
+  structure: "Shot-by-shot structure",
+  tips: "Tips",
+  hooks: "Hooks",
+  assets: "Downloadable assets",
+};
+const ALL_SECTION_KEYS = [
+  "script",
+  "examples",
+  "bestFor",
+  "structure",
+  "tips",
+  "hooks",
+  "assets",
+];
+
+function SectionOrderEditor({
+  value,
+  onChange,
+}: {
+  value: string[] | undefined;
+  onChange: (next: string[] | undefined) => void;
+}) {
+  const order = (() => {
+    if (!value || value.length === 0) return ALL_SECTION_KEYS;
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const k of value) {
+      if (ALL_SECTION_KEYS.includes(k) && !seen.has(k)) {
+        seen.add(k);
+        out.push(k);
+      }
+    }
+    for (const k of ALL_SECTION_KEYS) if (!seen.has(k)) out.push(k);
+    return out;
+  })();
+
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [overIdx, setOverIdx] = useState<number | null>(null);
+  const isCustom = !!value && value.length > 0;
+
+  function move(from: number, to: number) {
+    if (from === to) return;
+    const next = [...order];
+    const [item] = next.splice(from, 1);
+    next.splice(to, 0, item);
+    onChange(next);
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+          Section order
+        </div>
+        {isCustom && (
+          <button
+            type="button"
+            onClick={() => onChange(undefined)}
+            className="text-[10px] font-bold uppercase tracking-widest text-muted hover:text-accent underline"
+          >
+            Reset to default
+          </button>
+        )}
+      </div>
+      <ul className="space-y-1">
+        {order.map((key, i) => (
+          <li
+            key={key}
+            draggable
+            onDragStart={(e) => {
+              setDragIdx(i);
+              e.dataTransfer.effectAllowed = "move";
+              e.dataTransfer.setData("text/plain", String(i));
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              if (overIdx !== i) setOverIdx(i);
+            }}
+            onDragLeave={() => {
+              if (overIdx === i) setOverIdx(null);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              const from = Number(e.dataTransfer.getData("text/plain"));
+              if (!Number.isNaN(from)) move(from, i);
+              setDragIdx(null);
+              setOverIdx(null);
+            }}
+            onDragEnd={() => {
+              setDragIdx(null);
+              setOverIdx(null);
+            }}
+            className={`flex items-center gap-2 border-2 rounded-md px-2 py-1.5 bg-background cursor-grab active:cursor-grabbing ${
+              overIdx === i && dragIdx !== i
+                ? "border-accent bg-accent/10"
+                : "border-line"
+            } ${dragIdx === i ? "opacity-50" : ""}`}
+          >
+            <span className="font-black text-muted leading-none select-none" aria-hidden>
+              ⠿
+            </span>
+            <span className="font-mono text-[10px] font-bold text-muted shrink-0 w-6">
+              {String(i + 1).padStart(2, "0")}
+            </span>
+            <span className="flex-1 text-sm font-bold truncate">
+              {SECTION_LABELS[key] ?? key}
+            </span>
+            <button
+              type="button"
+              aria-label="Move up"
+              disabled={i === 0}
+              onClick={() => move(i, i - 1)}
+              className="w-7 h-7 border-2 border-line bg-background rounded-sm font-black nb-press disabled:opacity-30"
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              aria-label="Move down"
+              disabled={i === order.length - 1}
+              onClick={() => move(i, i + 1)}
+              className="w-7 h-7 border-2 border-line bg-background rounded-sm font-black nb-press disabled:opacity-30"
+            >
+              ↓
+            </button>
+          </li>
+        ))}
+      </ul>
+      <p className="text-[10px] text-muted mt-2">
+        Drag the rows or use the arrows to reorder. The order applies to the
+        public brief page for this format only.
+      </p>
+    </div>
+  );
+}
+
 function AssetManager({
   assets,
   onChange,
@@ -1763,7 +1906,9 @@ function FormatSection({
           override.structure ||
           override.tips ||
           override.bestFor ||
-          override.hiddenSections) && (
+          override.hiddenSections ||
+          override.sectionOrder ||
+          override.assets) && (
           <button
             type="button"
             onClick={() => onChangeOverride({})}
@@ -1827,6 +1972,12 @@ function FormatSection({
       />
 
       <div className="mt-6 pt-5 border-t-2 border-line space-y-5">
+        <SectionOrderEditor
+          value={override.sectionOrder}
+          onChange={(next) =>
+            onChangeOverride({ ...override, sectionOrder: next })
+          }
+        />
         <ListEditor
           label="Best For"
           items={override.bestFor}

@@ -116,6 +116,7 @@ export async function getFormatsForRender(briefSlug?: string): Promise<Format[]>
       thumbnail: listings[slug]?.topThumb ?? meta.thumbnail,
       examples: listings[slug]?.videos ?? [],
       hiddenSections: (ov.hiddenSections ?? []) as FormatSectionKey[],
+      sectionOrder: ov.sectionOrder as FormatSectionKey[] | undefined,
       assets: ov.assets ?? [],
     });
   }

@@ -42,6 +42,10 @@ export type FormatOverride = {
   bestFor?: FormatOverrideItem[];
   // Section keys hidden on the public page (e.g. "tips", "examples").
   hiddenSections?: string[];
+  // Custom rendering order for public-page sections. Each entry is a
+  // section key (script | examples | bestFor | structure | tips | hooks |
+  // assets). When unset, lib/types.ts DEFAULT_SECTION_ORDER applies.
+  sectionOrder?: string[];
   // Per-format downloadable assets (videos, images, etc.) shown on the
   // public brief page.
   assets?: FormatOverrideAsset[];

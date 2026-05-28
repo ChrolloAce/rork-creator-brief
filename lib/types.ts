@@ -29,14 +29,28 @@ export type Hook = {
 export type ListItem = { text: string; image?: string; hidden?: boolean };
 export type FormatListItem = string | ListItem;
 
-// Sections of a format that can be hidden on the public page per brief.
+// Sections of a format that can be hidden or reordered on the public
+// page per brief.
 export type FormatSectionKey =
   | "bestFor"
   | "structure"
   | "tips"
   | "script"
   | "examples"
-  | "hooks";
+  | "hooks"
+  | "assets";
+
+// Default rendering order on the public format page. Briefs that haven't
+// customized fall back to this order.
+export const DEFAULT_SECTION_ORDER: FormatSectionKey[] = [
+  "script",
+  "examples",
+  "bestFor",
+  "structure",
+  "tips",
+  "hooks",
+  "assets",
+];
 
 // Downloadable per-format reference asset — videos showing overlay style,
 // reference images, b-roll, etc. Stored out-of-band in image_blob; the
@@ -65,6 +79,7 @@ export type Format = {
   hookCategorySlugs: string[];
   examples: VideoExample[];
   hiddenSections?: FormatSectionKey[];
+  sectionOrder?: FormatSectionKey[];
   assets?: FormatAsset[];
 };
 
