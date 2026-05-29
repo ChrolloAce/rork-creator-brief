@@ -250,15 +250,26 @@ export function ContentCalendarView({
                 : undefined;
               const heading =
                 a.title?.trim() || linked?.title || "Script";
+              const thumb =
+                linked?.thumbnail || linked?.examples?.[0]?.thumbnail;
               return (
                 <li
                   key={a.id}
                   className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 sm:p-5"
                 >
                   <div className="flex items-start gap-3">
-                    <span className="shrink-0 w-7 h-7 border-2 border-line bg-paper flex items-center justify-center font-mono text-xs font-bold rounded-sm">
-                      {String(i + 1).padStart(2, "0")}
-                    </span>
+                    {thumb ? (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img
+                        src={thumb}
+                        alt=""
+                        className="shrink-0 w-16 h-16 sm:w-20 sm:h-20 object-cover border-2 border-line rounded-md bg-paper"
+                      />
+                    ) : (
+                      <span className="shrink-0 w-16 h-16 sm:w-20 sm:h-20 border-2 border-line bg-paper flex items-center justify-center font-mono text-sm font-bold rounded-md">
+                        {String(i + 1).padStart(2, "0")}
+                      </span>
+                    )}
                     <div className="min-w-0 flex-1 space-y-3">
                       <div className="flex items-center justify-between gap-2 flex-wrap">
                         <h3 className="text-lg font-black leading-tight flex items-center gap-2">
@@ -278,11 +289,6 @@ export function ContentCalendarView({
                           </Link>
                         )}
                       </div>
-                      {linked?.tagline && (
-                        <p className="text-sm text-ink-soft leading-relaxed">
-                          {linked.tagline}
-                        </p>
-                      )}
                       {a.note?.trim() && (
                         <div className="border-l-2 border-accent pl-3">
                           <p className="text-sm text-ink leading-relaxed whitespace-pre-line">
