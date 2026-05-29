@@ -327,6 +327,19 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
     await persist(cur);
   }
 
+  const calSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function setAndSaveCalendar(next: ContentCalendar | undefined) {
+    setCur((c) => {
+      if (!c) return c;
+      const nextCur: Curation = { ...c, contentCalendar: next };
+      // Debounced autosave so day/script edits persist without the user
+      // hitting Save. clearTimeout keeps only the latest edit's write.
+      if (calSaveTimer.current) clearTimeout(calSaveTimer.current);
+      calSaveTimer.current = setTimeout(() => void persist(nextCur), 800);
+      return nextCur;
+    });
+  }
+
   const hookSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   function setAndSaveHooks(next: BriefHookCategory[] | null) {
     setBrief((b) => (b ? { ...b, hookCategories: next } : b));
@@ -425,17 +438,22 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
     ...legacyHidden,
   ]);
 
-  // Visible formats (with effective titles) offered as calendar links. Hidden
-  // formats are excluded since a public link to them would 404.
+  // Visible formats (title + a thumbnail) offered as calendar links. Hidden
+  // formats are excluded since a public link to them would 404. Thumbnail
+  // falls back through the format's first pinned/auto preview video.
   const calendarFormats = effectiveOrder
     .filter((slug) => !hiddenSet.has(slug))
-    .map((slug) => {
+    .flatMap((slug) => {
       const meta = metaFor(slug);
-      if (!meta) return null;
+      if (!meta) return [];
       const title = cur.formatOverrides?.[slug]?.title ?? meta.title;
-      return { slug, title };
-    })
-    .filter((x): x is { slug: string; title: string } => x !== null);
+      const p = preview[slug];
+      const thumbnail =
+        p?.pinnedVideos?.[0]?.thumbnail ??
+        p?.autoVideos?.[0]?.thumbnail ??
+        meta.thumbnail;
+      return [{ slug, title, thumbnail }];
+    });
 
   function applyOrder(nextOrder: string[]) {
     if (!cur) return;
@@ -615,11 +633,7 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
           <CalendarEditor
             value={cur.contentCalendar}
             formats={calendarFormats}
-            onChange={(next) => {
-              if (!cur) return;
-              const nextCur: Curation = { ...cur, contentCalendar: next };
-              setCur(nextCur);
-            }}
+            onChange={setAndSaveCalendar}
           />
         </CollapsibleCard>
 
