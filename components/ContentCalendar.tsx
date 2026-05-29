@@ -55,11 +55,6 @@ export function ContentCalendarView({
     return map;
   }, [formats]);
 
-  function thumbFor(a: { formatSlug?: string }): string | undefined {
-    const f = a.formatSlug ? formatBySlug.get(a.formatSlug) : undefined;
-    return f?.thumbnail || f?.examples?.[0]?.thumbnail;
-  }
-
   // "Done" state lives only in this device's localStorage — no account, no
   // server, no personal data. Each creator's progress stays on their device.
   const storageKey = `superbriefed:cal-done:${briefSlug}`;
@@ -222,9 +217,14 @@ export function ContentCalendarView({
             const isSelected = selected === iso;
             const isToday = iso === todayISO;
             const dayNum = Number(iso.slice(8, 10));
-            const dayThumbs = day ? day.assignments.slice(0, 2).map(thumbFor) : [];
             const allDone =
               has && day!.assignments.every((a) => done.has(a.id));
+            // Orange = videos pending, Green = all done, neutral = nothing.
+            const statusClass = !has
+              ? "border-line/40 bg-background text-muted cursor-default"
+              : allDone
+                ? "border-line bg-success text-success-ink"
+                : "border-line bg-accent text-accent-ink";
             return (
               <button
                 key={iso}
@@ -233,51 +233,20 @@ export function ContentCalendarView({
                 onClick={() => setSelected(iso)}
                 aria-pressed={isSelected}
                 aria-label={`${prettyDate(iso)}${
-                  has ? `, ${count} ${count === 1 ? "script" : "scripts"}` : ""
+                  has
+                    ? allDone
+                      ? ", all done"
+                      : `, ${count} ${count === 1 ? "video" : "videos"} to film`
+                    : ""
                 }`}
-                className={`relative aspect-square sm:aspect-auto sm:min-h-[64px] border-2 rounded-md p-1.5 text-left transition-[transform,box-shadow,background-color] flex flex-col ${
-                  isSelected
-                    ? "border-line bg-accent text-accent-ink nb-shadow-sm"
-                    : has
-                      ? "border-line bg-paper text-ink nb-press"
-                      : "border-line/40 bg-background text-muted cursor-default"
-                }`}
+                className={`min-h-[72px] sm:min-h-[88px] border-2 rounded-md p-2 text-left flex flex-col transition-transform ${statusClass} ${
+                  isSelected ? "nb-shadow-sm -translate-y-0.5" : ""
+                } ${isToday && !isSelected ? "ring-2 ring-line ring-offset-1" : ""}`}
               >
-                <span
-                  className={`text-xs font-black leading-none ${
-                    isToday && !isSelected ? "text-accent" : ""
-                  }`}
-                >
-                  {dayNum}
-                </span>
+                <span className="text-sm font-black leading-none">{dayNum}</span>
                 {has && (
-                  <span className="mt-auto flex items-center gap-0.5">
-                    {allDone ? (
-                      <span
-                        className={`text-[11px] font-black leading-none ${
-                          isSelected ? "text-accent-ink" : "text-success-ink"
-                        }`}
-                      >
-                        ✓ done
-                      </span>
-                    ) : (
-                      dayThumbs.map((t, j) =>
-                        t ? (
-                          /* eslint-disable-next-line @next/next/no-img-element */
-                          <img
-                            key={j}
-                            src={t}
-                            alt=""
-                            className="w-4 h-4 sm:w-5 sm:h-5 object-cover border border-line rounded-[3px] bg-paper"
-                          />
-                        ) : (
-                          <span
-                            key={j}
-                            className="w-4 h-4 sm:w-5 sm:h-5 border border-line rounded-[3px] bg-accent"
-                          />
-                        )
-                      )
-                    )}
+                  <span className="mt-auto text-[10px] font-black uppercase tracking-widest leading-none">
+                    {allDone ? "✓ done" : "to film"}
                   </span>
                 )}
               </button>
@@ -364,17 +333,6 @@ export function ContentCalendarView({
                         )}
                         {heading}
                       </h3>
-                      {linked && href && (
-                        <div>
-                          <Link
-                            href={href}
-                            onClick={(e) => e.stopPropagation()}
-                            className="inline-flex border-2 border-line bg-accent text-accent-ink px-2.5 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
-                          >
-                            Open format →
-                          </Link>
-                        </div>
-                      )}
                       {a.note?.trim() && (
                         <div className="border-l-2 border-accent pl-3">
                           <p className="text-sm text-ink leading-relaxed whitespace-pre-line">
@@ -393,21 +351,32 @@ export function ContentCalendarView({
                           </p>
                         </div>
                       )}
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleDone(a.id);
-                        }}
-                        aria-pressed={isDone}
-                        className={`inline-flex items-center gap-1.5 border-2 border-line px-3 py-1.5 rounded-sm nb-press text-[11px] font-black uppercase tracking-widest ${
-                          isDone
-                            ? "bg-success text-success-ink"
-                            : "bg-background text-ink"
-                        }`}
-                      >
-                        {isDone ? "✓ Done — undo" : "Mark as done"}
-                      </button>
+                      <div className="flex items-center gap-2 flex-wrap pt-1">
+                        {linked && href && (
+                          <Link
+                            href={href}
+                            onClick={(e) => e.stopPropagation()}
+                            className="inline-flex border-2 border-line bg-accent text-accent-ink px-2.5 py-1.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+                          >
+                            Open format →
+                          </Link>
+                        )}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleDone(a.id);
+                          }}
+                          aria-pressed={isDone}
+                          className={`inline-flex items-center gap-1.5 border-2 border-line px-3 py-1.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest ${
+                            isDone
+                              ? "bg-success text-success-ink"
+                              : "bg-background text-ink"
+                          }`}
+                        >
+                          {isDone ? "✓ Done" : "Mark as done"}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </li>
