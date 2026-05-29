@@ -197,6 +197,17 @@ export function ContentCalendarView({
           </div>
         </div>
 
+        <div className="flex items-center gap-4 mb-3 text-[10px] font-bold uppercase tracking-widest text-muted">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="w-3.5 h-3.5 rounded-sm border-2 border-line bg-accent" />
+            To film
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="w-3.5 h-3.5 rounded-sm border-2 border-line bg-success" />
+            Done
+          </span>
+        </div>
+
         <div className="grid grid-cols-7 gap-1.5 mb-1.5">
           {WEEKDAYS.map((w) => (
             <div
@@ -239,16 +250,11 @@ export function ContentCalendarView({
                       : `, ${count} ${count === 1 ? "video" : "videos"} to film`
                     : ""
                 }`}
-                className={`min-h-[72px] sm:min-h-[88px] border-2 rounded-md p-2 text-left flex flex-col transition-transform ${statusClass} ${
+                className={`min-h-[44px] sm:min-h-[56px] border-2 rounded-md p-2 text-left transition-transform ${statusClass} ${
                   isSelected ? "nb-shadow-sm -translate-y-0.5" : ""
                 } ${isToday && !isSelected ? "ring-2 ring-line ring-offset-1" : ""}`}
               >
                 <span className="text-sm font-black leading-none">{dayNum}</span>
-                {has && (
-                  <span className="mt-auto text-[10px] font-black uppercase tracking-widest leading-none">
-                    {allDone ? "✓ done" : "to film"}
-                  </span>
-                )}
               </button>
             );
           })}
