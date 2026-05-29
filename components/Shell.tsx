@@ -4,9 +4,11 @@ import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import type { Format, HookCategory } from "@/lib/types";
+import type { ContentCalendar } from "@/lib/db";
 import { buildNavSections } from "@/lib/nav";
 import { Sidebar } from "./Sidebar";
 import { FormatView, OverviewView } from "./Views";
+import { ContentCalendarView } from "./ContentCalendar";
 
 export function Shell({
   formats,
@@ -16,6 +18,7 @@ export function Shell({
   useAllHooks = false,
   publicStats,
   hideOverview = false,
+  contentCalendar,
 }: {
   formats: Format[];
   hookCategories: HookCategory[];
@@ -29,10 +32,17 @@ export function Shell({
   useAllHooks?: boolean;
   publicStats?: { enabled: boolean; visible?: string[] };
   hideOverview?: boolean;
+  contentCalendar?: ContentCalendar | null;
 }) {
+  const calendarEnabled =
+    !!contentCalendar?.enabled && (contentCalendar.days?.length ?? 0) > 0;
   const sections = useMemo(
-    () => buildNavSections(formats, brief.slug, { includeOverview: !hideOverview }),
-    [formats, brief.slug, hideOverview]
+    () =>
+      buildNavSections(formats, brief.slug, {
+        includeOverview: !hideOverview,
+        includeCalendar: calendarEnabled,
+      }),
+    [formats, brief.slug, hideOverview, calendarEnabled]
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
   const pathname = usePathname();
@@ -67,10 +77,19 @@ export function Shell({
       const it = s.items.find((i) => i.id === activeId);
       if (it) return it.title;
     }
+    if (activeId === "calendar") return "Content Calendar";
     return "Overview";
   }, [sections, activeId]);
 
-  const view = renderView(activeId, formats, hookCategories, brief, useAllHooks, publicStats);
+  const view = renderView(
+    activeId,
+    formats,
+    hookCategories,
+    brief,
+    useAllHooks,
+    publicStats,
+    contentCalendar
+  );
 
   return (
     <div className="min-h-screen flex flex-col lg:flex-row bg-background">
@@ -171,17 +190,27 @@ function renderView(
   formats: Format[],
   hookCategories: HookCategory[],
   brief: {
+    slug: string;
     name: string;
     overview?: import("@/lib/db").BriefOverview | null;
   },
   useAllHooks: boolean,
-  publicStats?: { enabled: boolean; visible?: string[] }
+  publicStats?: { enabled: boolean; visible?: string[] },
+  contentCalendar?: ContentCalendar | null
 ) {
   if (activeId === "overview")
     return (
       <OverviewView
         briefName={brief.name}
         overview={brief.overview ?? null}
+      />
+    );
+  if (activeId === "calendar" && contentCalendar)
+    return (
+      <ContentCalendarView
+        calendar={contentCalendar}
+        formats={formats}
+        briefSlug={brief.slug}
       />
     );
   if (activeId.startsWith("format:")) {

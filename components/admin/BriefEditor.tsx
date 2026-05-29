@@ -14,7 +14,8 @@ import {
 import { allVideos } from "@/lib/all-videos";
 import { formats as formatsMeta } from "@/lib/formats";
 import { hookCategories as defaultHookCategories } from "@/lib/hooks";
-import type { BriefOverview, BriefHookCategory } from "@/lib/db";
+import type { BriefOverview, BriefHookCategory, ContentCalendar } from "@/lib/db";
+import { CalendarEditor } from "@/components/admin/CalendarEditor";
 import { CollapsibleCard } from "@/components/admin/CollapsibleCard";
 import { HooksEditor } from "@/components/admin/HooksEditor";
 import { LogoUpload } from "@/components/admin/LogoUpload";
@@ -56,6 +57,7 @@ type Curation = {
   publicStats?: { enabled: boolean; visible?: string[] };
   hideOverview?: boolean;
   hiddenFormats?: string[];
+  contentCalendar?: ContentCalendar;
 };
 
 type Preview = Record<
@@ -423,6 +425,18 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
     ...legacyHidden,
   ]);
 
+  // Visible formats (with effective titles) offered as calendar links. Hidden
+  // formats are excluded since a public link to them would 404.
+  const calendarFormats = effectiveOrder
+    .filter((slug) => !hiddenSet.has(slug))
+    .map((slug) => {
+      const meta = metaFor(slug);
+      if (!meta) return null;
+      const title = cur.formatOverrides?.[slug]?.title ?? meta.title;
+      return { slug, title };
+    })
+    .filter((x): x is { slug: string; title: string } => x !== null);
+
   function applyOrder(nextOrder: string[]) {
     if (!cur) return;
     const nextCur: Curation = { ...cur, formatOrder: nextOrder };
@@ -585,6 +599,26 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
               const nextCur: Curation = { ...cur, scopedProjectIds: next };
               setCur(nextCur);
               void persist(nextCur);
+            }}
+          />
+        </CollapsibleCard>
+
+        <CollapsibleCard
+          storageKey={`brief-editor:${briefSlug}:calendar`}
+          title="Content calendar"
+          meta={
+            cur.contentCalendar?.enabled
+              ? `${cur.contentCalendar.days?.length ?? 0} days`
+              : "Hidden"
+          }
+        >
+          <CalendarEditor
+            value={cur.contentCalendar}
+            formats={calendarFormats}
+            onChange={(next) => {
+              if (!cur) return;
+              const nextCur: Curation = { ...cur, contentCalendar: next };
+              setCur(nextCur);
             }}
           />
         </CollapsibleCard>

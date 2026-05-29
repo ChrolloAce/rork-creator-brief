@@ -69,6 +69,7 @@ export default async function BriefOverview({
       }
       publicStats={curation.publicStats}
       hideOverview={curation.hideOverview}
+      contentCalendar={curation.contentCalendar}
     />
   );
 }

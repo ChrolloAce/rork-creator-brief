@@ -83,6 +83,37 @@ export type CurationData = {
   // admin editor (grayed out) so they can still be edited offline. Separate
   // from `formatOrder`, which now controls ordering only.
   hiddenFormats?: string[];
+  // Per-day shooting schedule (rubric) shown to creators so they can see what
+  // to record on each date and batch-record ahead. Rendered at
+  // /b/{slug}/calendar when enabled.
+  contentCalendar?: ContentCalendar;
+};
+
+// A single script/task assigned to a calendar day. It either links to one of
+// the brief's formats (formatSlug → the creator taps through to that format's
+// full script/structure) or carries a custom one-off script typed inline.
+// `note` is a per-day instruction layered on top (e.g. which hook to use).
+export type CalendarAssignment = {
+  id: string;
+  formatSlug?: string;
+  title?: string;
+  script?: string;
+  note?: string;
+};
+
+export type CalendarDay = {
+  // ISO date, "YYYY-MM-DD".
+  date: string;
+  assignments: CalendarAssignment[];
+};
+
+export type ContentCalendar = {
+  // When true (and at least one day exists) the calendar shows on the public
+  // brief and in the sidebar nav.
+  enabled?: boolean;
+  title?: string;
+  intro?: string;
+  days: CalendarDay[];
 };
 
 export type CachedVideo = {

@@ -2,47 +2,46 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Shell } from "@/components/Shell";
 import { hookCategories as defaultHooks } from "@/lib/hooks";
-import { formatId } from "@/lib/nav";
+import { calendarId } from "@/lib/nav";
 import { getBrief, getCuration } from "@/lib/db";
 import type { HookCategory } from "@/lib/types";
 import { getFormatsForRender } from "@/lib/format-videos";
 
 export const dynamic = "force-dynamic";
 
-type Params = { slug: string; format: string };
+type Params = { slug: string };
 
 export async function generateMetadata({
   params,
 }: {
   params: Promise<Params>;
 }): Promise<Metadata> {
-  const { slug, format } = await params;
+  const { slug } = await params;
   const brief = await getBrief(slug);
   if (!brief) return { title: "Not found" };
-  // Look it up in the rendered format list so clones resolve too.
-  const formats = await getFormatsForRender(brief.slug);
-  const f = formats.find((x) => x.slug === format);
-  if (!f) return { title: "Not found" };
   return {
-    title: `${f.title} — ${brief.name} Creator Brief`,
-    description: f.description,
+    title: `Content Calendar — ${brief.name} Creator Brief`,
+    description: `What to film each day for ${brief.name}.`,
   };
 }
 
-export default async function BriefFormatPage({
+export default async function BriefCalendarPage({
   params,
 }: {
   params: Promise<Params>;
 }) {
-  const { slug, format } = await params;
+  const { slug } = await params;
   const brief = await getBrief(slug);
   if (!brief) notFound();
   const [formats, curation] = await Promise.all([
     getFormatsForRender(brief.slug),
     getCuration(brief.slug),
   ]);
-  // Format hidden on this brief — 404 so it doesn't leak via direct link.
-  if (!formats.some((f) => f.slug === format)) notFound();
+  const calendar = curation.contentCalendar;
+  // Only expose the calendar when it's enabled and has at least one day —
+  // otherwise the direct link shouldn't leak an empty page.
+  if (!calendar?.enabled || (calendar.days?.length ?? 0) === 0) notFound();
+
   const hooks: HookCategory[] =
     brief.hookCategories && brief.hookCategories.length > 0
       ? brief.hookCategories.map((c) => ({
@@ -57,7 +56,7 @@ export default async function BriefFormatPage({
     <Shell
       formats={formats}
       hookCategories={hooks}
-      activeId={formatId(format)}
+      activeId={calendarId}
       brief={{
         slug: brief.slug,
         name: brief.name,
@@ -69,7 +68,7 @@ export default async function BriefFormatPage({
       }
       publicStats={curation.publicStats}
       hideOverview={curation.hideOverview}
-      contentCalendar={curation.contentCalendar}
+      contentCalendar={calendar}
     />
   );
 }

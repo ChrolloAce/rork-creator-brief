@@ -12,15 +12,17 @@ export type NavSection = {
 };
 
 export const overviewId = "overview";
+export const calendarId = "calendar";
 export const formatId = (slug: string) => `format:${slug}`;
 
 export function buildNavSections(
   formats: Format[],
   briefSlug: string,
-  options?: { includeOverview?: boolean }
+  options?: { includeOverview?: boolean; includeCalendar?: boolean }
 ): NavSection[] {
   const base = `/b/${briefSlug}`;
   const includeOverview = options?.includeOverview !== false;
+  const includeCalendar = options?.includeCalendar === true;
   const sections: NavSection[] = [];
   if (includeOverview) {
     sections.push({
@@ -31,6 +33,19 @@ export function buildNavSections(
           href: base,
           title: "Overview",
           meta: "The brief",
+        },
+      ],
+    });
+  }
+  if (includeCalendar) {
+    sections.push({
+      label: "Plan",
+      items: [
+        {
+          id: calendarId,
+          href: `${base}/calendar`,
+          title: "Content Calendar",
+          meta: "What to film each day",
         },
       ],
     });
