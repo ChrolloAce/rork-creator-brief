@@ -98,20 +98,44 @@ export function ContentCalendarView({
     [dayByDate]
   );
 
-  // Default the visible month + selected day to the first scheduled date,
-  // else today.
-  const firstScheduled = scheduledDates[0];
-  const initial = firstScheduled
-    ? parseISODate(firstScheduled) ?? new Date()
-    : new Date();
+  // Default to today; the last-viewed day is restored on mount so leaving and
+  // returning resumes where you were. The Today button jumps back to now.
+  const now = new Date();
+  const todayISO = toISODate(now);
 
   const [view, setView] = useState({
-    year: initial.getFullYear(),
-    month: initial.getMonth(),
+    year: now.getFullYear(),
+    month: now.getMonth(),
   });
-  const [selected, setSelected] = useState<string | null>(
-    firstScheduled ?? null
-  );
+  const [selected, setSelected] = useState<string | null>(todayISO);
+
+  const selKey = `superbriefed:cal-sel:${briefSlug}`;
+  function selectDay(iso: string) {
+    setSelected(iso);
+    try {
+      localStorage.setItem(selKey, iso);
+    } catch {
+      /* ignore */
+    }
+  }
+  function goToToday() {
+    setView({ year: now.getFullYear(), month: now.getMonth() });
+    selectDay(todayISO);
+  }
+  // Restore the last-viewed day (per device) on mount.
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(selKey);
+      if (saved && /^\d{4}-\d{2}-\d{2}$/.test(saved)) {
+        setSelected(saved);
+        const d = parseISODate(saved);
+        if (d) setView({ year: d.getFullYear(), month: d.getMonth() });
+      }
+    } catch {
+      /* ignore */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selKey]);
 
   // Build the grid: leading blanks for the first week, then each day.
   const cells = useMemo(() => {
@@ -125,8 +149,6 @@ export function ContentCalendarView({
     }
     return out;
   }, [view]);
-
-  const todayISO = toISODate(new Date());
 
   function step(delta: number) {
     setView((v) => {
@@ -176,12 +198,7 @@ export function ContentCalendarView({
             </button>
             <button
               type="button"
-              onClick={() =>
-                setView({
-                  year: new Date().getFullYear(),
-                  month: new Date().getMonth(),
-                })
-              }
+              onClick={goToToday}
               className="border-2 border-line bg-background px-2.5 h-9 rounded-md font-black nb-press text-[10px] uppercase tracking-widest"
             >
               Today
@@ -241,7 +258,7 @@ export function ContentCalendarView({
                 key={iso}
                 type="button"
                 disabled={!has}
-                onClick={() => setSelected(iso)}
+                onClick={() => selectDay(iso)}
                 aria-pressed={isSelected}
                 aria-label={`${prettyDate(iso)}${
                   has
