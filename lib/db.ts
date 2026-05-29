@@ -99,12 +99,34 @@ export type CalendarAssignment = {
   title?: string;
   script?: string;
   note?: string;
+  // Short tag shown as a chip (e.g. "B1", "B2"). Set when an assignment comes
+  // from a group's ordered item.
+  label?: string;
 };
 
 export type CalendarDay = {
   // ISO date, "YYYY-MM-DD".
   date: string;
   assignments: CalendarAssignment[];
+};
+
+// One ordered item inside a group (e.g. the "B1" batch). Mirrors an
+// assignment so it can be stamped onto a day directly.
+export type CalendarGroupItem = {
+  id: string;
+  label?: string;
+  formatSlug?: string;
+  title?: string;
+  script?: string;
+  note?: string;
+};
+
+// A reusable category bundling an ordered series of items (B1, B2, B3…).
+// Auto-fill cycles a group's items one per day across a date range.
+export type CalendarGroup = {
+  id: string;
+  name: string;
+  items: CalendarGroupItem[];
 };
 
 export type ContentCalendar = {
@@ -114,6 +136,8 @@ export type ContentCalendar = {
   title?: string;
   intro?: string;
   days: CalendarDay[];
+  // Reusable groups used by the auto-fill scheduler.
+  groups?: CalendarGroup[];
 };
 
 export type CachedVideo = {

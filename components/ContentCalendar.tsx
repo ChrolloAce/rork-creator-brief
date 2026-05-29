@@ -261,7 +261,12 @@ export function ContentCalendarView({
                     </span>
                     <div className="min-w-0 flex-1 space-y-3">
                       <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <h3 className="text-lg font-black leading-tight">
+                        <h3 className="text-lg font-black leading-tight flex items-center gap-2">
+                          {a.label?.trim() && (
+                            <span className="shrink-0 border-2 border-line bg-accent text-accent-ink px-2 py-0.5 rounded-sm text-xs font-black uppercase tracking-widest">
+                              {a.label}
+                            </span>
+                          )}
                           {heading}
                         </h3>
                         {linked && (

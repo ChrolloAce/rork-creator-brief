@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import type {
   CalendarAssignment,
   CalendarDay,
+  CalendarGroup,
+  CalendarGroupItem,
   ContentCalendar,
 } from "@/lib/db";
 
@@ -116,6 +118,7 @@ export function CalendarEditor({
     scheduled[0] ?? toISODate(today)
   );
   const [showFill, setShowFill] = useState(false);
+  const [showGroups, setShowGroups] = useState(false);
 
   function update(patch: Partial<ContentCalendar>) {
     onChange({ ...cal, ...patch });
@@ -369,7 +372,23 @@ export function CalendarEditor({
                 >
                   {!isCustom && <FormatThumb fmt={fmt} size={44} />}
                   <div className="flex-1 min-w-0 space-y-1.5">
-                    {isCustom ? (
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="text"
+                        value={a.label ?? ""}
+                        onChange={(e) =>
+                          patchAssignment(idx, { label: e.target.value })
+                        }
+                        placeholder="B1"
+                        className="w-12 border-2 border-line rounded-sm px-1 py-1 text-xs font-black text-center uppercase tracking-widest focus:outline-none focus:border-accent bg-paper shrink-0"
+                      />
+                      {!isCustom && (
+                        <span className="font-bold text-sm leading-tight truncate">
+                          {fmt?.title ?? a.formatSlug}
+                        </span>
+                      )}
+                    </div>
+                    {isCustom && (
                       <>
                         <input
                           type="text"
@@ -390,10 +409,6 @@ export function CalendarEditor({
                           className="w-full border-2 border-line rounded-sm px-2 py-1 text-sm focus:outline-none focus:border-accent bg-background font-mono leading-relaxed"
                         />
                       </>
-                    ) : (
-                      <div className="font-bold text-sm leading-tight pt-0.5">
-                        {fmt?.title ?? a.formatSlug}
-                      </div>
                     )}
                     <input
                       type="text"
@@ -420,6 +435,27 @@ export function CalendarEditor({
         )}
       </div>
 
+      {/* Groups (B1, B2, B3…) */}
+      <div className="border-2 border-line bg-background rounded-md">
+        <button
+          type="button"
+          onClick={() => setShowGroups((s) => !s)}
+          className="w-full flex items-center justify-between px-3 py-2 text-[10px] uppercase tracking-[0.2em] font-bold text-muted"
+        >
+          <span>🗂 Groups · B1 B2 B3 ({(cal.groups ?? []).length})</span>
+          <span>{showGroups ? "−" : "+"}</span>
+        </button>
+        {showGroups && (
+          <div className="px-3 pb-3 border-t-2 border-line pt-3">
+            <GroupsManager
+              groups={cal.groups ?? []}
+              formats={formats}
+              onChange={(groups) => update({ groups })}
+            />
+          </div>
+        )}
+      </div>
+
       {/* Auto-fill scheduler */}
       <div className="border-2 border-line bg-background rounded-md">
         <button
@@ -434,6 +470,7 @@ export function CalendarEditor({
           <div className="px-3 pb-3 border-t-2 border-line pt-3">
             <AutoFill
               formats={formats}
+              groups={cal.groups ?? []}
               defaultStart={selected}
               onGenerate={(newDays) => {
                 // Merge generated assignments into existing days.
@@ -471,21 +508,41 @@ const CADENCE_LABELS: Record<Cadence, string> = {
   weekly: "Weekly",
 };
 
+function itemToAssignment(it: CalendarGroupItem): CalendarAssignment {
+  return {
+    id: genId(),
+    formatSlug: it.formatSlug,
+    title: it.title,
+    script: it.script,
+    note: it.note,
+    label: it.label,
+  };
+}
+
 function AutoFill({
   formats,
+  groups,
   defaultStart,
   onGenerate,
 }: {
   formats: FormatOption[];
+  groups: CalendarGroup[];
   defaultStart: string;
   onGenerate: (days: CalendarDay[]) => void;
 }) {
+  const usableGroups = groups.filter((g) => g.items.length > 0);
+  const [source, setSource] = useState<"group" | "formats">(
+    usableGroups.length > 0 ? "group" : "formats"
+  );
   const [start, setStart] = useState(defaultStart);
   const [cadence, setCadence] = useState<Cadence>("daily");
   const [count, setCount] = useState(7);
   const [picked, setPicked] = useState<string[]>(
     formats[0] ? [formats[0].slug] : []
   );
+  const [groupId, setGroupId] = useState<string>(usableGroups[0]?.id ?? "");
+
+  const group = usableGroups.find((g) => g.id === groupId);
 
   function toggle(slug: string) {
     setPicked((p) =>
@@ -499,7 +556,6 @@ function AutoFill({
     else if (cadence === "alt") n.setDate(n.getDate() + 2);
     else if (cadence === "weekly") n.setDate(n.getDate() + 7);
     else {
-      // weekdays: advance to next Mon–Fri
       do {
         n.setDate(n.getDate() + 1);
       } while (n.getDay() === 0 || n.getDay() === 6);
@@ -509,25 +565,53 @@ function AutoFill({
 
   function generate() {
     const startDate = parseISODate(start);
-    if (!startDate || picked.length === 0 || count < 1) return;
+    if (!startDate || count < 1) return;
+    if (source === "group" && !group) return;
+    if (source === "formats" && picked.length === 0) return;
     const days: CalendarDay[] = [];
     let cursor = startDate;
-    // For weekdays cadence, snap the first date forward off a weekend.
     if (cadence === "weekdays" && (cursor.getDay() === 0 || cursor.getDay() === 6)) {
       cursor = nextDate(cursor);
     }
     for (let i = 0; i < count; i++) {
-      days.push({
-        date: toISODate(cursor),
-        assignments: picked.map((slug) => ({ id: genId(), formatSlug: slug })),
-      });
+      const assignments =
+        source === "group" && group
+          ? // Cycle the group's items one per day, looping.
+            [itemToAssignment(group.items[i % group.items.length])]
+          : picked.map((slug) => ({ id: genId(), formatSlug: slug }));
+      days.push({ date: toISODate(cursor), assignments });
       cursor = nextDate(cursor);
     }
     onGenerate(days);
   }
 
+  const canGenerate =
+    source === "group" ? !!group : picked.length > 0;
+
   return (
     <div className="space-y-3">
+      {/* Source toggle */}
+      <div className="inline-flex border-2 border-line rounded-sm overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setSource("group")}
+          className={`px-2.5 py-1 text-[10px] font-black uppercase tracking-widest ${
+            source === "group" ? "bg-accent text-accent-ink" : "bg-background text-muted"
+          }`}
+        >
+          Cycle a group
+        </button>
+        <button
+          type="button"
+          onClick={() => setSource("formats")}
+          className={`px-2.5 py-1 text-[10px] font-black uppercase tracking-widest border-l-2 border-line ${
+            source === "formats" ? "bg-accent text-accent-ink" : "bg-background text-muted"
+          }`}
+        >
+          Pick formats
+        </button>
+      </div>
+
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
         <label className="block">
           <span className="text-[9px] uppercase tracking-widest font-bold text-muted">
@@ -558,7 +642,7 @@ function AutoFill({
         </label>
         <label className="block">
           <span className="text-[9px] uppercase tracking-widest font-bold text-muted">
-            How many
+            How many days
           </span>
           <input
             type="number"
@@ -571,39 +655,277 @@ function AutoFill({
         </label>
       </div>
 
-      <div>
-        <span className="text-[9px] uppercase tracking-widest font-bold text-muted">
-          Formats to schedule each day
-        </span>
-        <div className="flex gap-2 overflow-x-auto pb-1 mt-1">
-          {formats.map((f) => {
-            const on = picked.includes(f.slug);
+      {source === "group" ? (
+        usableGroups.length === 0 ? (
+          <p className="text-xs text-muted">
+            No groups with items yet — add one in the{" "}
+            <span className="font-bold">Groups</span> section above.
+          </p>
+        ) : (
+          <div>
+            <span className="text-[9px] uppercase tracking-widest font-bold text-muted">
+              Group to cycle
+            </span>
+            <div className="flex gap-1.5 flex-wrap mt-1">
+              {usableGroups.map((g) => (
+                <button
+                  key={g.id}
+                  type="button"
+                  onClick={() => setGroupId(g.id)}
+                  className={`border-2 border-line rounded-sm px-2 py-1 text-xs font-bold nb-press ${
+                    g.id === groupId ? "bg-accent text-accent-ink" : "bg-background"
+                  }`}
+                >
+                  {g.name} · {g.items.length}
+                </button>
+              ))}
+            </div>
+            {group && (
+              <p className="text-[10px] text-muted mt-1.5">
+                {group.items
+                  .map((it) => it.label?.trim() || "•")
+                  .join(" → ")}{" "}
+                → loops, one per day.
+              </p>
+            )}
+          </div>
+        )
+      ) : (
+        <div>
+          <span className="text-[9px] uppercase tracking-widest font-bold text-muted">
+            Formats to schedule each day
+          </span>
+          <div className="flex gap-2 overflow-x-auto pb-1 mt-1">
+            {formats.map((f) => {
+              const on = picked.includes(f.slug);
+              return (
+                <button
+                  key={f.slug}
+                  type="button"
+                  onClick={() => toggle(f.slug)}
+                  className={`shrink-0 w-16 border-2 rounded-md overflow-hidden nb-press ${
+                    on ? "border-line nb-shadow-sm" : "border-line/40 opacity-60"
+                  }`}
+                >
+                  <FormatThumb fmt={f} size={60} />
+                  <span className="block px-1 py-0.5 text-[8px] font-bold truncate">
+                    {f.title}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <button
+        type="button"
+        onClick={generate}
+        disabled={!canGenerate}
+        className="w-full border-2 border-line bg-ink text-background rounded-md px-2 py-2 text-xs font-black uppercase tracking-widest nb-press disabled:opacity-40"
+      >
+        Generate {count} {count === 1 ? "day" : "days"}
+      </button>
+    </div>
+  );
+}
+
+function GroupsManager({
+  groups,
+  formats,
+  onChange,
+}: {
+  groups: CalendarGroup[];
+  formats: FormatOption[];
+  onChange: (groups: CalendarGroup[]) => void;
+}) {
+  const fmtBySlug = useMemo(() => {
+    const m = new Map<string, FormatOption>();
+    for (const f of formats) m.set(f.slug, f);
+    return m;
+  }, [formats]);
+
+  function patchGroup(id: string, patch: Partial<CalendarGroup>) {
+    onChange(groups.map((g) => (g.id === id ? { ...g, ...patch } : g)));
+  }
+  function removeGroup(id: string) {
+    onChange(groups.filter((g) => g.id !== id));
+  }
+  function addGroup() {
+    const letter = String.fromCharCode(65 + groups.length); // A, B, C…
+    onChange([
+      ...groups,
+      { id: genId(), name: `Group ${letter}`, items: [] },
+    ]);
+  }
+  function setItems(gid: string, items: CalendarGroupItem[]) {
+    patchGroup(gid, { items });
+  }
+  function addItem(g: CalendarGroup, formatSlug?: string) {
+    const label = `B${g.items.length + 1}`;
+    setItems(g.id, [...g.items, { id: genId(), label, formatSlug }]);
+  }
+  function patchItem(g: CalendarGroup, idx: number, patch: Partial<CalendarGroupItem>) {
+    setItems(
+      g.id,
+      g.items.map((it, i) => (i === idx ? { ...it, ...patch } : it))
+    );
+  }
+  function removeItem(g: CalendarGroup, idx: number) {
+    setItems(g.id, g.items.filter((_, i) => i !== idx));
+  }
+  function moveItem(g: CalendarGroup, idx: number, dir: -1 | 1) {
+    const t = idx + dir;
+    if (t < 0 || t >= g.items.length) return;
+    const next = [...g.items];
+    [next[idx], next[t]] = [next[t], next[idx]];
+    setItems(g.id, next);
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-[10px] text-muted leading-relaxed">
+        A group is an ordered series of scripts (B1, B2, B3…). Use{" "}
+        <span className="font-bold">Auto-fill → Cycle a group</span> to spread one
+        per day across the month.
+      </p>
+
+      {groups.map((g) => (
+        <div key={g.id} className="border-2 border-line bg-paper rounded-md p-2.5 space-y-2">
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={g.name}
+              onChange={(e) => patchGroup(g.id, { name: e.target.value })}
+              placeholder="Group name"
+              className="flex-1 border-2 border-line rounded-sm px-2 py-1 text-sm font-black focus:outline-none focus:border-accent bg-background"
+            />
+            <span className="text-[10px] uppercase tracking-widest font-bold text-muted">
+              {g.items.length} items
+            </span>
+            <button
+              type="button"
+              onClick={() => removeGroup(g.id)}
+              aria-label="Remove group"
+              className="w-7 h-7 border-2 border-line bg-background rounded-sm font-black nb-press"
+            >
+              ×
+            </button>
+          </div>
+
+          {g.items.map((it, idx) => {
+            const isCustom = it.formatSlug === undefined;
+            const fmt = it.formatSlug ? fmtBySlug.get(it.formatSlug) : undefined;
             return (
+              <div key={it.id} className="border-2 border-line bg-background rounded-md p-2 flex gap-2">
+                <input
+                  type="text"
+                  value={it.label ?? ""}
+                  onChange={(e) => patchItem(g, idx, { label: e.target.value })}
+                  placeholder="B1"
+                  className="w-12 border-2 border-line rounded-sm px-1 py-1 text-xs font-black text-center uppercase tracking-widest focus:outline-none focus:border-accent bg-paper shrink-0 self-start"
+                />
+                {!isCustom && <FormatThumb fmt={fmt} size={40} />}
+                <div className="flex-1 min-w-0 space-y-1.5">
+                  {isCustom ? (
+                    <>
+                      <input
+                        type="text"
+                        value={it.title ?? ""}
+                        onChange={(e) => patchItem(g, idx, { title: e.target.value })}
+                        placeholder="Custom script title"
+                        className="w-full border-2 border-line rounded-sm px-2 py-1 text-sm font-bold focus:outline-none focus:border-accent bg-background"
+                      />
+                      <textarea
+                        value={it.script ?? ""}
+                        onChange={(e) => patchItem(g, idx, { script: e.target.value })}
+                        rows={2}
+                        placeholder={"0–2s: Hook…"}
+                        className="w-full border-2 border-line rounded-sm px-2 py-1 text-sm focus:outline-none focus:border-accent bg-background font-mono leading-relaxed"
+                      />
+                    </>
+                  ) : (
+                    <div className="font-bold text-sm leading-tight pt-0.5">
+                      {fmt?.title ?? it.formatSlug}
+                    </div>
+                  )}
+                  <input
+                    type="text"
+                    value={it.note ?? ""}
+                    onChange={(e) => patchItem(g, idx, { note: e.target.value })}
+                    placeholder="Note (optional)"
+                    className="w-full border-2 border-line rounded-sm px-2 py-1 text-xs focus:outline-none focus:border-accent bg-background"
+                  />
+                </div>
+                <div className="flex flex-col gap-1 shrink-0">
+                  <button
+                    type="button"
+                    aria-label="Move up"
+                    disabled={idx === 0}
+                    onClick={() => moveItem(g, idx, -1)}
+                    className="w-7 h-7 border-2 border-line bg-background rounded-sm font-black nb-press disabled:opacity-30"
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Move down"
+                    disabled={idx === g.items.length - 1}
+                    onClick={() => moveItem(g, idx, 1)}
+                    className="w-7 h-7 border-2 border-line bg-background rounded-sm font-black nb-press disabled:opacity-30"
+                  >
+                    ↓
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Remove item"
+                    onClick={() => removeItem(g, idx)}
+                    className="w-7 h-7 border-2 border-line bg-background rounded-sm font-black nb-press"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Add item — tap a format thumbnail or custom */}
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {formats.map((f) => (
               <button
                 key={f.slug}
                 type="button"
-                onClick={() => toggle(f.slug)}
-                className={`shrink-0 w-16 border-2 rounded-md overflow-hidden nb-press ${
-                  on ? "border-line nb-shadow-sm" : "border-line/40 opacity-60"
-                }`}
+                onClick={() => addItem(g, f.slug)}
+                title={`Add ${f.title}`}
+                className="shrink-0 w-16 border-2 border-line bg-background rounded-md overflow-hidden nb-press"
               >
                 <FormatThumb fmt={f} size={60} />
                 <span className="block px-1 py-0.5 text-[8px] font-bold truncate">
                   {f.title}
                 </span>
               </button>
-            );
-          })}
+            ))}
+            <button
+              type="button"
+              onClick={() => addItem(g)}
+              title="Add custom item"
+              className="shrink-0 w-16 border-2 border-dashed border-line bg-background rounded-md nb-press flex flex-col items-center justify-center gap-0.5 py-2 text-muted hover:text-accent hover:border-accent"
+            >
+              <span className="text-lg font-black leading-none">+</span>
+              <span className="text-[8px] font-bold uppercase tracking-widest">
+                Custom
+              </span>
+            </button>
+          </div>
         </div>
-      </div>
+      ))}
 
       <button
         type="button"
-        onClick={generate}
-        disabled={picked.length === 0}
-        className="w-full border-2 border-line bg-ink text-background rounded-md px-2 py-2 text-xs font-black uppercase tracking-widest nb-press disabled:opacity-40"
+        onClick={addGroup}
+        className="w-full border-2 border-line bg-ink text-background rounded-md px-2 py-2 text-xs font-black uppercase tracking-widest nb-press"
       >
-        Generate {count} {count === 1 ? "day" : "days"}
+        + Add group
       </button>
     </div>
   );
