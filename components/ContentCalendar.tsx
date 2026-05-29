@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ContentCalendar as ContentCalendarData } from "@/lib/db";
 import type { Format } from "@/lib/types";
 
@@ -52,6 +52,37 @@ export function ContentCalendarView({
     for (const f of formats) map.set(f.slug, f);
     return map;
   }, [formats]);
+
+  function thumbFor(a: { formatSlug?: string }): string | undefined {
+    const f = a.formatSlug ? formatBySlug.get(a.formatSlug) : undefined;
+    return f?.thumbnail || f?.examples?.[0]?.thumbnail;
+  }
+
+  // "Done" state lives only in this device's localStorage — no account, no
+  // server, no personal data. Each creator's progress stays on their device.
+  const storageKey = `superbriefed:cal-done:${briefSlug}`;
+  const [done, setDone] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (raw) setDone(new Set(JSON.parse(raw) as string[]));
+    } catch {
+      /* ignore */
+    }
+  }, [storageKey]);
+  function toggleDone(id: string) {
+    setDone((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      try {
+        localStorage.setItem(storageKey, JSON.stringify([...next]));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }
 
   // date(ISO) -> assignment count, plus quick lookup of a day's assignments.
   const dayByDate = useMemo(() => {
@@ -189,6 +220,9 @@ export function ContentCalendarView({
             const isSelected = selected === iso;
             const isToday = iso === todayISO;
             const dayNum = Number(iso.slice(8, 10));
+            const dayThumbs = day ? day.assignments.slice(0, 2).map(thumbFor) : [];
+            const allDone =
+              has && day!.assignments.every((a) => done.has(a.id));
             return (
               <button
                 key={iso}
@@ -215,16 +249,33 @@ export function ContentCalendarView({
                   {dayNum}
                 </span>
                 {has && (
-                  <span className="mt-auto inline-flex items-center gap-1">
-                    <span
-                      className={`text-[10px] font-black leading-none px-1 py-0.5 border-2 border-line rounded-sm ${
-                        isSelected
-                          ? "bg-background text-ink"
-                          : "bg-accent text-accent-ink"
-                      }`}
-                    >
-                      {count}
-                    </span>
+                  <span className="mt-auto flex items-center gap-0.5">
+                    {allDone ? (
+                      <span
+                        className={`text-[11px] font-black leading-none ${
+                          isSelected ? "text-accent-ink" : "text-success-ink"
+                        }`}
+                      >
+                        ✓ done
+                      </span>
+                    ) : (
+                      dayThumbs.map((t, j) =>
+                        t ? (
+                          /* eslint-disable-next-line @next/next/no-img-element */
+                          <img
+                            key={j}
+                            src={t}
+                            alt=""
+                            className="w-4 h-4 sm:w-5 sm:h-5 object-cover border border-line rounded-[3px] bg-paper"
+                          />
+                        ) : (
+                          <span
+                            key={j}
+                            className="w-4 h-4 sm:w-5 sm:h-5 border border-line rounded-[3px] bg-accent"
+                          />
+                        )
+                      )
+                    )}
                   </span>
                 )}
               </button>
@@ -238,10 +289,23 @@ export function ContentCalendarView({
         <section className="space-y-4">
           <div className="flex items-baseline justify-between gap-2 flex-wrap">
             <h2 className="text-xl font-black">{prettyDate(selectedDay.date)}</h2>
-            <span className="inline-flex items-center border-2 border-line bg-accent text-accent-ink px-2 py-0.5 text-[11px] font-bold uppercase tracking-widest rounded-sm">
-              {selectedDay.assignments.length}{" "}
-              {selectedDay.assignments.length === 1 ? "script" : "scripts"} to film
-            </span>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {(() => {
+                const total = selectedDay.assignments.length;
+                const doneCount = selectedDay.assignments.filter((a) =>
+                  done.has(a.id)
+                ).length;
+                return doneCount > 0 ? (
+                  <span className="inline-flex items-center border-2 border-line bg-success text-success-ink px-2 py-0.5 text-[11px] font-bold uppercase tracking-widest rounded-sm">
+                    {doneCount}/{total} done
+                  </span>
+                ) : null;
+              })()}
+              <span className="inline-flex items-center border-2 border-line bg-accent text-accent-ink px-2 py-0.5 text-[11px] font-bold uppercase tracking-widest rounded-sm">
+                {selectedDay.assignments.length}{" "}
+                {selectedDay.assignments.length === 1 ? "script" : "scripts"} to film
+              </span>
+            </div>
           </div>
           <ol className="space-y-3">
             {selectedDay.assignments.map((a, i) => {
@@ -252,10 +316,13 @@ export function ContentCalendarView({
                 a.title?.trim() || linked?.title || "Script";
               const thumb =
                 linked?.thumbnail || linked?.examples?.[0]?.thumbnail;
+              const isDone = done.has(a.id);
               return (
                 <li
                   key={a.id}
-                  className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 sm:p-5"
+                  className={`border-2 border-line rounded-md nb-shadow-sm p-4 sm:p-5 ${
+                    isDone ? "bg-paper opacity-70" : "bg-background"
+                  }`}
                 >
                   <div className="flex items-start gap-3">
                     {thumb ? (
@@ -307,6 +374,18 @@ export function ContentCalendarView({
                           </p>
                         </div>
                       )}
+                      <button
+                        type="button"
+                        onClick={() => toggleDone(a.id)}
+                        aria-pressed={isDone}
+                        className={`inline-flex items-center gap-1.5 border-2 border-line px-3 py-1.5 rounded-sm nb-press text-[11px] font-black uppercase tracking-widest ${
+                          isDone
+                            ? "bg-success text-success-ink"
+                            : "bg-background text-ink"
+                        }`}
+                      >
+                        {isDone ? "✓ Done — undo" : "Mark as done"}
+                      </button>
                     </div>
                   </div>
                 </li>
