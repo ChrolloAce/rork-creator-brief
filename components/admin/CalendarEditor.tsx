@@ -305,6 +305,26 @@ export function CalendarEditor({
             );
           })}
         </div>
+
+        {cal.days.length > 0 && (
+          <div className="flex justify-end mt-3 pt-3 border-t-2 border-line">
+            <button
+              type="button"
+              onClick={() => {
+                if (
+                  window.confirm(
+                    `Clear the whole calendar? This removes all ${cal.days.length} scheduled ${cal.days.length === 1 ? "day" : "days"}. Your groups are kept.`
+                  )
+                ) {
+                  update({ days: [] });
+                }
+              }}
+              className="border-2 border-line bg-background px-2.5 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest text-[#b91c1c] hover:bg-[#fee2e2]"
+            >
+              🗑 Clear calendar
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Selected day editor */}
