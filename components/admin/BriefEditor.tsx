@@ -455,6 +455,73 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
       return [{ slug, title, thumbnail }];
     });
 
+  // All formats in this brief (incl. hidden) as { slug, title } — used by the
+  // per-format "Copy from another format" picker.
+  const allFormatsList = effectiveOrder.flatMap((slug) => {
+    const meta = metaFor(slug);
+    if (!meta) return [];
+    return [{ slug, title: cur.formatOverrides?.[slug]?.title ?? meta.title }];
+  });
+
+  // Materialize a meta list value (string | {text,...}) into override rows.
+  function toRows(
+    items: ReadonlyArray<string | { text: string; image?: string; hidden?: boolean }>
+  ): { text: string; image?: string; hidden?: boolean }[] {
+    return items.map((i) =>
+      typeof i === "string" ? { text: i } : { ...i }
+    );
+  }
+
+  // Copy selected parts from another format in this brief into `targetSlug`'s
+  // override. Each part takes the SOURCE's effective value (its override if set,
+  // else its static meta default) so the target ends up looking like the source.
+  function copyPartsFromFormat(
+    targetSlug: string,
+    sourceSlug: string,
+    parts: string[]
+  ) {
+    if (!cur || parts.length === 0) return;
+    const srcMeta = metaFor(sourceSlug);
+    const srcOv = cur.formatOverrides?.[sourceSlug] ?? {};
+    const tgtOv = cur.formatOverrides?.[targetSlug] ?? {};
+    const next: FormatOverride = { ...tgtOv };
+    for (const part of parts) {
+      if (part === "assets") {
+        next.assets = srcOv.assets ? srcOv.assets.map((a) => ({ ...a })) : undefined;
+      } else if (part === "sectionOrder") {
+        next.sectionOrder = srcOv.sectionOrder ? [...srcOv.sectionOrder] : undefined;
+      } else if (part === "hiddenSections") {
+        next.hiddenSections = srcOv.hiddenSections ? [...srcOv.hiddenSections] : undefined;
+      } else if (part === "script") {
+        next.script = srcOv.script ?? srcMeta?.script;
+      } else if (part === "structure") {
+        next.structure = srcOv.structure
+          ? srcOv.structure.map((i) => ({ ...i }))
+          : srcMeta
+            ? toRows(srcMeta.structure)
+            : undefined;
+      } else if (part === "tips") {
+        next.tips = srcOv.tips
+          ? srcOv.tips.map((i) => ({ ...i }))
+          : srcMeta
+            ? toRows(srcMeta.tips)
+            : undefined;
+      } else if (part === "bestFor") {
+        next.bestFor = srcOv.bestFor
+          ? srcOv.bestFor.map((i) => ({ ...i }))
+          : srcMeta
+            ? toRows(srcMeta.bestFor)
+            : undefined;
+      }
+    }
+    const nextCur: Curation = {
+      ...cur,
+      formatOverrides: { ...(cur.formatOverrides ?? {}), [targetSlug]: next },
+    };
+    setCur(nextCur);
+    void persist(nextCur);
+  }
+
   function applyOrder(nextOrder: string[]) {
     if (!cur) return;
     const nextCur: Curation = { ...cur, formatOrder: nextOrder };
@@ -678,6 +745,10 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
               copySectionToBrief(targetSlug, slug)
             }
             onCloneInBrief={() => cloneSectionInBrief(slug)}
+            allFormats={allFormatsList}
+            onCopyPartsFrom={(sourceSlug, parts) =>
+              copyPartsFromFormat(slug, sourceSlug, parts)
+            }
             publicStatsVisible={publicStatsVisible}
             publicStatsEnabled={publicStatsEnabled}
             onPublicStatsChange={updatePublicStats}
@@ -1689,12 +1760,145 @@ function AskClaude({
   );
 }
 
+const COPY_PARTS: { key: string; label: string }[] = [
+  { key: "assets", label: "Assets" },
+  { key: "sectionOrder", label: "Section order" },
+  { key: "script", label: "Script" },
+  { key: "structure", label: "Structure" },
+  { key: "tips", label: "Tips" },
+  { key: "bestFor", label: "Best for" },
+  { key: "hiddenSections", label: "Visibility" },
+];
+
+// Per-format "copy from another format" picker: choose a source format in this
+// brief + which parts to pull in (assets, order, script, structure, …).
+function CopyFromFormat({
+  otherFormats,
+  onApply,
+}: {
+  otherFormats: Array<{ slug: string; title: string }>;
+  onApply: (sourceSlug: string, parts: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [source, setSource] = useState("");
+  const [parts, setParts] = useState<string[]>(["assets"]);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  if (otherFormats.length === 0) return null;
+  const selected = source || otherFormats[0].slug;
+
+  function toggle(key: string) {
+    setParts((p) =>
+      p.includes(key) ? p.filter((k) => k !== key) : [...p, key]
+    );
+  }
+
+  function apply() {
+    if (!selected || parts.length === 0) return;
+    onApply(selected, parts);
+    const name = otherFormats.find((f) => f.slug === selected)?.title ?? selected;
+    setMsg(
+      `Copied ${parts.length} part${parts.length === 1 ? "" : "s"} from ${name} ✓`
+    );
+    setTimeout(() => setMsg(null), 2500);
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="mb-3 border-2 border-line bg-background px-2.5 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+      >
+        ⧉ Copy from another format
+      </button>
+    );
+  }
+
+  return (
+    <div className="mb-3 border-2 border-line bg-paper rounded-md p-3 space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+          ⧉ Copy from another format
+        </span>
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          className="text-xs font-bold text-muted hover:text-ink"
+        >
+          Close
+        </button>
+      </div>
+      <label className="block">
+        <span className="text-[9px] uppercase tracking-widest font-bold text-muted">
+          Source format
+        </span>
+        <select
+          value={selected}
+          onChange={(e) => setSource(e.target.value)}
+          className="mt-1 w-full border-2 border-line rounded-sm px-2 py-1.5 text-sm font-bold bg-background focus:outline-none focus:border-accent"
+        >
+          {otherFormats.map((f) => (
+            <option key={f.slug} value={f.slug}>
+              {f.title}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div>
+        <span className="text-[9px] uppercase tracking-widest font-bold text-muted">
+          What to copy
+        </span>
+        <div className="flex flex-wrap gap-1.5 mt-1">
+          {COPY_PARTS.map((p) => {
+            const on = parts.includes(p.key);
+            return (
+              <button
+                key={p.key}
+                type="button"
+                onClick={() => toggle(p.key)}
+                className={`border-2 rounded-sm px-2 py-1 text-[11px] font-bold nb-press ${
+                  on
+                    ? "border-line bg-accent text-accent-ink"
+                    : "border-line/40 bg-background text-muted"
+                }`}
+              >
+                {p.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={apply}
+        disabled={parts.length === 0}
+        className="w-full border-2 border-line bg-ink text-background rounded-md px-2 py-1.5 text-xs font-black uppercase tracking-widest nb-press disabled:opacity-40"
+      >
+        Copy into this format
+      </button>
+      <p className="text-[10px] text-muted">
+        Overwrites the chosen parts of this format with{" "}
+        {otherFormats.find((f) => f.slug === selected)?.title ?? "the source"}
+        &rsquo;s. Use Reset to default to undo.
+      </p>
+      {msg && (
+        <p className="text-[11px] font-bold border-2 border-line bg-background px-2 py-1 rounded-sm">
+          {msg}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function FormatSection({
   slug,
   briefName,
   availableBriefs,
   onCopyToBrief,
   onCloneInBrief,
+  allFormats,
+  onCopyPartsFrom,
   publicStatsVisible,
   publicStatsEnabled,
   onPublicStatsChange,
@@ -1726,6 +1930,8 @@ function FormatSection({
   availableBriefs: Array<{ slug: string; name: string }>;
   onCopyToBrief: (targetSlug: string) => Promise<{ ok: boolean; error?: string }>;
   onCloneInBrief: () => Promise<{ ok: boolean; error?: string; newSlug?: string }>;
+  allFormats: Array<{ slug: string; title: string }>;
+  onCopyPartsFrom: (sourceSlug: string, parts: string[]) => void;
   publicStatsVisible: SectionStatKey[];
   publicStatsEnabled: boolean;
   onPublicStatsChange: (patch: { visible?: SectionStatKey[]; publicEnabled?: boolean }) => void;
@@ -1899,6 +2105,11 @@ function FormatSection({
           {copyMsg}
         </p>
       )}
+
+      <CopyFromFormat
+        otherFormats={allFormats.filter((f) => f.slug !== slug)}
+        onApply={onCopyPartsFrom}
+      />
 
       <SectionStats
         videos={pinnedVideos}
