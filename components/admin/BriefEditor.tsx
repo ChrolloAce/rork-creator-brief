@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { HookCategory, VideoExample } from "@/lib/types";
 import {
   SECTION_STAT_KEYS,
@@ -484,40 +484,50 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
     const srcMeta = metaFor(sourceSlug);
     const srcOv = cur.formatOverrides?.[sourceSlug] ?? {};
     const tgtOv = cur.formatOverrides?.[targetSlug] ?? {};
-    const next: FormatOverride = { ...tgtOv };
+    const nextOv: FormatOverride = { ...tgtOv };
+    let overrideTouched = false;
     for (const part of parts) {
       if (part === "assets") {
-        next.assets = srcOv.assets ? srcOv.assets.map((a) => ({ ...a })) : undefined;
+        nextOv.assets = srcOv.assets ? srcOv.assets.map((a) => ({ ...a })) : undefined;
+        overrideTouched = true;
       } else if (part === "sectionOrder") {
-        next.sectionOrder = srcOv.sectionOrder ? [...srcOv.sectionOrder] : undefined;
+        nextOv.sectionOrder = srcOv.sectionOrder ? [...srcOv.sectionOrder] : undefined;
+        overrideTouched = true;
       } else if (part === "hiddenSections") {
-        next.hiddenSections = srcOv.hiddenSections ? [...srcOv.hiddenSections] : undefined;
+        nextOv.hiddenSections = srcOv.hiddenSections ? [...srcOv.hiddenSections] : undefined;
+        overrideTouched = true;
       } else if (part === "script") {
-        next.script = srcOv.script ?? srcMeta?.script;
+        nextOv.script = srcOv.script ?? srcMeta?.script;
+        overrideTouched = true;
       } else if (part === "structure") {
-        next.structure = srcOv.structure
+        nextOv.structure = srcOv.structure
           ? srcOv.structure.map((i) => ({ ...i }))
           : srcMeta
             ? toRows(srcMeta.structure)
             : undefined;
-      } else if (part === "tips") {
-        next.tips = srcOv.tips
-          ? srcOv.tips.map((i) => ({ ...i }))
-          : srcMeta
-            ? toRows(srcMeta.tips)
-            : undefined;
-      } else if (part === "bestFor") {
-        next.bestFor = srcOv.bestFor
-          ? srcOv.bestFor.map((i) => ({ ...i }))
-          : srcMeta
-            ? toRows(srcMeta.bestFor)
-            : undefined;
+        overrideTouched = true;
       }
     }
-    const nextCur: Curation = {
-      ...cur,
-      formatOverrides: { ...(cur.formatOverrides ?? {}), [targetSlug]: next },
-    };
+    const nextCur: Curation = { ...cur };
+    if (overrideTouched) {
+      nextCur.formatOverrides = {
+        ...(cur.formatOverrides ?? {}),
+        [targetSlug]: nextOv,
+      };
+    }
+    // "pins" copies the source format's videos. Metadata is keyed globally by
+    // dbId, so copying the id list is enough for the pins to resolve.
+    if (parts.includes("pins")) {
+      const srcPins = cur.formatPins?.[sourceSlug] ?? [];
+      nextCur.formatPins = { ...cur.formatPins, [targetSlug]: [...srcPins] };
+      setPreview((p) => ({
+        ...p,
+        [targetSlug]: {
+          pinnedVideos: [...(p[sourceSlug]?.pinnedVideos ?? [])],
+          autoVideos: p[targetSlug]?.autoVideos ?? [],
+        },
+      }));
+    }
     setCur(nextCur);
     void persist(nextCur);
   }
@@ -756,12 +766,6 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
             defaultTagline={meta.tagline}
             defaultDescription={meta.description}
             defaultStructure={meta.structure.map((i) =>
-              typeof i === "string" ? i : i.text
-            )}
-            defaultTips={meta.tips.map((i) =>
-              typeof i === "string" ? i : i.text
-            )}
-            defaultBestFor={meta.bestFor.map((i) =>
               typeof i === "string" ? i : i.text
             )}
             linkedHookSlugs={meta.hookCategorySlugs}
@@ -1096,6 +1100,7 @@ function ListEditor({
   hidden = false,
   onToggleHidden,
   onChange,
+  headerAction,
 }: {
   label: string;
   items?: RowItem[];
@@ -1107,6 +1112,7 @@ function ListEditor({
   hidden?: boolean;
   onToggleHidden?: () => void;
   onChange: (next: RowItem[] | undefined) => void;
+  headerAction?: ReactNode;
 }) {
   const effective: RowItem[] =
     items ?? defaults.map((s) => ({ text: s }));
@@ -1124,15 +1130,18 @@ function ListEditor({
             </span>
           )}
         </div>
-        {onToggleHidden && (
-          <button
-            type="button"
-            onClick={onToggleHidden}
-            className="border-2 border-line bg-background px-2 py-0.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
-          >
-            {hidden ? "Show" : "Hide section"}
-          </button>
-        )}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {headerAction}
+          {onToggleHidden && (
+            <button
+              type="button"
+              onClick={onToggleHidden}
+              className="border-2 border-line bg-background px-2 py-0.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+            >
+              {hidden ? "Show" : "Hide section"}
+            </button>
+          )}
+        </div>
       </div>
       <div className="space-y-2">
         {effective.map((row, i) => (
@@ -1234,18 +1243,14 @@ function ListEditor({
 const SECTION_LABELS: Record<string, string> = {
   script: "Script",
   examples: "Example videos",
-  bestFor: "Best For",
   structure: "Shot-by-shot structure",
-  tips: "Tips",
   hooks: "Hooks",
   assets: "Downloadable assets",
 };
 const ALL_SECTION_KEYS = [
   "script",
   "examples",
-  "bestFor",
   "structure",
-  "tips",
   "hooks",
   "assets",
 ];
@@ -1253,9 +1258,11 @@ const ALL_SECTION_KEYS = [
 function SectionOrderEditor({
   value,
   onChange,
+  headerAction,
 }: {
   value: string[] | undefined;
   onChange: (next: string[] | undefined) => void;
+  headerAction?: ReactNode;
 }) {
   const order = (() => {
     if (!value || value.length === 0) return ALL_SECTION_KEYS;
@@ -1289,15 +1296,18 @@ function SectionOrderEditor({
         <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
           Section order
         </div>
-        {isCustom && (
-          <button
-            type="button"
-            onClick={() => onChange(undefined)}
-            className="text-[10px] font-bold uppercase tracking-widest text-muted hover:text-accent underline"
-          >
-            Reset to default
-          </button>
-        )}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {headerAction}
+          {isCustom && (
+            <button
+              type="button"
+              onClick={() => onChange(undefined)}
+              className="text-[10px] font-bold uppercase tracking-widest text-muted hover:text-accent underline"
+            >
+              Reset to default
+            </button>
+          )}
+        </div>
       </div>
       <ul className="space-y-1">
         {order.map((key, i) => (
@@ -1375,9 +1385,11 @@ function SectionOrderEditor({
 function AssetManager({
   assets,
   onChange,
+  headerAction,
 }: {
   assets: FormatAssetRow[];
   onChange: (next: FormatAssetRow[] | undefined) => void;
+  headerAction?: ReactNode;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -1451,6 +1463,7 @@ function AssetManager({
         <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
           Downloadable assets ({assets.length})
         </div>
+        {headerAction}
       </div>
 
       <div className="space-y-2">
@@ -1761,14 +1774,62 @@ function AskClaude({
 }
 
 const COPY_PARTS: { key: string; label: string }[] = [
+  { key: "pins", label: "Videos" },
   { key: "assets", label: "Assets" },
-  { key: "sectionOrder", label: "Section order" },
   { key: "script", label: "Script" },
   { key: "structure", label: "Structure" },
-  { key: "tips", label: "Tips" },
-  { key: "bestFor", label: "Best for" },
+  { key: "sectionOrder", label: "Section order" },
   { key: "hiddenSections", label: "Visibility" },
 ];
+
+// Small per-section copy control: a ⧉ button that opens a list of other
+// formats; picking one copies just that section into the current format.
+function SectionCopyButton({
+  part,
+  label,
+  otherFormats,
+  onApply,
+}: {
+  part: string;
+  label: string;
+  otherFormats: Array<{ slug: string; title: string }>;
+  onApply: (sourceSlug: string, parts: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  if (otherFormats.length === 0) return null;
+  return (
+    <div className="relative inline-block">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        title={`Copy ${label} from another format`}
+        className="border-2 border-line bg-background px-2 py-0.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+      >
+        ⧉ Copy
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-10 border-2 border-line bg-background rounded-md nb-shadow-sm min-w-[180px] max-h-[260px] overflow-y-auto">
+          <div className="px-3 py-2 text-[9px] uppercase tracking-[0.2em] font-bold text-muted border-b-2 border-line">
+            Copy {label} from…
+          </div>
+          {otherFormats.map((f) => (
+            <button
+              key={f.slug}
+              type="button"
+              onClick={() => {
+                onApply(f.slug, [part]);
+                setOpen(false);
+              }}
+              className="w-full text-left px-3 py-2 text-xs font-bold hover:bg-paper border-b border-line last:border-b-0 truncate"
+            >
+              {f.title}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Per-format "copy from another format" picker: choose a source format in this
 // brief + which parts to pull in (assets, order, script, structure, …).
@@ -1906,8 +1967,6 @@ function FormatSection({
   defaultTagline,
   defaultDescription,
   defaultStructure,
-  defaultTips,
-  defaultBestFor,
   linkedHookSlugs,
   defaultHookCategories,
   hookCategories,
@@ -1939,8 +1998,6 @@ function FormatSection({
   defaultTagline: string;
   defaultDescription: string;
   defaultStructure: string[];
-  defaultTips: string[];
-  defaultBestFor: string[];
   linkedHookSlugs: string[];
   defaultHookCategories: HookCategory[];
   hookCategories: BriefHookCategory[] | null;
@@ -1968,6 +2025,9 @@ function FormatSection({
   // sections of the same brief.
   const sectionExcluded = new Set<string>(globalExcluded);
   for (const id of pins) sectionExcluded.add(id);
+
+  // Other formats in this brief — sources for the per-section copy buttons.
+  const otherFormats = allFormats.filter((f) => f.slug !== slug);
 
   async function handleCopyTo(targetSlug: string, targetName: string) {
     if (copyBusy) return;
@@ -2106,10 +2166,7 @@ function FormatSection({
         </p>
       )}
 
-      <CopyFromFormat
-        otherFormats={allFormats.filter((f) => f.slug !== slug)}
-        onApply={onCopyPartsFrom}
-      />
+      <CopyFromFormat otherFormats={otherFormats} onApply={onCopyPartsFrom} />
 
       <SectionStats
         videos={pinnedVideos}
@@ -2163,8 +2220,6 @@ function FormatSection({
           override.description ||
           override.script ||
           override.structure ||
-          override.tips ||
-          override.bestFor ||
           override.hiddenSections ||
           override.sectionOrder ||
           override.assets) && (
@@ -2187,13 +2242,21 @@ function FormatSection({
             </span>
           )}
         </h3>
-        <button
-          type="button"
-          onClick={() => toggleSectionHidden("examples")}
-          className="border-2 border-line bg-background px-2 py-0.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
-        >
-          {isSectionHidden("examples") ? "Show videos" : "Hide videos"}
-        </button>
+        <div className="flex items-center gap-1.5">
+          <SectionCopyButton
+            part="pins"
+            label="videos"
+            otherFormats={otherFormats}
+            onApply={onCopyPartsFrom}
+          />
+          <button
+            type="button"
+            onClick={() => toggleSectionHidden("examples")}
+            className="border-2 border-line bg-background px-2 py-0.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+          >
+            {isSectionHidden("examples") ? "Show videos" : "Hide videos"}
+          </button>
+        </div>
       </div>
       <p className="text-xs text-muted mb-3">
         {pinnedVideos.length > 0
@@ -2236,18 +2299,13 @@ function FormatSection({
           onChange={(next) =>
             onChangeOverride({ ...override, sectionOrder: next })
           }
-        />
-        <ListEditor
-          label="Best For"
-          items={override.bestFor}
-          defaults={defaultBestFor}
-          itemLabel="audience"
-          rows={2}
-          placeholder="Audience this format works for"
-          hidden={isSectionHidden("bestFor")}
-          onToggleHidden={() => toggleSectionHidden("bestFor")}
-          onChange={(next) =>
-            onChangeOverride({ ...override, bestFor: next })
+          headerAction={
+            <SectionCopyButton
+              part="sectionOrder"
+              label="section order"
+              otherFormats={otherFormats}
+              onApply={onCopyPartsFrom}
+            />
           }
         />
         <ListEditor
@@ -2263,18 +2321,13 @@ function FormatSection({
           onChange={(next) =>
             onChangeOverride({ ...override, structure: next })
           }
-        />
-        <ListEditor
-          label="Tips"
-          items={override.tips}
-          defaults={defaultTips}
-          itemLabel="tip"
-          rows={2}
-          placeholder="Record the hook 5–10 times..."
-          hidden={isSectionHidden("tips")}
-          onToggleHidden={() => toggleSectionHidden("tips")}
-          onChange={(next) =>
-            onChangeOverride({ ...override, tips: next })
+          headerAction={
+            <SectionCopyButton
+              part="structure"
+              label="structure"
+              otherFormats={otherFormats}
+              onApply={onCopyPartsFrom}
+            />
           }
         />
         <div className={isSectionHidden("script") ? "opacity-60" : undefined}>
@@ -2287,13 +2340,21 @@ function FormatSection({
                 </span>
               )}
             </div>
-            <button
-              type="button"
-              onClick={() => toggleSectionHidden("script")}
-              className="border-2 border-line bg-background px-2 py-0.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
-            >
-              {isSectionHidden("script") ? "Show" : "Hide section"}
-            </button>
+            <div className="flex items-center gap-1.5">
+              <SectionCopyButton
+                part="script"
+                label="script"
+                otherFormats={otherFormats}
+                onApply={onCopyPartsFrom}
+              />
+              <button
+                type="button"
+                onClick={() => toggleSectionHidden("script")}
+                className="border-2 border-line bg-background px-2 py-0.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+              >
+                {isSectionHidden("script") ? "Show" : "Hide section"}
+              </button>
+            </div>
           </div>
           <textarea
             value={override.script ?? ""}
@@ -2318,6 +2379,14 @@ function FormatSection({
               onChange={(next) =>
                 onChangeOverride({ ...override, assets: next })
               }
+              headerAction={
+                <SectionCopyButton
+                  part="assets"
+                  label="assets"
+                  otherFormats={otherFormats}
+                  onApply={onCopyPartsFrom}
+                />
+              }
             />
           </div>
           <AskClaude
@@ -2329,10 +2398,7 @@ function FormatSection({
               .filter((i) => !("hidden" in i ? i.hidden : false))
               .map((i) => (typeof i === "string" ? i : i.text))
               .filter(Boolean)}
-            tips={(override.tips ?? defaultTips.map((t) => ({ text: t })))
-              .filter((i) => !("hidden" in i ? i.hidden : false))
-              .map((i) => (typeof i === "string" ? i : i.text))
-              .filter(Boolean)}
+            tips={[]}
             hooks={(() => {
               const cats = hookCategories ?? [];
               const linked = linkedHookSlugs

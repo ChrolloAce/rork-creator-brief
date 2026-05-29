@@ -483,30 +483,6 @@ export function FormatView({
           <VideoCarousel videos={format.examples} />
         </section>
       ) : null,
-    bestFor:
-      !isHidden(format, "bestFor") && visibleItems(format.bestFor).length > 0 ? (
-        <section className="border-2 border-line bg-background rounded-md nb-shadow-sm p-5 sm:p-6">
-          <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-4">
-            Best for
-          </div>
-          <ul className="space-y-3">
-            {visibleItems(format.bestFor).map((item, i) => (
-              <ItemRow
-                key={i}
-                item={item}
-                badge={
-                  <span
-                    className="shrink-0 w-7 h-7 border-2 border-line bg-paper flex items-center justify-center font-black rounded-sm"
-                    aria-hidden
-                  >
-                    ★
-                  </span>
-                }
-              />
-            ))}
-          </ul>
-        </section>
-      ) : null,
     structure:
       !isHidden(format, "structure") && visibleItems(format.structure).length > 0 ? (
         <section className="border-2 border-line bg-background rounded-md nb-shadow-sm p-5 sm:p-6">
@@ -529,30 +505,6 @@ export function FormatView({
               />
             ))}
           </ol>
-        </section>
-      ) : null,
-    tips:
-      !isHidden(format, "tips") && visibleItems(format.tips).length > 0 ? (
-        <section className="border-2 border-line bg-background rounded-md nb-shadow-sm p-5 sm:p-6">
-          <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-4">
-            Tips
-          </div>
-          <ul className="space-y-3">
-            {visibleItems(format.tips).map((item, i) => (
-              <ItemRow
-                key={i}
-                item={item}
-                badge={
-                  <span
-                    className="shrink-0 w-7 h-7 border-2 border-line bg-paper flex items-center justify-center font-black rounded-sm"
-                    aria-hidden
-                  >
-                    ✓
-                  </span>
-                }
-              />
-            ))}
-          </ul>
         </section>
       ) : null,
     hooks:

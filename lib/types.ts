@@ -32,9 +32,7 @@ export type FormatListItem = string | ListItem;
 // Sections of a format that can be hidden or reordered on the public
 // page per brief.
 export type FormatSectionKey =
-  | "bestFor"
   | "structure"
-  | "tips"
   | "script"
   | "examples"
   | "hooks"
@@ -45,9 +43,7 @@ export type FormatSectionKey =
 export const DEFAULT_SECTION_ORDER: FormatSectionKey[] = [
   "script",
   "examples",
-  "bestFor",
   "structure",
-  "tips",
   "hooks",
   "assets",
 ];
