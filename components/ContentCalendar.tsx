@@ -271,24 +271,24 @@ export function ContentCalendarView({
                       </span>
                     )}
                     <div className="min-w-0 flex-1 space-y-3">
-                      <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <h3 className="text-lg font-black leading-tight flex items-center gap-2">
-                          {a.label?.trim() && (
-                            <span className="shrink-0 border-2 border-line bg-accent text-accent-ink px-2 py-0.5 rounded-sm text-xs font-black uppercase tracking-widest">
-                              {a.label}
-                            </span>
-                          )}
-                          {heading}
-                        </h3>
-                        {linked && (
+                      <h3 className="text-lg font-black leading-tight flex items-center gap-2 flex-wrap">
+                        {a.label?.trim() && (
+                          <span className="shrink-0 border-2 border-line bg-accent text-accent-ink px-2 py-0.5 rounded-sm text-xs font-black uppercase tracking-widest">
+                            {a.label}
+                          </span>
+                        )}
+                        {heading}
+                      </h3>
+                      {linked && (
+                        <div>
                           <Link
                             href={`/b/${briefSlug}/formats/${linked.slug}`}
-                            className="shrink-0 border-2 border-line bg-accent text-accent-ink px-2.5 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+                            className="inline-flex border-2 border-line bg-accent text-accent-ink px-2.5 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
                           >
                             Open format →
                           </Link>
-                        )}
-                      </div>
+                        </div>
+                      )}
                       {a.note?.trim() && (
                         <div className="border-l-2 border-accent pl-3">
                           <p className="text-sm text-ink leading-relaxed whitespace-pre-line">
