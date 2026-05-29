@@ -508,6 +508,14 @@ const CADENCE_LABELS: Record<Cadence, string> = {
   weekly: "Weekly",
 };
 
+// Random group index for shuffle, avoiding an immediate repeat. Module-level
+// so the impure Math.random call isn't inside a component body.
+function randomIndex(n: number, avoid: number): number {
+  let idx = Math.floor(Math.random() * n);
+  if (n > 1 && idx === avoid) idx = (idx + 1) % n;
+  return idx;
+}
+
 function itemToAssignment(it: CalendarGroupItem): CalendarAssignment {
   return {
     id: genId(),
@@ -540,13 +548,24 @@ function AutoFill({
   const [picked, setPicked] = useState<string[]>(
     formats[0] ? [formats[0].slug] : []
   );
-  const [groupId, setGroupId] = useState<string>(usableGroups[0]?.id ?? "");
+  // Which groups participate in the alternation, and how days pick among them.
+  const [pickedGroups, setPickedGroups] = useState<string[]>(
+    usableGroups.map((g) => g.id)
+  );
+  const [distribution, setDistribution] = useState<"shuffle" | "rotate">(
+    "shuffle"
+  );
 
-  const group = usableGroups.find((g) => g.id === groupId);
+  const chosenGroups = usableGroups.filter((g) => pickedGroups.includes(g.id));
 
-  function toggle(slug: string) {
+  function toggleFmt(slug: string) {
     setPicked((p) =>
       p.includes(slug) ? p.filter((s) => s !== slug) : [...p, slug]
+    );
+  }
+  function toggleGroup(id: string) {
+    setPickedGroups((p) =>
+      p.includes(id) ? p.filter((g) => g !== id) : [...p, id]
     );
   }
 
@@ -566,19 +585,28 @@ function AutoFill({
   function generate() {
     const startDate = parseISODate(start);
     if (!startDate || count < 1) return;
-    if (source === "group" && !group) return;
+    if (source === "group" && chosenGroups.length === 0) return;
     if (source === "formats" && picked.length === 0) return;
     const days: CalendarDay[] = [];
     let cursor = startDate;
     if (cadence === "weekdays" && (cursor.getDay() === 0 || cursor.getDay() === 6)) {
       cursor = nextDate(cursor);
     }
+    let last = -1;
     for (let i = 0; i < count; i++) {
-      const assignments =
-        source === "group" && group
-          ? // Cycle the group's items one per day, looping.
-            [itemToAssignment(group.items[i % group.items.length])]
-          : picked.map((slug) => ({ id: genId(), formatSlug: slug }));
+      let assignments: CalendarAssignment[];
+      if (source === "group") {
+        // Each day gets ONE whole group (all of its videos). Days rotate
+        // through the chosen groups, or shuffle (avoiding back-to-back repeats).
+        const idx =
+          distribution === "rotate"
+            ? i % chosenGroups.length
+            : randomIndex(chosenGroups.length, last);
+        last = idx;
+        assignments = chosenGroups[idx].items.map(itemToAssignment);
+      } else {
+        assignments = picked.map((slug) => ({ id: genId(), formatSlug: slug }));
+      }
       days.push({ date: toISODate(cursor), assignments });
       cursor = nextDate(cursor);
     }
@@ -586,7 +614,7 @@ function AutoFill({
   }
 
   const canGenerate =
-    source === "group" ? !!group : picked.length > 0;
+    source === "group" ? chosenGroups.length > 0 : picked.length > 0;
 
   return (
     <div className="space-y-3">
@@ -599,7 +627,7 @@ function AutoFill({
             source === "group" ? "bg-accent text-accent-ink" : "bg-background text-muted"
           }`}
         >
-          Cycle a group
+          Alternate groups
         </button>
         <button
           type="button"
@@ -658,36 +686,63 @@ function AutoFill({
       {source === "group" ? (
         usableGroups.length === 0 ? (
           <p className="text-xs text-muted">
-            No groups with items yet — add one in the{" "}
+            No groups with videos yet — add one in the{" "}
             <span className="font-bold">Groups</span> section above.
           </p>
         ) : (
-          <div>
-            <span className="text-[9px] uppercase tracking-widest font-bold text-muted">
-              Group to cycle
-            </span>
-            <div className="flex gap-1.5 flex-wrap mt-1">
-              {usableGroups.map((g) => (
+          <div className="space-y-2">
+            {/* Distribution */}
+            <div className="inline-flex border-2 border-line rounded-sm overflow-hidden">
+              {(["shuffle", "rotate"] as const).map((d) => (
                 <button
-                  key={g.id}
+                  key={d}
                   type="button"
-                  onClick={() => setGroupId(g.id)}
-                  className={`border-2 border-line rounded-sm px-2 py-1 text-xs font-bold nb-press ${
-                    g.id === groupId ? "bg-accent text-accent-ink" : "bg-background"
+                  onClick={() => setDistribution(d)}
+                  className={`px-2.5 py-1 text-[10px] font-black uppercase tracking-widest ${
+                    d === "rotate" ? "border-l-2 border-line" : ""
+                  } ${
+                    distribution === d
+                      ? "bg-accent text-accent-ink"
+                      : "bg-background text-muted"
                   }`}
                 >
-                  {g.name} · {g.items.length}
+                  {d === "shuffle" ? "🎲 Shuffle" : "↻ Rotate"}
                 </button>
               ))}
             </div>
-            {group && (
-              <p className="text-[10px] text-muted mt-1.5">
-                {group.items
-                  .map((it) => it.label?.trim() || "•")
-                  .join(" → ")}{" "}
-                → loops, one per day.
-              </p>
-            )}
+
+            <div>
+              <span className="text-[9px] uppercase tracking-widest font-bold text-muted">
+                Groups to alternate between
+              </span>
+              <div className="flex gap-1.5 flex-wrap mt-1">
+                {usableGroups.map((g) => {
+                  const on = pickedGroups.includes(g.id);
+                  return (
+                    <button
+                      key={g.id}
+                      type="button"
+                      onClick={() => toggleGroup(g.id)}
+                      className={`border-2 rounded-md px-2 py-1 text-xs font-bold nb-press ${
+                        on
+                          ? "border-line bg-accent text-accent-ink nb-shadow-sm"
+                          : "border-line/40 bg-background text-muted"
+                      }`}
+                    >
+                      {g.name} · {g.items.length}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <p className="text-[10px] text-muted">
+              Each day gets one whole group ({" "}
+              <span className="font-bold">all its videos</span> ).{" "}
+              {distribution === "shuffle"
+                ? "Days pick a random group (no two same in a row)."
+                : "Days rotate through them in order."}
+            </p>
           </div>
         )
       ) : (
@@ -702,7 +757,7 @@ function AutoFill({
                 <button
                   key={f.slug}
                   type="button"
-                  onClick={() => toggle(f.slug)}
+                  onClick={() => toggleFmt(f.slug)}
                   className={`shrink-0 w-16 border-2 rounded-md overflow-hidden nb-press ${
                     on ? "border-line nb-shadow-sm" : "border-line/40 opacity-60"
                   }`}
@@ -730,6 +785,10 @@ function AutoFill({
   );
 }
 
+// Color-codes each group with one of a few accent hues so they read as
+// distinct categories at a glance (less "stagnant").
+const GROUP_HUES = ["#F1610B", "#2563EB", "#16A34A", "#9333EA", "#DB2777", "#0891B2"];
+
 function GroupsManager({
   groups,
   formats,
@@ -745,6 +804,10 @@ function GroupsManager({
     return m;
   }, [formats]);
 
+  // itemId currently open for note/custom editing; groupId whose add-strip is open.
+  const [editing, setEditing] = useState<string | null>(null);
+  const [addingTo, setAddingTo] = useState<string | null>(null);
+
   function patchGroup(id: string, patch: Partial<CalendarGroup>) {
     onChange(groups.map((g) => (g.id === id ? { ...g, ...patch } : g)));
   }
@@ -753,172 +816,217 @@ function GroupsManager({
   }
   function addGroup() {
     const letter = String.fromCharCode(65 + groups.length); // A, B, C…
-    onChange([
-      ...groups,
-      { id: genId(), name: `Group ${letter}`, items: [] },
-    ]);
+    onChange([...groups, { id: genId(), name: `Group ${letter}`, items: [] }]);
   }
   function setItems(gid: string, items: CalendarGroupItem[]) {
     patchGroup(gid, { items });
   }
   function addItem(g: CalendarGroup, formatSlug?: string) {
-    const label = `B${g.items.length + 1}`;
-    setItems(g.id, [...g.items, { id: genId(), label, formatSlug }]);
+    const it: CalendarGroupItem = { id: genId(), formatSlug };
+    setItems(g.id, [...g.items, it]);
+    if (formatSlug === undefined) setEditing(it.id); // open editor for custom
   }
-  function patchItem(g: CalendarGroup, idx: number, patch: Partial<CalendarGroupItem>) {
-    setItems(
-      g.id,
-      g.items.map((it, i) => (i === idx ? { ...it, ...patch } : it))
-    );
+  function patchItem(g: CalendarGroup, id: string, patch: Partial<CalendarGroupItem>) {
+    setItems(g.id, g.items.map((it) => (it.id === id ? { ...it, ...patch } : it)));
   }
-  function removeItem(g: CalendarGroup, idx: number) {
-    setItems(g.id, g.items.filter((_, i) => i !== idx));
-  }
-  function moveItem(g: CalendarGroup, idx: number, dir: -1 | 1) {
-    const t = idx + dir;
-    if (t < 0 || t >= g.items.length) return;
-    const next = [...g.items];
-    [next[idx], next[t]] = [next[t], next[idx]];
-    setItems(g.id, next);
+  function removeItem(g: CalendarGroup, id: string) {
+    setItems(g.id, g.items.filter((it) => it.id !== id));
+    if (editing === id) setEditing(null);
   }
 
   return (
     <div className="space-y-3">
       <p className="text-[10px] text-muted leading-relaxed">
-        A group is an ordered series of scripts (B1, B2, B3…). Use{" "}
-        <span className="font-bold">Auto-fill → Cycle a group</span> to spread one
-        per day across the month.
+        A group is a <span className="font-bold">bundle of videos</span>. In{" "}
+        <span className="font-bold">Auto-fill → Alternate groups</span>, each day
+        gets one whole group; days rotate or shuffle between your groups.
       </p>
 
-      {groups.map((g) => (
-        <div key={g.id} className="border-2 border-line bg-paper rounded-md p-2.5 space-y-2">
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={g.name}
-              onChange={(e) => patchGroup(g.id, { name: e.target.value })}
-              placeholder="Group name"
-              className="flex-1 border-2 border-line rounded-sm px-2 py-1 text-sm font-black focus:outline-none focus:border-accent bg-background"
-            />
-            <span className="text-[10px] uppercase tracking-widest font-bold text-muted">
-              {g.items.length} items
-            </span>
-            <button
-              type="button"
-              onClick={() => removeGroup(g.id)}
-              aria-label="Remove group"
-              className="w-7 h-7 border-2 border-line bg-background rounded-sm font-black nb-press"
+      {groups.map((g, gi) => {
+        const hue = GROUP_HUES[gi % GROUP_HUES.length];
+        const editItem = g.items.find((it) => it.id === editing);
+        return (
+          <div
+            key={g.id}
+            className="border-2 border-line rounded-md overflow-hidden"
+            style={{ borderColor: hue }}
+          >
+            {/* Header band, color-coded per group */}
+            <div
+              className="flex items-center gap-2 px-2 py-1.5"
+              style={{ backgroundColor: hue }}
             >
-              ×
-            </button>
-          </div>
+              <span className="w-5 h-5 rounded-full bg-white/90 text-ink flex items-center justify-center font-black text-[11px] shrink-0">
+                {g.name.replace(/[^A-Za-z0-9]/g, "").slice(-1).toUpperCase() ||
+                  String.fromCharCode(65 + gi)}
+              </span>
+              <input
+                type="text"
+                value={g.name}
+                onChange={(e) => patchGroup(g.id, { name: e.target.value })}
+                placeholder="Group name"
+                className="flex-1 bg-transparent text-white placeholder-white/60 font-black text-sm focus:outline-none min-w-0"
+              />
+              <span className="text-[10px] uppercase tracking-widest font-bold text-white/80">
+                {g.items.length} {g.items.length === 1 ? "video" : "videos"}
+              </span>
+              <button
+                type="button"
+                onClick={() => removeGroup(g.id)}
+                aria-label="Remove group"
+                className="w-6 h-6 rounded-sm bg-white/90 text-ink font-black nb-press shrink-0"
+              >
+                ×
+              </button>
+            </div>
 
-          {g.items.map((it, idx) => {
-            const isCustom = it.formatSlug === undefined;
-            const fmt = it.formatSlug ? fmtBySlug.get(it.formatSlug) : undefined;
-            return (
-              <div key={it.id} className="border-2 border-line bg-background rounded-md p-2 flex gap-2">
-                <input
-                  type="text"
-                  value={it.label ?? ""}
-                  onChange={(e) => patchItem(g, idx, { label: e.target.value })}
-                  placeholder="B1"
-                  className="w-12 border-2 border-line rounded-sm px-1 py-1 text-xs font-black text-center uppercase tracking-widest focus:outline-none focus:border-accent bg-paper shrink-0 self-start"
-                />
-                {!isCustom && <FormatThumb fmt={fmt} size={40} />}
-                <div className="flex-1 min-w-0 space-y-1.5">
-                  {isCustom ? (
+            <div className="p-2.5 space-y-2 bg-paper">
+              {/* Video tiles */}
+              {g.items.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {g.items.map((it) => {
+                    const isCustom = it.formatSlug === undefined;
+                    const fmt = it.formatSlug ? fmtBySlug.get(it.formatSlug) : undefined;
+                    const label = isCustom
+                      ? it.title?.trim() || "Custom"
+                      : fmt?.title ?? it.formatSlug;
+                    const open = editing === it.id;
+                    return (
+                      <div key={it.id} className="relative w-[84px]">
+                        <button
+                          type="button"
+                          onClick={() => setEditing(open ? null : it.id)}
+                          className={`block w-full border-2 rounded-md overflow-hidden nb-press bg-background ${
+                            open ? "border-accent nb-shadow-sm" : "border-line"
+                          }`}
+                        >
+                          {isCustom ? (
+                            <span className="w-full aspect-square bg-paper border-b-2 border-line flex items-center justify-center text-lg font-black text-muted">
+                              ✎
+                            </span>
+                          ) : fmt?.thumbnail ? (
+                            /* eslint-disable-next-line @next/next/no-img-element */
+                            <img
+                              src={fmt.thumbnail}
+                              alt=""
+                              className="w-full aspect-square object-cover border-b-2 border-line"
+                            />
+                          ) : (
+                            <span className="w-full aspect-square bg-accent text-accent-ink border-b-2 border-line flex items-center justify-center font-black">
+                              {(label ?? "?").slice(0, 2).toUpperCase()}
+                            </span>
+                          )}
+                          <span className="block px-1 py-1 text-[9px] font-bold truncate leading-tight">
+                            {label}
+                          </span>
+                        </button>
+                        {it.note?.trim() && (
+                          <span
+                            title="Has a note"
+                            className="absolute bottom-6 left-1 w-2 h-2 rounded-full bg-accent border border-line"
+                          />
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => removeItem(g, it.id)}
+                          aria-label="Remove video"
+                          className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-background border-2 border-line rounded-full text-[11px] font-black leading-none flex items-center justify-center nb-press"
+                        >
+                          ×
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Inline editor for the selected tile */}
+              {editItem && (
+                <div className="border-2 border-line bg-background rounded-md p-2 space-y-1.5">
+                  {editItem.formatSlug === undefined && (
                     <>
                       <input
                         type="text"
-                        value={it.title ?? ""}
-                        onChange={(e) => patchItem(g, idx, { title: e.target.value })}
+                        value={editItem.title ?? ""}
+                        onChange={(e) => patchItem(g, editItem.id, { title: e.target.value })}
                         placeholder="Custom script title"
                         className="w-full border-2 border-line rounded-sm px-2 py-1 text-sm font-bold focus:outline-none focus:border-accent bg-background"
                       />
                       <textarea
-                        value={it.script ?? ""}
-                        onChange={(e) => patchItem(g, idx, { script: e.target.value })}
+                        value={editItem.script ?? ""}
+                        onChange={(e) => patchItem(g, editItem.id, { script: e.target.value })}
                         rows={2}
                         placeholder={"0–2s: Hook…"}
                         className="w-full border-2 border-line rounded-sm px-2 py-1 text-sm focus:outline-none focus:border-accent bg-background font-mono leading-relaxed"
                       />
                     </>
-                  ) : (
-                    <div className="font-bold text-sm leading-tight pt-0.5">
-                      {fmt?.title ?? it.formatSlug}
-                    </div>
                   )}
                   <input
                     type="text"
-                    value={it.note ?? ""}
-                    onChange={(e) => patchItem(g, idx, { note: e.target.value })}
-                    placeholder="Note (optional)"
+                    value={editItem.note ?? ""}
+                    onChange={(e) => patchItem(g, editItem.id, { note: e.target.value })}
+                    placeholder="Note for this video (optional)"
                     className="w-full border-2 border-line rounded-sm px-2 py-1 text-xs focus:outline-none focus:border-accent bg-background"
                   />
                 </div>
-                <div className="flex flex-col gap-1 shrink-0">
-                  <button
-                    type="button"
-                    aria-label="Move up"
-                    disabled={idx === 0}
-                    onClick={() => moveItem(g, idx, -1)}
-                    className="w-7 h-7 border-2 border-line bg-background rounded-sm font-black nb-press disabled:opacity-30"
-                  >
-                    ↑
-                  </button>
-                  <button
-                    type="button"
-                    aria-label="Move down"
-                    disabled={idx === g.items.length - 1}
-                    onClick={() => moveItem(g, idx, 1)}
-                    className="w-7 h-7 border-2 border-line bg-background rounded-sm font-black nb-press disabled:opacity-30"
-                  >
-                    ↓
-                  </button>
-                  <button
-                    type="button"
-                    aria-label="Remove item"
-                    onClick={() => removeItem(g, idx)}
-                    className="w-7 h-7 border-2 border-line bg-background rounded-sm font-black nb-press"
-                  >
-                    ×
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+              )}
 
-          {/* Add item — tap a format thumbnail or custom */}
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            {formats.map((f) => (
-              <button
-                key={f.slug}
-                type="button"
-                onClick={() => addItem(g, f.slug)}
-                title={`Add ${f.title}`}
-                className="shrink-0 w-16 border-2 border-line bg-background rounded-md overflow-hidden nb-press"
-              >
-                <FormatThumb fmt={f} size={60} />
-                <span className="block px-1 py-0.5 text-[8px] font-bold truncate">
-                  {f.title}
-                </span>
-              </button>
-            ))}
-            <button
-              type="button"
-              onClick={() => addItem(g)}
-              title="Add custom item"
-              className="shrink-0 w-16 border-2 border-dashed border-line bg-background rounded-md nb-press flex flex-col items-center justify-center gap-0.5 py-2 text-muted hover:text-accent hover:border-accent"
-            >
-              <span className="text-lg font-black leading-none">+</span>
-              <span className="text-[8px] font-bold uppercase tracking-widest">
-                Custom
-              </span>
-            </button>
+              {/* Add videos */}
+              {addingTo === g.id ? (
+                <div className="border-2 border-dashed border-line rounded-md p-2">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-[9px] uppercase tracking-widest font-bold text-muted">
+                      Tap to add
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setAddingTo(null)}
+                      className="text-[10px] font-black uppercase tracking-widest text-muted hover:text-ink"
+                    >
+                      Done
+                    </button>
+                  </div>
+                  <div className="flex gap-2 overflow-x-auto pb-1">
+                    {formats.map((f) => (
+                      <button
+                        key={f.slug}
+                        type="button"
+                        onClick={() => addItem(g, f.slug)}
+                        title={`Add ${f.title}`}
+                        className="shrink-0 w-16 border-2 border-line bg-background rounded-md overflow-hidden nb-press"
+                      >
+                        <FormatThumb fmt={f} size={60} />
+                        <span className="block px-1 py-0.5 text-[8px] font-bold truncate">
+                          {f.title}
+                        </span>
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => addItem(g)}
+                      title="Add custom video"
+                      className="shrink-0 w-16 border-2 border-dashed border-line bg-background rounded-md nb-press flex flex-col items-center justify-center gap-0.5 py-2 text-muted hover:text-accent hover:border-accent"
+                    >
+                      <span className="text-lg font-black leading-none">+</span>
+                      <span className="text-[8px] font-bold uppercase tracking-widest">
+                        Custom
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setAddingTo(g.id)}
+                  className="w-full border-2 border-dashed border-line bg-background rounded-md px-2 py-1.5 text-xs font-bold uppercase tracking-widest text-muted hover:text-accent hover:border-accent"
+                >
+                  + Add videos
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
 
       <button
         type="button"
