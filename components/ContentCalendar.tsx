@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import type { ContentCalendar as ContentCalendarData } from "@/lib/db";
 import type { Format } from "@/lib/types";
@@ -47,6 +48,7 @@ export function ContentCalendarView({
   formats: Format[];
   briefSlug: string;
 }) {
+  const router = useRouter();
   const formatBySlug = useMemo(() => {
     const map = new Map<string, Format>();
     for (const f of formats) map.set(f.slug, f);
@@ -317,12 +319,28 @@ export function ContentCalendarView({
               const thumb =
                 linked?.thumbnail || linked?.examples?.[0]?.thumbnail;
               const isDone = done.has(a.id);
+              const href = linked
+                ? `/b/${briefSlug}/formats/${linked.slug}`
+                : undefined;
               return (
                 <li
                   key={a.id}
+                  onClick={href ? () => router.push(href) : undefined}
+                  onKeyDown={
+                    href
+                      ? (e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            router.push(href);
+                          }
+                        }
+                      : undefined
+                  }
+                  role={href ? "link" : undefined}
+                  tabIndex={href ? 0 : undefined}
                   className={`border-2 border-line rounded-md nb-shadow-sm p-4 sm:p-5 ${
-                    isDone ? "bg-paper opacity-70" : "bg-background"
-                  }`}
+                    href ? "cursor-pointer hover:border-accent" : ""
+                  } ${isDone ? "bg-paper opacity-70" : "bg-background"}`}
                 >
                   <div className="flex items-start gap-3">
                     {thumb ? (
@@ -346,10 +364,11 @@ export function ContentCalendarView({
                         )}
                         {heading}
                       </h3>
-                      {linked && (
+                      {linked && href && (
                         <div>
                           <Link
-                            href={`/b/${briefSlug}/formats/${linked.slug}`}
+                            href={href}
+                            onClick={(e) => e.stopPropagation()}
                             className="inline-flex border-2 border-line bg-accent text-accent-ink px-2.5 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
                           >
                             Open format →
@@ -376,7 +395,10 @@ export function ContentCalendarView({
                       )}
                       <button
                         type="button"
-                        onClick={() => toggleDone(a.id)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleDone(a.id);
+                        }}
                         aria-pressed={isDone}
                         className={`inline-flex items-center gap-1.5 border-2 border-line px-3 py-1.5 rounded-sm nb-press text-[11px] font-black uppercase tracking-widest ${
                           isDone

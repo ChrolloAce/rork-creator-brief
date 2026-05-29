@@ -5,7 +5,8 @@ import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import type { Format, HookCategory } from "@/lib/types";
 import type { ContentCalendar } from "@/lib/db";
-import { buildNavSections } from "@/lib/nav";
+import Link from "next/link";
+import { buildNavSections, calendarId } from "@/lib/nav";
 import { Sidebar } from "./Sidebar";
 import { FormatView, OverviewView } from "./Views";
 import { ContentCalendarView } from "./ContentCalendar";
@@ -181,6 +182,15 @@ export function Shell({
           </div>
         </footer>
       </main>
+
+      {calendarEnabled && activeId !== calendarId && (
+        <Link
+          href={`/b/${brief.slug}/calendar`}
+          className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 inline-flex items-center gap-2 border-2 border-line bg-accent text-accent-ink px-4 py-2.5 rounded-full nb-shadow font-black text-xs sm:text-sm uppercase tracking-widest"
+        >
+          <span aria-hidden>📅</span> Go to Calendar
+        </Link>
+      )}
     </div>
   );
 }
