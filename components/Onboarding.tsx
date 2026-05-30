@@ -242,12 +242,16 @@ export function OnboardingFlow({
     mainRef.current?.scrollTo({ top: 0 });
   }, [i]);
 
-  // Resume where they left off: restore the saved step on mount, save on change.
+  // Resume where they left off: restore the saved step AND answers on mount,
+  // save on change. (Restoring the step without the answers used to land
+  // returning creators on the final gate with an empty submission.)
   useEffect(() => {
     try {
       const raw = localStorage.getItem(`sb-step-${brief.slug}`);
       const n = raw == null ? NaN : parseInt(raw, 10);
       if (!Number.isNaN(n)) setI(Math.max(0, Math.min(total - 1, n)));
+      const ans = localStorage.getItem(`sb-answers-${brief.slug}`);
+      if (ans) setAnswers(JSON.parse(ans) as Record<string, unknown>);
     } catch {
       /* ignore */
     }
@@ -260,6 +264,22 @@ export function OnboardingFlow({
       /* ignore */
     }
   }, [i, brief.slug]);
+  useEffect(() => {
+    try {
+      localStorage.setItem(`sb-answers-${brief.slug}`, JSON.stringify(answers));
+    } catch {
+      /* ignore */
+    }
+  }, [answers, brief.slug]);
+
+  function clearSaved() {
+    try {
+      localStorage.removeItem(`sb-step-${brief.slug}`);
+      localStorage.removeItem(`sb-answers-${brief.slug}`);
+    } catch {
+      /* ignore */
+    }
+  }
 
   const onGate = gated && i === steps.length;
   const step = steps[i]; // undefined on the gate screen
@@ -324,7 +344,10 @@ export function OnboardingFlow({
     if (onGate || blocked) return;
     if (isLastStep) {
       if (gated) setI(steps.length);
-      else router.push(`/b/${brief.slug}`);
+      else {
+        clearSaved();
+        router.push(`/b/${brief.slug}`);
+      }
     } else {
       setI((n) => n + 1);
     }
@@ -398,6 +421,7 @@ export function OnboardingFlow({
         setGBusy(false);
         return;
       }
+      clearSaved();
       router.push(`/b/${brief.slug}`);
     } catch (e) {
       setGErr((e as Error).message);

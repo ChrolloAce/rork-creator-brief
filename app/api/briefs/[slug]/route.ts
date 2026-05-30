@@ -46,6 +46,7 @@ export async function PATCH(
     hookCategories?: BriefHookCategory[] | null;
     accessCode?: string | null;
     accessEnabled?: boolean;
+    requireLogin?: boolean;
     onboarding?: Onboarding | null;
   } = {};
   try {
@@ -61,6 +62,7 @@ export async function PATCH(
     hookCategories?: BriefHookCategory[] | null;
     accessCode?: string | null;
     accessEnabled?: boolean;
+    requireLogin?: boolean;
     onboarding?: Onboarding | null;
   } = {};
   if (body.onboarding !== undefined) patch.onboarding = body.onboarding;
@@ -70,6 +72,9 @@ export async function PATCH(
   }
   if (typeof body.accessEnabled === "boolean") {
     patch.accessEnabled = body.accessEnabled;
+  }
+  if (typeof body.requireLogin === "boolean") {
+    patch.requireLogin = body.requireLogin;
   }
   if (typeof body.slug === "string") {
     const s = slugify(body.slug);
