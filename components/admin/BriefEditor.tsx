@@ -589,6 +589,12 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
             <h1 className="text-xl font-black">{brief.name}</h1>
           </div>
           <a
+            href={`/admin/b/${brief.slug}/creators`}
+            className="border-2 border-line bg-accent text-accent-ink px-2 py-1.5 rounded-md nb-press text-xs font-black uppercase tracking-widest"
+          >
+            Submissions
+          </a>
+          <a
             href={`/b/${brief.slug}`}
             target="_blank"
             rel="noreferrer"
