@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type ReactNode } from "react";
+import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import type {
   Onboarding,
   OnboardingBlock,
@@ -517,9 +517,13 @@ function RichTextArea({
   // Last selection inside the editor — clicking a toolbar button can blur it,
   // so we remember the range and restore it before applying formatting.
   const saved = useRef<Range | null>(null);
+  // Keep the latest onChange in a ref so the memoized (never-rerendering)
+  // Editable can always reach the current handler without re-rendering.
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   function emit() {
-    if (ref.current) onChange(ref.current.innerHTML);
+    if (ref.current) onChangeRef.current(ref.current.innerHTML);
   }
   function remember() {
     const sel = window.getSelection();
@@ -673,13 +677,9 @@ function RichTextArea({
           </button>
         ))}
       </div>
-      <div
-        ref={ref}
-        contentEditable
-        suppressContentEditableWarning
-        role="textbox"
-        aria-multiline="true"
-        data-placeholder="Write the copy… select text and tap B, highlight, etc."
+      <Editable
+        editorRef={ref}
+        initialHtml={initial.current}
         onInput={emit}
         onKeyUp={remember}
         onMouseUp={remember}
@@ -687,12 +687,58 @@ function RichTextArea({
           remember();
           emit();
         }}
-        dangerouslySetInnerHTML={{ __html: initial.current }}
         className={`${PROSE_CLASS} min-h-[110px] px-3 py-2.5 bg-background focus:outline-none text-sm [&_h2]:text-xl [&_h3]:text-base`}
       />
     </div>
   );
 }
+
+// The contentEditable surface, isolated and memoized so it NEVER re-renders
+// after mount. That's what stops React from resetting the caret to the start
+// when the parent re-renders (e.g. on autosave). HTML is set once imperatively;
+// all handlers read live DOM / refs so the captured first instances stay valid.
+type EditableProps = {
+  editorRef: { current: HTMLDivElement | null };
+  initialHtml: string;
+  onInput: () => void;
+  onKeyUp: () => void;
+  onMouseUp: () => void;
+  onBlur: () => void;
+  className: string;
+};
+const Editable = memo(
+  function Editable({
+    editorRef,
+    initialHtml,
+    onInput,
+    onKeyUp,
+    onMouseUp,
+    onBlur,
+    className,
+  }: EditableProps) {
+    useEffect(() => {
+      if (editorRef.current) editorRef.current.innerHTML = initialHtml;
+      // run once on mount only
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+    return (
+      <div
+        ref={editorRef}
+        contentEditable
+        suppressContentEditableWarning
+        role="textbox"
+        aria-multiline="true"
+        data-placeholder="Write the copy… select text and tap B, highlight, etc."
+        onInput={onInput}
+        onKeyUp={onKeyUp}
+        onMouseUp={onMouseUp}
+        onBlur={onBlur}
+        className={className}
+      />
+    );
+  },
+  () => true // props are stable refs/first-captured handlers — never re-render
+);
 
 // ----- ViewTrack example videos block -----
 function VideosBlock({
