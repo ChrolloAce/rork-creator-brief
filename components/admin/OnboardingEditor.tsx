@@ -94,6 +94,9 @@ export function OnboardingEditor({
   function addBlock(step: OnboardingStep, block: OnboardingBlock) {
     setBlocks(step.id, [...step.blocks, block]);
   }
+  function patchGate(patch: Partial<NonNullable<Onboarding["gate"]>>) {
+    commit({ ...ob, gate: { ...(ob.gate ?? {}), ...patch } });
+  }
 
   const totalBlocks = steps.reduce((n, s) => n + s.blocks.length, 0);
 
@@ -119,6 +122,50 @@ export function OnboardingEditor({
         add text, images, video embeds, and questions. Drag order with the
         arrows. Changes autosave.
       </p>
+
+      <details className="border-2 border-line bg-paper rounded-md">
+        <summary className="cursor-pointer px-3 py-2 text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+          🔒 Final code gate (approval)
+        </summary>
+        <div className="px-3 pb-3 space-y-2 border-t-2 border-line pt-3">
+          <p className="text-[10px] text-muted leading-relaxed">
+            Turn on <span className="font-bold">Require name + code</span> in the{" "}
+            <span className="font-bold">Creator access</span> card to lock the
+            brief. When locked, the onboarding ends with this screen — creators
+            read the instructions, message you, then enter the code to unlock.
+          </p>
+          <input
+            type="text"
+            value={ob.gate?.heading ?? ""}
+            onChange={(e) => patchGate({ heading: e.target.value })}
+            placeholder="Heading (e.g. Get approved to start)"
+            className="w-full border-2 border-line rounded-sm px-2 py-1.5 font-bold text-sm focus:outline-none focus:border-accent bg-background"
+          />
+          <textarea
+            value={ob.gate?.body ?? ""}
+            onChange={(e) => patchGate({ body: e.target.value })}
+            rows={3}
+            placeholder="Instructions (e.g. Message us on WhatsApp to get approved, then enter the code we send you.)"
+            className="w-full border-2 border-line rounded-sm px-2 py-1.5 text-sm focus:outline-none focus:border-accent bg-background leading-relaxed"
+          />
+          <div className="grid gap-2 sm:grid-cols-2">
+            <input
+              type="text"
+              value={ob.gate?.ctaLabel ?? ""}
+              onChange={(e) => patchGate({ ctaLabel: e.target.value })}
+              placeholder="Button label (e.g. Message us on WhatsApp)"
+              className="w-full border-2 border-line rounded-sm px-2 py-1.5 text-sm focus:outline-none focus:border-accent bg-background"
+            />
+            <input
+              type="text"
+              value={ob.gate?.ctaUrl ?? ""}
+              onChange={(e) => patchGate({ ctaUrl: e.target.value })}
+              placeholder="Button link (e.g. https://wa.me/1555…)"
+              className="w-full border-2 border-line rounded-sm px-2 py-1.5 text-sm font-mono focus:outline-none focus:border-accent bg-background"
+            />
+          </div>
+        </div>
+      </details>
 
       <div className="space-y-3">
         {steps.map((step, idx) => (

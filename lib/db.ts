@@ -259,9 +259,20 @@ export type OnboardingStep = {
   blocks: OnboardingBlock[];
 };
 
+// Final "approval gate" shown at the end of onboarding when the brief requires
+// a code. Creators read the instructions (e.g. message us on WhatsApp), then
+// enter the code to unlock the brief.
+export type OnboardingGate = {
+  heading?: string;
+  body?: string;
+  ctaLabel?: string;
+  ctaUrl?: string;
+};
+
 export type Onboarding = {
   enabled?: boolean;
   steps: OnboardingStep[];
+  gate?: OnboardingGate;
 };
 
 export type Brief = {

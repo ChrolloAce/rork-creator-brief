@@ -221,38 +221,84 @@ function Block({
 export function OnboardingFlow({
   onboarding,
   brief,
+  gated = false,
 }: {
   onboarding: Onboarding;
   brief: { slug: string; name: string; logoUrl: string | null };
+  gated?: boolean;
 }) {
   const router = useRouter();
   const steps = onboarding.steps;
+  // When gated, a final "enter the code" screen follows the steps.
+  const total = steps.length + (gated ? 1 : 0);
   const [i, setI] = useState(0);
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
-  const step = steps[i];
   const mainRef = useRef<HTMLDivElement>(null);
-  // Jump back to the top of the scroll area whenever the step changes.
   useEffect(() => {
     mainRef.current?.scrollTo({ top: 0 });
   }, [i]);
-  const isLast = i === steps.length - 1;
 
-  // Block any required question on this step that's unanswered.
-  const blocked = step.blocks.some(
-    (b) =>
-      b.kind === "question" &&
-      b.required &&
-      (answers[b.id] === undefined ||
-        answers[b.id] === "" ||
-        answers[b.id] === false)
-  );
+  const onGate = gated && i === steps.length;
+  const step = steps[i]; // undefined on the gate screen
+  const isLastStep = i === steps.length - 1;
+
+  // Final-gate form state.
+  const [gName, setGName] = useState("");
+  const [gCode, setGCode] = useState("");
+  const [gErr, setGErr] = useState<string | null>(null);
+  const [gBusy, setGBusy] = useState(false);
+
+  // Block advancing while a required question on this step is unanswered.
+  const blocked =
+    !onGate &&
+    !!step &&
+    step.blocks.some(
+      (b) =>
+        b.kind === "question" &&
+        b.required &&
+        (answers[b.id] === undefined ||
+          answers[b.id] === "" ||
+          answers[b.id] === false)
+    );
 
   function next() {
-    if (blocked) return;
-    if (isLast) {
-      router.push(`/b/${brief.slug}`);
+    if (onGate || blocked) return;
+    if (isLastStep) {
+      if (gated) setI(steps.length);
+      else router.push(`/b/${brief.slug}`);
     } else {
-      setI((n) => Math.min(steps.length - 1, n + 1));
+      setI((n) => n + 1);
+    }
+  }
+
+  async function unlock() {
+    if (gBusy) return;
+    if (!gName.trim() || !gCode.trim()) {
+      setGErr("Enter your name and the code.");
+      return;
+    }
+    setGBusy(true);
+    setGErr(null);
+    try {
+      const res = await fetch(`/api/access/${encodeURIComponent(brief.slug)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: gName.trim(), code: gCode.trim(), answers }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j.ok) {
+        setGErr(
+          j.error === "wrong code"
+            ? "That code isn't right — check with us and try again."
+            : (j.error ?? "Something went wrong.")
+        );
+        setGBusy(false);
+        return;
+      }
+      router.push(`/b/${brief.slug}`);
+    } catch (e) {
+      setGErr((e as Error).message);
+      setGBusy(false);
     }
   }
 
@@ -272,39 +318,98 @@ export function OnboardingFlow({
             {brief.name} · Onboarding
           </div>
           <div className="ml-auto text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
-            {i + 1} / {steps.length}
+            {i + 1} / {total}
           </div>
         </div>
         {/* Progress bar */}
         <div className="h-1.5 bg-paper">
           <div
             className="h-full bg-accent transition-[width] duration-300"
-            style={{ width: `${((i + 1) / steps.length) * 100}%` }}
+            style={{ width: `${((i + 1) / total) * 100}%` }}
           />
         </div>
       </header>
 
       <main ref={mainRef} className="flex-1 min-h-0 overflow-y-auto">
-        <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 sm:py-12 space-y-6">
-          {step.title && (
+        {onGate ? (
+          <div className="max-w-md mx-auto px-4 sm:px-6 py-8 sm:py-12 space-y-5">
             <h1 className="text-3xl sm:text-4xl font-black tracking-tight leading-tight">
-              {step.title}
+              {onboarding.gate?.heading?.trim() || "Get approved to start"}
             </h1>
-          )}
-          {step.subtitle && (
-            <p className="text-base sm:text-lg text-ink-soft leading-relaxed -mt-2">
-              {step.subtitle}
-            </p>
-          )}
-          {step.blocks.map((b) => (
-            <Block
-              key={b.id}
-              block={b}
-              answer={answers[b.id]}
-              onAnswer={(v) => setAnswers((a) => ({ ...a, [b.id]: v }))}
-            />
-          ))}
-        </div>
+            {onboarding.gate?.body?.trim() && (
+              <p className="text-base sm:text-lg text-ink leading-relaxed whitespace-pre-line">
+                {onboarding.gate.body}
+              </p>
+            )}
+            {onboarding.gate?.ctaUrl?.trim() &&
+              onboarding.gate?.ctaLabel?.trim() && (
+                <a
+                  href={onboarding.gate.ctaUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex w-full justify-center border-2 border-line bg-success text-success-ink px-4 py-3 rounded-md nb-press font-black uppercase tracking-widest text-sm"
+                >
+                  {onboarding.gate.ctaLabel}
+                </a>
+              )}
+            <div className="border-2 border-line bg-paper rounded-md p-4 space-y-3">
+              <label className="block">
+                <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+                  Your name
+                </span>
+                <input
+                  type="text"
+                  value={gName}
+                  onChange={(e) => setGName(e.target.value)}
+                  placeholder="First + last"
+                  className="mt-1 w-full border-2 border-line rounded-md px-3 py-2 text-base font-bold focus:outline-none focus:border-accent bg-background"
+                />
+              </label>
+              <label className="block">
+                <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+                  Access code
+                </span>
+                <input
+                  type="text"
+                  value={gCode}
+                  onChange={(e) => setGCode(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void unlock();
+                    }
+                  }}
+                  placeholder="Enter your code"
+                  className="mt-1 w-full border-2 border-line rounded-md px-3 py-2 text-base font-mono focus:outline-none focus:border-accent bg-background"
+                />
+              </label>
+              {gErr && (
+                <p className="text-sm font-bold text-[#b91c1c]">{gErr}</p>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 sm:py-12 space-y-6">
+            {step.title && (
+              <h1 className="text-3xl sm:text-4xl font-black tracking-tight leading-tight">
+                {step.title}
+              </h1>
+            )}
+            {step.subtitle && (
+              <p className="text-base sm:text-lg text-ink-soft leading-relaxed -mt-2">
+                {step.subtitle}
+              </p>
+            )}
+            {step.blocks.map((b) => (
+              <Block
+                key={b.id}
+                block={b}
+                answer={answers[b.id]}
+                onAnswer={(v) => setAnswers((a) => ({ ...a, [b.id]: v }))}
+              />
+            ))}
+          </div>
+        )}
       </main>
 
       <footer className="shrink-0 border-t-2 border-line bg-background">
@@ -319,11 +424,19 @@ export function OnboardingFlow({
           </button>
           <button
             type="button"
-            onClick={next}
-            disabled={blocked}
+            onClick={onGate ? unlock : next}
+            disabled={onGate ? gBusy : blocked}
             className="ml-auto border-2 border-line bg-accent text-accent-ink px-6 py-2.5 rounded-md nb-press font-black uppercase tracking-widest text-xs disabled:opacity-40"
           >
-            {isLast ? "Enter the brief →" : "Next →"}
+            {onGate
+              ? gBusy
+                ? "Unlocking…"
+                : "Unlock the brief →"
+              : isLastStep
+                ? gated
+                  ? "Continue →"
+                  : "Enter the brief →"
+                : "Next →"}
           </button>
         </div>
       </footer>

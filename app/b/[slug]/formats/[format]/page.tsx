@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { Shell } from "@/components/Shell";
 import { hookCategories as defaultHooks } from "@/lib/hooks";
 import { formatId } from "@/lib/nav";
 import { getBrief, getCuration } from "@/lib/db";
 import type { HookCategory } from "@/lib/types";
 import { getFormatsForRender } from "@/lib/format-videos";
+import { briefAccessRequired } from "@/lib/brief-gate";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +38,7 @@ export default async function BriefFormatPage({
   const { slug, format } = await params;
   const brief = await getBrief(slug);
   if (!brief) notFound();
+  if (await briefAccessRequired(brief)) redirect(`/b/${brief.slug}/onboarding`);
   const [formats, curation] = await Promise.all([
     getFormatsForRender(brief.slug),
     getCuration(brief.slug),

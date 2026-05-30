@@ -35,6 +35,7 @@ export default async function OnboardingPage({
     <OnboardingFlow
       onboarding={ob}
       brief={{ slug: brief.slug, name: brief.name, logoUrl: brief.logoUrl }}
+      gated={!!(brief.accessEnabled && brief.accessCode)}
     />
   );
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { joinBrief } from "@/lib/db";
+import { accessCookieName, accessToken } from "@/lib/creator-access";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +39,17 @@ export async function POST(
         { status: 401 }
       );
     }
-    return NextResponse.json({ ok: true, creator });
+    // Correct code → set the access cookie that unlocks the brief pages.
+    const res = NextResponse.json({ ok: true, creator });
+    const token = await accessToken(slug, code);
+    res.cookies.set(accessCookieName(slug), token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: 60 * 60 * 24 * 60, // 60 days
+    });
+    return res;
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: (e as Error).message },

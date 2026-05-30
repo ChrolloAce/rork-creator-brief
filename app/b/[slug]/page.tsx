@@ -6,6 +6,7 @@ import { overviewId } from "@/lib/nav";
 import { getBrief, getCuration } from "@/lib/db";
 import type { HookCategory } from "@/lib/types";
 import { getFormatsForRender } from "@/lib/format-videos";
+import { briefAccessRequired } from "@/lib/brief-gate";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +35,8 @@ export default async function BriefOverview({
   const { slug } = await params;
   const brief = await getBrief(slug);
   if (!brief) notFound();
+  // Gated brief: unapproved visitors must complete onboarding + enter the code.
+  if (await briefAccessRequired(brief)) redirect(`/b/${brief.slug}/onboarding`);
   const [formats, curation] = await Promise.all([
     getFormatsForRender(brief.slug),
     getCuration(brief.slug),
