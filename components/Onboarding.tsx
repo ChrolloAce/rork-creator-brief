@@ -222,10 +222,12 @@ export function OnboardingFlow({
   onboarding,
   brief,
   gated = false,
+  account = null,
 }: {
   onboarding: Onboarding;
   brief: { slug: string; name: string; logoUrl: string | null };
   gated?: boolean;
+  account?: { name: string | null; email: string } | null;
 }) {
   const router = useRouter();
   const steps = onboarding.steps;
@@ -262,7 +264,10 @@ export function OnboardingFlow({
   const isLastStep = i === steps.length - 1;
 
   // Final-gate form state.
+  const [authMode, setAuthMode] = useState<"signup" | "login">("signup");
   const [gName, setGName] = useState("");
+  const [gEmail, setGEmail] = useState("");
+  const [gPassword, setGPassword] = useState("");
   const [gCode, setGCode] = useState("");
   const [gErr, setGErr] = useState<string | null>(null);
   const [gBusy, setGBusy] = useState(false);
@@ -325,18 +330,49 @@ export function OnboardingFlow({
 
   async function unlock() {
     if (gBusy) return;
-    if (!gName.trim() || !gCode.trim()) {
-      setGErr("Enter your name and the code.");
+    if (!gCode.trim()) {
+      setGErr("Enter your access code.");
       return;
+    }
+    if (!account) {
+      if (!gEmail.trim() || !gPassword) {
+        setGErr("Enter your email and password.");
+        return;
+      }
+      if (authMode === "signup" && !gName.trim()) {
+        setGErr("Enter your name.");
+        return;
+      }
     }
     setGBusy(true);
     setGErr(null);
     try {
+      let userName = account?.name ?? null;
+      // 1) Sign up / log in (unless already logged in) → sets the session.
+      if (!account) {
+        const authRes = await fetch(`/api/auth/${authMode}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            authMode === "signup"
+              ? { email: gEmail.trim(), password: gPassword, name: gName.trim() }
+              : { email: gEmail.trim(), password: gPassword }
+          ),
+        });
+        const aj = await authRes.json().catch(() => ({}));
+        if (!authRes.ok || !aj.ok) {
+          setGErr(aj.error ?? "Could not sign you in.");
+          setGBusy(false);
+          return;
+        }
+        userName = gName.trim() || aj.user?.name || aj.user?.email;
+      }
+      // 2) Enter the brief code → records approval + sets the access cookie.
       const res = await fetch(`/api/access/${encodeURIComponent(brief.slug)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: gName.trim(),
+          name: userName || account?.email || "Creator",
           code: gCode.trim(),
           answers,
           clientId: clientId.current,
@@ -411,19 +447,85 @@ export function OnboardingFlow({
                 </a>
               )}
             <div className="border-2 border-line bg-paper rounded-md p-4 space-y-3">
-              <label className="block">
-                <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
-                  Your name
-                </span>
-                <input
-                  type="text"
-                  value={gName}
-                  onChange={(e) => setGName(e.target.value)}
-                  onBlur={recordOnboarded}
-                  placeholder="First + last"
-                  className="mt-1 w-full border-2 border-line rounded-md px-3 py-2 text-base font-bold focus:outline-none focus:border-accent bg-background"
-                />
-              </label>
+              {account ? (
+                <div className="text-sm font-bold">
+                  Signed in as{" "}
+                  <span className="text-accent">{account.email}</span>
+                </div>
+              ) : (
+                <>
+                  <div className="inline-flex border-2 border-line rounded-sm overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setAuthMode("signup")}
+                      className={`px-3 py-1 text-[10px] font-black uppercase tracking-widest ${
+                        authMode === "signup"
+                          ? "bg-accent text-accent-ink"
+                          : "bg-background text-muted"
+                      }`}
+                    >
+                      Create account
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAuthMode("login")}
+                      className={`px-3 py-1 text-[10px] font-black uppercase tracking-widest border-l-2 border-line ${
+                        authMode === "login"
+                          ? "bg-accent text-accent-ink"
+                          : "bg-background text-muted"
+                      }`}
+                    >
+                      Log in
+                    </button>
+                  </div>
+
+                  {authMode === "signup" && (
+                    <label className="block">
+                      <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+                        Your name
+                      </span>
+                      <input
+                        type="text"
+                        value={gName}
+                        onChange={(e) => setGName(e.target.value)}
+                        onBlur={recordOnboarded}
+                        placeholder="First + last"
+                        className="mt-1 w-full border-2 border-line rounded-md px-3 py-2 text-base font-bold focus:outline-none focus:border-accent bg-background"
+                      />
+                    </label>
+                  )}
+                  <label className="block">
+                    <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+                      Email
+                    </span>
+                    <input
+                      type="email"
+                      autoComplete="email"
+                      value={gEmail}
+                      onChange={(e) => setGEmail(e.target.value)}
+                      placeholder="you@email.com"
+                      className="mt-1 w-full border-2 border-line rounded-md px-3 py-2 text-base focus:outline-none focus:border-accent bg-background"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+                      Password
+                    </span>
+                    <input
+                      type="password"
+                      autoComplete={
+                        authMode === "signup" ? "new-password" : "current-password"
+                      }
+                      value={gPassword}
+                      onChange={(e) => setGPassword(e.target.value)}
+                      placeholder={
+                        authMode === "signup" ? "At least 6 characters" : "Your password"
+                      }
+                      className="mt-1 w-full border-2 border-line rounded-md px-3 py-2 text-base focus:outline-none focus:border-accent bg-background"
+                    />
+                  </label>
+                </>
+              )}
               <label className="block">
                 <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
                   Access code
@@ -438,7 +540,7 @@ export function OnboardingFlow({
                       void unlock();
                     }
                   }}
-                  placeholder="Enter your code"
+                  placeholder="Code we send you"
                   className="mt-1 w-full border-2 border-line rounded-md px-3 py-2 text-base font-mono focus:outline-none focus:border-accent bg-background"
                 />
               </label>

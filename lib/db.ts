@@ -2,6 +2,7 @@ import "server-only";
 import postgres from "postgres";
 import { formats as formatsMeta } from "./formats";
 import type { VideoExample } from "./types";
+import { hashPassword, verifyPassword } from "./passwords";
 
 declare global {
   // eslint-disable-next-line no-var
@@ -297,10 +298,18 @@ export type BriefCreator = {
   id: string;
   briefSlug: string;
   name: string;
+  email: string | null;
   code: string | null;
   answers: Record<string, unknown>;
   status: CreatorStatus;
   clientId: string | null;
+  createdAt: Date;
+};
+
+export type CreatorUser = {
+  id: string;
+  email: string;
+  name: string | null;
   createdAt: Date;
 };
 
@@ -420,6 +429,17 @@ async function runSchema() {
   await sql`ALTER TABLE brief_creator ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'approved'`;
   await sql`ALTER TABLE brief_creator ADD COLUMN IF NOT EXISTS client_id TEXT`;
   await sql`ALTER TABLE brief_creator ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`;
+  await sql`ALTER TABLE brief_creator ADD COLUMN IF NOT EXISTS email TEXT`;
+  // Site-wide creator accounts (email + password). One login works everywhere.
+  await sql`
+    CREATE TABLE IF NOT EXISTS creator_user (
+      id TEXT PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      name TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `;
   // Seed Rork brief if none exists
   const existing = await sql`SELECT slug FROM brief`;
   if (existing.length === 0) {
@@ -567,6 +587,7 @@ function rowToCreator(r: {
   id: string;
   brief_slug: string;
   name: string;
+  email: string | null;
   code: string | null;
   answers: Record<string, unknown> | null;
   status: string | null;
@@ -577,6 +598,7 @@ function rowToCreator(r: {
     id: r.id,
     briefSlug: r.brief_slug,
     name: r.name,
+    email: r.email,
     code: r.code,
     answers: r.answers ?? {},
     status: r.status === "approved" ? "approved" : "onboarded",
@@ -585,7 +607,7 @@ function rowToCreator(r: {
   };
 }
 
-const CREATOR_COLS = `id, brief_slug, name, code, answers, status, client_id, created_at`;
+const CREATOR_COLS = `id, brief_slug, name, email, code, answers, status, client_id, created_at`;
 
 // Does the submitted code match the brief's passcode? (Empty brief code = any.)
 export async function verifyBriefCode(
@@ -605,6 +627,7 @@ export async function verifyBriefCode(
 export async function upsertCreator(input: {
   briefSlug: string;
   name: string;
+  email?: string | null;
   code?: string;
   answers?: Record<string, unknown>;
   status: CreatorStatus;
@@ -613,6 +636,7 @@ export async function upsertCreator(input: {
   await ensureSchema();
   const sql = getSql();
   const name = input.name.trim();
+  const email = input.email?.trim().toLowerCase() || null;
   const code = input.code?.trim() || null;
   const answers = input.answers ?? {};
 
@@ -626,6 +650,7 @@ export async function upsertCreator(input: {
       await sql`
         UPDATE brief_creator SET
           name = ${name},
+          email = COALESCE(${email}, email),
           code = COALESCE(${code}, code),
           answers = ${sql.json(answers as never)},
           status = CASE WHEN status = 'approved' THEN 'approved' ELSE ${input.status} END,
@@ -641,13 +666,69 @@ export async function upsertCreator(input: {
 
   const id = `cr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   await sql`
-    INSERT INTO brief_creator (id, brief_slug, name, code, answers, status, client_id)
-    VALUES (${id}, ${input.briefSlug}, ${name}, ${code}, ${sql.json(answers as never)}, ${input.status}, ${input.clientId ?? null})
+    INSERT INTO brief_creator (id, brief_slug, name, email, code, answers, status, client_id)
+    VALUES (${id}, ${input.briefSlug}, ${name}, ${email}, ${code}, ${sql.json(answers as never)}, ${input.status}, ${input.clientId ?? null})
   `;
   const rows = await sql<Parameters<typeof rowToCreator>[0][]>`
     SELECT ${sql.unsafe(CREATOR_COLS)} FROM brief_creator WHERE id = ${id}
   `;
   return rowToCreator(rows[0]);
+}
+
+// ---------- Creator accounts (site-wide email + password) ----------
+
+type UserRow = {
+  id: string;
+  email: string;
+  password_hash: string;
+  name: string | null;
+  created_at: Date;
+};
+function rowToUser(r: UserRow): CreatorUser {
+  return { id: r.id, email: r.email, name: r.name, createdAt: r.created_at };
+}
+
+export async function createUser(input: {
+  email: string;
+  password: string;
+  name?: string;
+}): Promise<CreatorUser> {
+  await ensureSchema();
+  const sql = getSql();
+  const email = input.email.trim().toLowerCase();
+  const existing = await sql`SELECT id FROM creator_user WHERE email = ${email}`;
+  if (existing.length > 0) throw new Error("email already registered");
+  const id = `u_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  await sql`
+    INSERT INTO creator_user (id, email, password_hash, name)
+    VALUES (${id}, ${email}, ${hashPassword(input.password)}, ${input.name?.trim() || null})
+  `;
+  const rows = await sql<UserRow[]>`SELECT id, email, password_hash, name, created_at FROM creator_user WHERE id = ${id}`;
+  return rowToUser(rows[0]);
+}
+
+export async function verifyLogin(
+  email: string,
+  password: string
+): Promise<CreatorUser | null> {
+  await ensureSchema();
+  const sql = getSql();
+  const rows = await sql<UserRow[]>`
+    SELECT id, email, password_hash, name, created_at FROM creator_user
+    WHERE email = ${email.trim().toLowerCase()}
+  `;
+  if (rows.length === 0) return null;
+  if (!verifyPassword(password, rows[0].password_hash)) return null;
+  return rowToUser(rows[0]);
+}
+
+export async function getUserById(id: string): Promise<CreatorUser | null> {
+  await ensureSchema();
+  const sql = getSql();
+  const rows = await sql<UserRow[]>`
+    SELECT id, email, password_hash, name, created_at FROM creator_user WHERE id = ${id}
+  `;
+  return rows.length ? rowToUser(rows[0]) : null;
 }
 
 export async function listCreators(briefSlug: string): Promise<BriefCreator[]> {

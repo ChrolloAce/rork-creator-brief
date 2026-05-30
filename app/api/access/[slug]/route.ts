@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
-import { upsertCreator, verifyBriefCode } from "@/lib/db";
+import { cookies } from "next/headers";
+import { upsertCreator, verifyBriefCode, getUserById } from "@/lib/db";
 import { accessCookieName, accessToken } from "@/lib/creator-access";
+import { SESSION_COOKIE, readSessionToken } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -49,13 +51,23 @@ export async function POST(
       return NextResponse.json({ ok: true, creator });
     }
 
-    // approve
+    // approve — must be logged in.
+    const jar = await cookies();
+    const userId = await readSessionToken(jar.get(SESSION_COOKIE)?.value);
+    const user = userId ? await getUserById(userId) : null;
+    if (!user) {
+      return NextResponse.json(
+        { ok: false, error: "not signed in" },
+        { status: 401 }
+      );
+    }
     const valid = await verifyBriefCode(slug, code);
     if (!valid) {
       // Wrong code — still capture them as a finished-onboarding lead.
       await upsertCreator({
         briefSlug: slug,
-        name,
+        name: user.name ?? name,
+        email: user.email,
         answers,
         status: "onboarded",
         clientId,
@@ -64,7 +76,8 @@ export async function POST(
     }
     const creator = await upsertCreator({
       briefSlug: slug,
-      name,
+      name: user.name ?? name,
+      email: user.email,
       code,
       answers,
       status: "approved",
