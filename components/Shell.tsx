@@ -179,7 +179,7 @@ export function Shell({
         <footer className="border-t-2 border-line mt-10">
           <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-10 py-5 text-xs text-muted flex justify-between items-center">
             <span className="font-bold uppercase tracking-widest">
-              Rork Creator Brief
+              {brief.name}
             </span>
             <span>Built for the team</span>
           </div>
