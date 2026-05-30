@@ -1002,7 +1002,46 @@ type CreatorRow = {
   name: string;
   createdAt: string;
   answers: Record<string, unknown> | null;
+  status?: "onboarded" | "approved";
 };
+
+function CreatorList({
+  label,
+  rows,
+  tone,
+}: {
+  label: string;
+  rows: CreatorRow[];
+  tone: "approved" | "onboarded";
+}) {
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-1.5">
+        {label} ({rows.length})
+      </div>
+      {rows.length === 0 ? (
+        <p className="text-[11px] text-muted italic">None yet.</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {rows.map((c) => (
+            <li
+              key={c.id}
+              className={`flex items-center justify-between gap-2 border-2 border-line rounded-md px-2.5 py-1.5 ${
+                tone === "approved" ? "bg-success/15" : "bg-background"
+              }`}
+            >
+              <span className="font-bold text-sm truncate">{c.name}</span>
+              <span className="text-[10px] text-muted font-mono shrink-0">
+                {new Date(c.createdAt).toLocaleDateString()} ·{" "}
+                {Object.keys(c.answers ?? {}).length} answers
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 function CreatorAccess({
   brief,
@@ -1084,7 +1123,7 @@ function CreatorAccess({
       <div>
         <div className="flex items-center justify-between mb-2">
           <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
-            Creators ({creators?.length ?? 0})
+            Creators
           </div>
           <button
             type="button"
@@ -1098,24 +1137,21 @@ function CreatorAccess({
           <p className="text-xs text-muted">Loading…</p>
         ) : (creators?.length ?? 0) === 0 ? (
           <p className="text-xs text-muted italic">
-            No creators yet — they appear here once the gate is live and people
-            sign in.
+            No creators yet — they appear here once people go through onboarding.
           </p>
         ) : (
-          <ul className="space-y-1.5">
-            {creators!.map((c) => (
-              <li
-                key={c.id}
-                className="flex items-center justify-between gap-2 border-2 border-line bg-background rounded-md px-2.5 py-1.5"
-              >
-                <span className="font-bold text-sm truncate">{c.name}</span>
-                <span className="text-[10px] text-muted font-mono shrink-0">
-                  {new Date(c.createdAt).toLocaleDateString()} ·{" "}
-                  {Object.keys(c.answers ?? {}).length} answers
-                </span>
-              </li>
-            ))}
-          </ul>
+          <div className="space-y-3">
+            <CreatorList
+              label="✅ Approved — entered the code & got in"
+              rows={(creators ?? []).filter((c) => c.status === "approved")}
+              tone="approved"
+            />
+            <CreatorList
+              label="⏳ Finished onboarding — awaiting code"
+              rows={(creators ?? []).filter((c) => c.status !== "approved")}
+              tone="onboarded"
+            />
+          </div>
         )}
       </div>
     </div>

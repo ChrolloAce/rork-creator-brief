@@ -291,12 +291,16 @@ export type Brief = {
   updatedAt: Date;
 };
 
+export type CreatorStatus = "onboarded" | "approved";
+
 export type BriefCreator = {
   id: string;
   briefSlug: string;
   name: string;
   code: string | null;
   answers: Record<string, unknown>;
+  status: CreatorStatus;
+  clientId: string | null;
   createdAt: Date;
 };
 
@@ -412,6 +416,10 @@ async function runSchema() {
     )
   `;
   await sql`CREATE INDEX IF NOT EXISTS brief_creator_brief_idx ON brief_creator (brief_slug, created_at DESC)`;
+  // status: "onboarded" (finished onboarding) vs "approved" (entered the code).
+  await sql`ALTER TABLE brief_creator ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'approved'`;
+  await sql`ALTER TABLE brief_creator ADD COLUMN IF NOT EXISTS client_id TEXT`;
+  await sql`ALTER TABLE brief_creator ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`;
   // Seed Rork brief if none exists
   const existing = await sql`SELECT slug FROM brief`;
   if (existing.length === 0) {
@@ -561,6 +569,8 @@ function rowToCreator(r: {
   name: string;
   code: string | null;
   answers: Record<string, unknown> | null;
+  status: string | null;
+  client_id: string | null;
   created_at: Date;
 }): BriefCreator {
   return {
@@ -569,32 +579,73 @@ function rowToCreator(r: {
     name: r.name,
     code: r.code,
     answers: r.answers ?? {},
+    status: r.status === "approved" ? "approved" : "onboarded",
+    clientId: r.client_id,
     createdAt: r.created_at,
   };
 }
 
-// Verify a creator's code against the brief's shared passcode and record them.
-// Returns the new creator on success, or null when the code doesn't match.
-export async function joinBrief(input: {
+const CREATOR_COLS = `id, brief_slug, name, code, answers, status, client_id, created_at`;
+
+// Does the submitted code match the brief's passcode? (Empty brief code = any.)
+export async function verifyBriefCode(
+  briefSlug: string,
+  code: string
+): Promise<boolean> {
+  const brief = await getBrief(briefSlug);
+  if (!brief) return false;
+  const expected = (brief.accessCode ?? "").trim();
+  if (!expected) return true;
+  return code.trim() === expected;
+}
+
+// Record/update a creator. Deduped by clientId (same device) so a creator who
+// finishes onboarding ("onboarded") and later enters the code ("approved")
+// updates one row instead of creating two. Never downgrades approved→onboarded.
+export async function upsertCreator(input: {
   briefSlug: string;
   name: string;
-  code: string;
+  code?: string;
   answers?: Record<string, unknown>;
-}): Promise<BriefCreator | null> {
+  status: CreatorStatus;
+  clientId?: string;
+}): Promise<BriefCreator> {
   await ensureSchema();
   const sql = getSql();
-  const brief = await getBrief(input.briefSlug);
-  if (!brief) return null;
-  const expected = (brief.accessCode ?? "").trim();
-  // When no code is set on the brief, any code passes (name-only style).
-  if (expected && input.code.trim() !== expected) return null;
+  const name = input.name.trim();
+  const code = input.code?.trim() || null;
+  const answers = input.answers ?? {};
+
+  if (input.clientId) {
+    const existing = await sql<{ id: string }[]>`
+      SELECT id FROM brief_creator
+      WHERE brief_slug = ${input.briefSlug} AND client_id = ${input.clientId}
+      LIMIT 1
+    `;
+    if (existing.length > 0) {
+      await sql`
+        UPDATE brief_creator SET
+          name = ${name},
+          code = COALESCE(${code}, code),
+          answers = ${sql.json(answers as never)},
+          status = CASE WHEN status = 'approved' THEN 'approved' ELSE ${input.status} END,
+          updated_at = NOW()
+        WHERE id = ${existing[0].id}
+      `;
+      const rows = await sql<Parameters<typeof rowToCreator>[0][]>`
+        SELECT ${sql.unsafe(CREATOR_COLS)} FROM brief_creator WHERE id = ${existing[0].id}
+      `;
+      return rowToCreator(rows[0]);
+    }
+  }
+
   const id = `cr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   await sql`
-    INSERT INTO brief_creator (id, brief_slug, name, code, answers)
-    VALUES (${id}, ${input.briefSlug}, ${input.name.trim()}, ${input.code.trim() || null}, ${sql.json((input.answers ?? {}) as never)})
+    INSERT INTO brief_creator (id, brief_slug, name, code, answers, status, client_id)
+    VALUES (${id}, ${input.briefSlug}, ${name}, ${code}, ${sql.json(answers as never)}, ${input.status}, ${input.clientId ?? null})
   `;
   const rows = await sql<Parameters<typeof rowToCreator>[0][]>`
-    SELECT id, brief_slug, name, code, answers, created_at FROM brief_creator WHERE id = ${id}
+    SELECT ${sql.unsafe(CREATOR_COLS)} FROM brief_creator WHERE id = ${id}
   `;
   return rowToCreator(rows[0]);
 }
@@ -603,7 +654,7 @@ export async function listCreators(briefSlug: string): Promise<BriefCreator[]> {
   await ensureSchema();
   const sql = getSql();
   const rows = await sql<Parameters<typeof rowToCreator>[0][]>`
-    SELECT id, brief_slug, name, code, answers, created_at
+    SELECT ${sql.unsafe(CREATOR_COLS)}
     FROM brief_creator WHERE brief_slug = ${briefSlug}
     ORDER BY created_at DESC
   `;

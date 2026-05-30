@@ -238,6 +238,25 @@ export function OnboardingFlow({
     mainRef.current?.scrollTo({ top: 0 });
   }, [i]);
 
+  // Resume where they left off: restore the saved step on mount, save on change.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(`sb-step-${brief.slug}`);
+      const n = raw == null ? NaN : parseInt(raw, 10);
+      if (!Number.isNaN(n)) setI(Math.max(0, Math.min(total - 1, n)));
+    } catch {
+      /* ignore */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    try {
+      localStorage.setItem(`sb-step-${brief.slug}`, String(i));
+    } catch {
+      /* ignore */
+    }
+  }, [i, brief.slug]);
+
   const onGate = gated && i === steps.length;
   const step = steps[i]; // undefined on the gate screen
   const isLastStep = i === steps.length - 1;
@@ -247,6 +266,39 @@ export function OnboardingFlow({
   const [gCode, setGCode] = useState("");
   const [gErr, setGErr] = useState<string | null>(null);
   const [gBusy, setGBusy] = useState(false);
+
+  // Stable per-device id so a creator who finishes onboarding and later enters
+  // the code updates one record (moves from the onboarded list to approved).
+  const clientId = useRef("");
+  useEffect(() => {
+    try {
+      const k = `sb-cid-${brief.slug}`;
+      let v = localStorage.getItem(k);
+      if (!v) {
+        v = `c_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+        localStorage.setItem(k, v);
+      }
+      clientId.current = v;
+    } catch {
+      /* ignore */
+    }
+  }, [brief.slug]);
+
+  // Capture a "finished onboarding" lead (no code yet) — fired when they tap
+  // the WhatsApp/contact CTA on the gate screen.
+  function recordOnboarded() {
+    if (!gName.trim()) return;
+    void fetch(`/api/access/${encodeURIComponent(brief.slug)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: gName.trim(),
+        answers,
+        clientId: clientId.current,
+        mode: "onboarded",
+      }),
+    }).catch(() => {});
+  }
 
   // Block advancing while a required question on this step is unanswered.
   const blocked =
@@ -283,7 +335,13 @@ export function OnboardingFlow({
       const res = await fetch(`/api/access/${encodeURIComponent(brief.slug)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: gName.trim(), code: gCode.trim(), answers }),
+        body: JSON.stringify({
+          name: gName.trim(),
+          code: gCode.trim(),
+          answers,
+          clientId: clientId.current,
+          mode: "approve",
+        }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j.ok) {
@@ -334,19 +392,19 @@ export function OnboardingFlow({
         {onGate ? (
           <div className="max-w-md mx-auto px-4 sm:px-6 py-8 sm:py-12 space-y-5">
             <h1 className="text-3xl sm:text-4xl font-black tracking-tight leading-tight">
-              {onboarding.gate?.heading?.trim() || "Get approved to start"}
+              {onboarding.gate?.heading?.trim() || "One last step to begin"}
             </h1>
-            {onboarding.gate?.body?.trim() && (
-              <p className="text-base sm:text-lg text-ink leading-relaxed whitespace-pre-line">
-                {onboarding.gate.body}
-              </p>
-            )}
+            <p className="text-base sm:text-lg text-ink leading-relaxed whitespace-pre-line">
+              {onboarding.gate?.body?.trim() ||
+                "Message us to officially begin — once you reach out we'll send you your access code over WhatsApp. Enter it below to unlock the brief."}
+            </p>
             {onboarding.gate?.ctaUrl?.trim() &&
               onboarding.gate?.ctaLabel?.trim() && (
                 <a
                   href={onboarding.gate.ctaUrl}
                   target="_blank"
                   rel="noreferrer"
+                  onClick={recordOnboarded}
                   className="flex w-full justify-center border-2 border-line bg-success text-success-ink px-4 py-3 rounded-md nb-press font-black uppercase tracking-widest text-sm"
                 >
                   {onboarding.gate.ctaLabel}
@@ -361,6 +419,7 @@ export function OnboardingFlow({
                   type="text"
                   value={gName}
                   onChange={(e) => setGName(e.target.value)}
+                  onBlur={recordOnboarded}
                   placeholder="First + last"
                   className="mt-1 w-full border-2 border-line rounded-md px-3 py-2 text-base font-bold focus:outline-none focus:border-accent bg-background"
                 />

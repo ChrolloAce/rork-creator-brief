@@ -1,21 +1,28 @@
 import { NextResponse } from "next/server";
-import { joinBrief } from "@/lib/db";
+import { upsertCreator, verifyBriefCode } from "@/lib/db";
 import { accessCookieName, accessToken } from "@/lib/creator-access";
 
 export const dynamic = "force-dynamic";
 
 type Params = { slug: string };
 
-// PUBLIC endpoint (not behind the admin cookie). A creator submits their name +
-// the brief passcode to "sign in". Validates the code, records the creator, and
-// returns a creator id the client can store. NOTE: the public brief pages don't
-// call this yet — the gate is built but not live until access_enabled flips on.
+// PUBLIC endpoint (not behind the admin cookie). Two modes:
+//  - mode "onboarded": the creator finished onboarding / reached out — record
+//    them as a lead (no code check, no access).
+//  - mode "approve" (default when a code is sent): verify the code; on success
+//    record them as approved and set the access cookie that unlocks the brief.
 export async function POST(
   req: Request,
   { params }: { params: Promise<Params> }
 ) {
   const { slug } = await params;
-  let body: { name?: string; code?: string; answers?: Record<string, unknown> } = {};
+  let body: {
+    name?: string;
+    code?: string;
+    answers?: Record<string, unknown>;
+    clientId?: string;
+    mode?: "onboarded" | "approve";
+  } = {};
   try {
     body = await req.json();
   } catch {
@@ -23,23 +30,46 @@ export async function POST(
   }
   const name = (body.name ?? "").trim();
   const code = (body.code ?? "").trim();
+  const clientId = body.clientId;
+  const answers = body.answers ?? {};
+  const mode = body.mode ?? (code ? "approve" : "onboarded");
   if (!name) {
     return NextResponse.json({ error: "name required" }, { status: 400 });
   }
+
   try {
-    const creator = await joinBrief({
+    if (mode === "onboarded") {
+      const creator = await upsertCreator({
+        briefSlug: slug,
+        name,
+        answers,
+        status: "onboarded",
+        clientId,
+      });
+      return NextResponse.json({ ok: true, creator });
+    }
+
+    // approve
+    const valid = await verifyBriefCode(slug, code);
+    if (!valid) {
+      // Wrong code — still capture them as a finished-onboarding lead.
+      await upsertCreator({
+        briefSlug: slug,
+        name,
+        answers,
+        status: "onboarded",
+        clientId,
+      });
+      return NextResponse.json({ ok: false, error: "wrong code" }, { status: 401 });
+    }
+    const creator = await upsertCreator({
       briefSlug: slug,
       name,
       code,
-      answers: body.answers ?? {},
+      answers,
+      status: "approved",
+      clientId,
     });
-    if (!creator) {
-      return NextResponse.json(
-        { ok: false, error: "wrong code" },
-        { status: 401 }
-      );
-    }
-    // Correct code → set the access cookie that unlocks the brief pages.
     const res = NextResponse.json({ ok: true, creator });
     const token = await accessToken(slug, code);
     res.cookies.set(accessCookieName(slug), token, {
