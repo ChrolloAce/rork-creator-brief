@@ -1,12 +1,13 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import type {
   Onboarding,
   OnboardingBlock,
   OnboardingStep,
   OnboardingQuestionType,
 } from "@/lib/db";
+import { RichText } from "@/components/RichText";
 
 function genId(): string {
   return `ob_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
@@ -294,12 +295,9 @@ function BlockEditor({
         </div>
 
         {block.kind === "text" && (
-          <textarea
+          <RichTextArea
             value={block.text}
-            onChange={(e) => onChange({ ...block, text: e.target.value })}
-            rows={3}
-            placeholder="Write the copy for this block…"
-            className="w-full border-2 border-line rounded-sm px-2 py-1 text-sm focus:outline-none focus:border-accent bg-background leading-relaxed"
+            onChange={(text) => onChange({ ...block, text })}
           />
         )}
 
@@ -462,6 +460,107 @@ function BlockEditor({
           ×
         </button>
       </div>
+    </div>
+  );
+}
+
+// Textarea with a formatting toolbar (markdown-lite) + live preview. Keeps the
+// raw markdown as the value; RichText renders it the same way the viewer does.
+function RichTextArea({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const [preview, setPreview] = useState(false);
+
+  function surround(before: string, after: string) {
+    const ta = ref.current;
+    if (!ta) return;
+    const s = ta.selectionStart;
+    const e = ta.selectionEnd;
+    const sel = value.slice(s, e) || "text";
+    onChange(value.slice(0, s) + before + sel + after + value.slice(e));
+    requestAnimationFrame(() => {
+      ta.focus();
+      ta.setSelectionRange(s + before.length, s + before.length + sel.length);
+    });
+  }
+  function prefixLine(prefix: string) {
+    const ta = ref.current;
+    if (!ta) return;
+    const s = ta.selectionStart;
+    const lineStart = value.lastIndexOf("\n", s - 1) + 1;
+    onChange(value.slice(0, lineStart) + prefix + value.slice(lineStart));
+    requestAnimationFrame(() => {
+      ta.focus();
+      const pos = s + prefix.length;
+      ta.setSelectionRange(pos, pos);
+    });
+  }
+
+  const tools: { title: string; label: ReactNode; run: () => void }[] = [
+    { title: "Heading", label: "H1", run: () => prefixLine("# ") },
+    { title: "Subheading", label: "H2", run: () => prefixLine("## ") },
+    { title: "Bold", label: <b>B</b>, run: () => surround("**", "**") },
+    { title: "Italic", label: <i>I</i>, run: () => surround("*", "*") },
+    {
+      title: "Highlight",
+      label: (
+        <span className="bg-accent text-accent-ink px-0.5 rounded-[2px]">H</span>
+      ),
+      run: () => surround("==", "=="),
+    },
+    { title: "Quote", label: "❝", run: () => prefixLine("> ") },
+    { title: "Bullet list", label: "•", run: () => prefixLine("- ") },
+    { title: "Link", label: "🔗", run: () => surround("[", "](https://)") },
+  ];
+
+  return (
+    <div className="border-2 border-line rounded-md bg-paper overflow-hidden">
+      <div className="flex flex-wrap items-center gap-1 px-1.5 py-1 border-b-2 border-line bg-background">
+        {tools.map((t) => (
+          <button
+            key={t.title}
+            type="button"
+            title={t.title}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={t.run}
+            className="min-w-7 h-7 px-1.5 border-2 border-line bg-background rounded-sm text-xs font-black nb-press flex items-center justify-center"
+          >
+            {t.label}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => setPreview((p) => !p)}
+          className={`ml-auto h-7 px-2 border-2 border-line rounded-sm text-[10px] font-black uppercase tracking-widest nb-press ${
+            preview ? "bg-accent text-accent-ink" : "bg-background"
+          }`}
+        >
+          {preview ? "Edit" : "Preview"}
+        </button>
+      </div>
+      {preview ? (
+        <div className="p-3 bg-background min-h-[90px]">
+          {value.trim() ? (
+            <RichText text={value} />
+          ) : (
+            <span className="text-xs text-muted italic">Nothing to preview yet.</span>
+          )}
+        </div>
+      ) : (
+        <textarea
+          ref={ref}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          rows={5}
+          placeholder="Write the copy. Select text then tap B / highlight, or start a line with # heading, > quote, - list."
+          className="w-full px-2.5 py-2 text-sm focus:outline-none bg-background leading-relaxed resize-y block"
+        />
+      )}
     </div>
   );
 }

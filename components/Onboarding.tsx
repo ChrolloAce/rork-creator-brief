@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { Onboarding, OnboardingBlock } from "@/lib/db";
+import { RichText } from "@/components/RichText";
 
 function VideoEmbed({ url }: { url: string }) {
   const yt = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]+)/);
@@ -48,11 +49,7 @@ function Block({
   onAnswer: (v: unknown) => void;
 }) {
   if (block.kind === "text") {
-    return (
-      <p className="text-base sm:text-lg text-ink leading-relaxed whitespace-pre-line">
-        {block.text}
-      </p>
-    );
+    return <RichText text={block.text} />;
   }
   if (block.kind === "image") {
     if (!block.url) return null;
