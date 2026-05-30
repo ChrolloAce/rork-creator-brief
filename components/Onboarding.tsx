@@ -187,11 +187,13 @@ function Block({
           className="w-full border-2 border-line rounded-md px-3 py-2 text-base font-bold bg-background focus:outline-none focus:border-accent"
         >
           <option value="">Choose…</option>
-          {(block.options ?? []).map((o) => (
-            <option key={o} value={o}>
-              {o}
-            </option>
-          ))}
+          {(block.options ?? [])
+            .filter((o) => o.trim())
+            .map((o) => (
+              <option key={o} value={o}>
+                {o}
+              </option>
+            ))}
         </select>
       ) : block.field === "checkbox" ? (
         <span className="inline-flex items-center gap-2">

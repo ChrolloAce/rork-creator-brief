@@ -440,21 +440,54 @@ function BlockEditor({
               </label>
             </div>
             {block.field === "select" && (
-              <input
-                type="text"
-                value={(block.options ?? []).join(", ")}
-                onChange={(e) =>
-                  onChange({
-                    ...block,
-                    options: e.target.value
-                      .split(",")
-                      .map((o) => o.trim())
-                      .filter(Boolean),
-                  })
-                }
-                placeholder="Options, comma separated (e.g. TikTok, Instagram, YouTube)"
-                className="w-full border-2 border-line rounded-sm px-2 py-1 text-xs focus:outline-none focus:border-accent bg-background"
-              />
+              <div className="space-y-1.5">
+                <span className="text-[9px] uppercase tracking-widest font-bold text-muted">
+                  Dropdown options
+                </span>
+                {(block.options ?? []).map((opt, oi) => (
+                  <div key={oi} className="flex items-center gap-1.5">
+                    <span className="font-mono text-[10px] text-muted w-4 shrink-0">
+                      {oi + 1}
+                    </span>
+                    <input
+                      type="text"
+                      value={opt}
+                      autoFocus={opt === ""}
+                      onChange={(e) => {
+                        const next = [...(block.options ?? [])];
+                        next[oi] = e.target.value;
+                        onChange({ ...block, options: next });
+                      }}
+                      placeholder="Option label"
+                      className="flex-1 border-2 border-line rounded-sm px-2 py-1 text-sm focus:outline-none focus:border-accent bg-background"
+                    />
+                    <button
+                      type="button"
+                      aria-label="Remove option"
+                      onClick={() =>
+                        onChange({
+                          ...block,
+                          options: (block.options ?? []).filter(
+                            (_, j) => j !== oi
+                          ),
+                        })
+                      }
+                      className="w-7 h-7 border-2 border-line bg-background rounded-sm font-black nb-press shrink-0"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() =>
+                    onChange({ ...block, options: [...(block.options ?? []), ""] })
+                  }
+                  className="w-full border-2 border-dashed border-line bg-background rounded-sm px-2 py-1 text-[10px] font-black uppercase tracking-widest text-muted hover:text-accent hover:border-accent"
+                >
+                  + Add option
+                </button>
+              </div>
             )}
             {(block.field === "short" || block.field === "long") && (
               <input
