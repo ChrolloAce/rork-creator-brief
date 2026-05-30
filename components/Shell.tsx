@@ -20,6 +20,7 @@ export function Shell({
   publicStats,
   hideOverview = false,
   contentCalendar,
+  onboardingEnabled = false,
 }: {
   formats: Format[];
   hookCategories: HookCategory[];
@@ -34,6 +35,7 @@ export function Shell({
   publicStats?: { enabled: boolean; visible?: string[] };
   hideOverview?: boolean;
   contentCalendar?: ContentCalendar | null;
+  onboardingEnabled?: boolean;
 }) {
   const calendarEnabled =
     !!contentCalendar?.enabled && (contentCalendar.days?.length ?? 0) > 0;
@@ -42,8 +44,9 @@ export function Shell({
       buildNavSections(formats, brief.slug, {
         includeOverview: !hideOverview,
         includeCalendar: calendarEnabled,
+        includeOnboarding: onboardingEnabled,
       }),
-    [formats, brief.slug, hideOverview, calendarEnabled]
+    [formats, brief.slug, hideOverview, calendarEnabled, onboardingEnabled]
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
   const pathname = usePathname();

@@ -210,12 +210,42 @@ export type BriefHookCategory = {
   hooks: BriefHook[];
 };
 
+// ---------- Onboarding (multi-step intro flow) ----------
+export type OnboardingQuestionType = "short" | "long" | "select" | "checkbox";
+
+export type OnboardingBlock =
+  | { kind: "text"; id: string; text: string }
+  | { kind: "image"; id: string; url: string; caption?: string }
+  | { kind: "video"; id: string; url: string; caption?: string }
+  | {
+      kind: "question";
+      id: string;
+      label: string;
+      field: OnboardingQuestionType;
+      required?: boolean;
+      placeholder?: string;
+      options?: string[];
+    };
+
+export type OnboardingStep = {
+  id: string;
+  title?: string;
+  subtitle?: string;
+  blocks: OnboardingBlock[];
+};
+
+export type Onboarding = {
+  enabled?: boolean;
+  steps: OnboardingStep[];
+};
+
 export type Brief = {
   slug: string;
   name: string;
   logoUrl: string | null;
   overview: BriefOverview | null;
   hookCategories: BriefHookCategory[] | null;
+  onboarding: Onboarding | null;
   // Creator-access gate. accessCode is the shared passcode; accessEnabled
   // controls whether the public brief actually requires it (kept false until
   // we go live with the gate).
@@ -334,6 +364,7 @@ async function runSchema() {
   // Creator-access gate (passcode + name). Dormant until access_enabled flips on.
   await sql`ALTER TABLE brief ADD COLUMN IF NOT EXISTS access_code TEXT`;
   await sql`ALTER TABLE brief ADD COLUMN IF NOT EXISTS access_enabled BOOLEAN DEFAULT false`;
+  await sql`ALTER TABLE brief ADD COLUMN IF NOT EXISTS onboarding JSONB`;
   await sql`
     CREATE TABLE IF NOT EXISTS brief_creator (
       id TEXT PRIMARY KEY,
@@ -374,6 +405,7 @@ type BriefRow = {
   hook_categories: BriefHookCategory[] | null;
   access_code: string | null;
   access_enabled: boolean | null;
+  onboarding: Onboarding | null;
   created_at: Date;
   updated_at: Date;
 };
@@ -387,19 +419,20 @@ function rowToBrief(r: BriefRow): Brief {
     hookCategories: r.hook_categories,
     accessCode: r.access_code,
     accessEnabled: !!r.access_enabled,
+    onboarding: r.onboarding,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
 }
 
-const BRIEF_SELECT = `slug, name, logo_url, overview, hook_categories, access_code, access_enabled, created_at, updated_at`;
+const BRIEF_SELECT = `slug, name, logo_url, overview, hook_categories, access_code, access_enabled, onboarding, created_at, updated_at`;
 
 export async function listBriefs(): Promise<Brief[]> {
   await ensureSchema();
   const sql = getSql();
   const rows = await sql<
     BriefRow[]
-  >`SELECT slug, name, logo_url, overview, hook_categories, access_code, access_enabled, created_at, updated_at FROM brief ORDER BY created_at ASC`;
+  >`SELECT slug, name, logo_url, overview, hook_categories, access_code, access_enabled, onboarding, created_at, updated_at FROM brief ORDER BY created_at ASC`;
   return rows.map(rowToBrief);
 }
 
@@ -408,7 +441,7 @@ export async function getBrief(slug: string): Promise<Brief | null> {
   const sql = getSql();
   const rows = await sql<
     BriefRow[]
-  >`SELECT slug, name, logo_url, overview, hook_categories, access_code, access_enabled, created_at, updated_at FROM brief WHERE slug = ${slug}`;
+  >`SELECT slug, name, logo_url, overview, hook_categories, access_code, access_enabled, onboarding, created_at, updated_at FROM brief WHERE slug = ${slug}`;
   if (rows.length === 0) return null;
   return rowToBrief(rows[0]);
 }
@@ -447,6 +480,7 @@ export async function updateBrief(
     hookCategories?: BriefHookCategory[] | null;
     accessCode?: string | null;
     accessEnabled?: boolean;
+    onboarding?: Onboarding | null;
   }
 ): Promise<Brief> {
   await ensureSchema();
@@ -474,6 +508,9 @@ export async function updateBrief(
   }
   if (patch.accessEnabled !== undefined) {
     await sql`UPDATE brief SET access_enabled = ${patch.accessEnabled}, updated_at = NOW() WHERE slug = ${slug}`;
+  }
+  if (patch.onboarding !== undefined) {
+    await sql`UPDATE brief SET onboarding = ${patch.onboarding ? sql.json(patch.onboarding as never) : null}, updated_at = NOW() WHERE slug = ${slug}`;
   }
   const b = await getBrief(slug);
   if (!b) throw new Error("Brief not found after update");

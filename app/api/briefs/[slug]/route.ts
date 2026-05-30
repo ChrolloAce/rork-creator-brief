@@ -7,6 +7,7 @@ import {
   DEFAULT_BRIEF_SLUG,
   type BriefOverview,
   type BriefHookCategory,
+  type Onboarding,
 } from "@/lib/db";
 
 export const dynamic = "force-dynamic";
@@ -45,6 +46,7 @@ export async function PATCH(
     hookCategories?: BriefHookCategory[] | null;
     accessCode?: string | null;
     accessEnabled?: boolean;
+    onboarding?: Onboarding | null;
   } = {};
   try {
     body = await req.json();
@@ -59,7 +61,9 @@ export async function PATCH(
     hookCategories?: BriefHookCategory[] | null;
     accessCode?: string | null;
     accessEnabled?: boolean;
+    onboarding?: Onboarding | null;
   } = {};
+  if (body.onboarding !== undefined) patch.onboarding = body.onboarding;
   if (typeof body.name === "string") patch.name = body.name.trim();
   if (body.accessCode !== undefined) {
     patch.accessCode = body.accessCode === null ? null : String(body.accessCode);

@@ -14,11 +14,12 @@ import {
 import { allVideos } from "@/lib/all-videos";
 import { formats as formatsMeta } from "@/lib/formats";
 import { hookCategories as defaultHookCategories } from "@/lib/hooks";
-import type { BriefOverview, BriefHookCategory, ContentCalendar } from "@/lib/db";
+import type { BriefOverview, BriefHookCategory, ContentCalendar, Onboarding } from "@/lib/db";
 import { CalendarEditor } from "@/components/admin/CalendarEditor";
 import { CollapsibleCard } from "@/components/admin/CollapsibleCard";
 import { HooksEditor } from "@/components/admin/HooksEditor";
 import { LogoUpload } from "@/components/admin/LogoUpload";
+import { OnboardingEditor } from "@/components/admin/OnboardingEditor";
 import { OverviewEditor } from "@/components/admin/OverviewEditor";
 import { ProjectSources } from "@/components/admin/ProjectSources";
 import { VideoChip } from "@/components/admin/VideoChip";
@@ -73,6 +74,7 @@ type BriefRecord = {
   hookCategories?: BriefHookCategory[] | null;
   accessCode?: string | null;
   accessEnabled?: boolean;
+  onboarding?: Onboarding | null;
 };
 
 function SectionStats({
@@ -656,6 +658,23 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
             brief={brief}
             briefSlug={briefSlug}
             onSave={saveBrief}
+          />
+        </CollapsibleCard>
+
+        <CollapsibleCard
+          storageKey={`brief-editor:${briefSlug}:onboarding`}
+          title="Onboarding"
+          meta={
+            brief.onboarding?.enabled
+              ? `${brief.onboarding.steps?.length ?? 0} steps`
+              : "Off"
+          }
+        >
+          <OnboardingEditor
+            value={brief.onboarding}
+            onSave={(onboarding) => {
+              void saveBrief({ onboarding });
+            }}
           />
         </CollapsibleCard>
 

@@ -69,6 +69,9 @@ export default async function BriefCalendarPage({
       publicStats={curation.publicStats}
       hideOverview={curation.hideOverview}
       contentCalendar={calendar}
+      onboardingEnabled={
+        !!(brief.onboarding?.enabled && (brief.onboarding.steps?.length ?? 0) > 0)
+      }
     />
   );
 }
