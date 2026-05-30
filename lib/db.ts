@@ -216,8 +216,22 @@ export type Brief = {
   logoUrl: string | null;
   overview: BriefOverview | null;
   hookCategories: BriefHookCategory[] | null;
+  // Creator-access gate. accessCode is the shared passcode; accessEnabled
+  // controls whether the public brief actually requires it (kept false until
+  // we go live with the gate).
+  accessCode: string | null;
+  accessEnabled: boolean;
   createdAt: Date;
   updatedAt: Date;
+};
+
+export type BriefCreator = {
+  id: string;
+  briefSlug: string;
+  name: string;
+  code: string | null;
+  answers: Record<string, unknown>;
+  createdAt: Date;
 };
 
 export const DEFAULT_BRIEF_SLUG = "rork";
@@ -317,6 +331,20 @@ async function runSchema() {
     )
   `;
   await sql`ALTER TABLE image_blob ADD COLUMN IF NOT EXISTS filename TEXT`;
+  // Creator-access gate (passcode + name). Dormant until access_enabled flips on.
+  await sql`ALTER TABLE brief ADD COLUMN IF NOT EXISTS access_code TEXT`;
+  await sql`ALTER TABLE brief ADD COLUMN IF NOT EXISTS access_enabled BOOLEAN DEFAULT false`;
+  await sql`
+    CREATE TABLE IF NOT EXISTS brief_creator (
+      id TEXT PRIMARY KEY,
+      brief_slug TEXT NOT NULL,
+      name TEXT NOT NULL,
+      code TEXT,
+      answers JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS brief_creator_brief_idx ON brief_creator (brief_slug, created_at DESC)`;
   // Seed Rork brief if none exists
   const existing = await sql`SELECT slug FROM brief`;
   if (existing.length === 0) {
@@ -344,6 +372,8 @@ type BriefRow = {
   logo_url: string | null;
   overview: BriefOverview | null;
   hook_categories: BriefHookCategory[] | null;
+  access_code: string | null;
+  access_enabled: boolean | null;
   created_at: Date;
   updated_at: Date;
 };
@@ -355,19 +385,21 @@ function rowToBrief(r: BriefRow): Brief {
     logoUrl: r.logo_url,
     overview: r.overview,
     hookCategories: r.hook_categories,
+    accessCode: r.access_code,
+    accessEnabled: !!r.access_enabled,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
 }
 
-const BRIEF_SELECT = `slug, name, logo_url, overview, hook_categories, created_at, updated_at`;
+const BRIEF_SELECT = `slug, name, logo_url, overview, hook_categories, access_code, access_enabled, created_at, updated_at`;
 
 export async function listBriefs(): Promise<Brief[]> {
   await ensureSchema();
   const sql = getSql();
   const rows = await sql<
     BriefRow[]
-  >`SELECT slug, name, logo_url, overview, hook_categories, created_at, updated_at FROM brief ORDER BY created_at ASC`;
+  >`SELECT slug, name, logo_url, overview, hook_categories, access_code, access_enabled, created_at, updated_at FROM brief ORDER BY created_at ASC`;
   return rows.map(rowToBrief);
 }
 
@@ -376,7 +408,7 @@ export async function getBrief(slug: string): Promise<Brief | null> {
   const sql = getSql();
   const rows = await sql<
     BriefRow[]
-  >`SELECT slug, name, logo_url, overview, hook_categories, created_at, updated_at FROM brief WHERE slug = ${slug}`;
+  >`SELECT slug, name, logo_url, overview, hook_categories, access_code, access_enabled, created_at, updated_at FROM brief WHERE slug = ${slug}`;
   if (rows.length === 0) return null;
   return rowToBrief(rows[0]);
 }
@@ -413,6 +445,8 @@ export async function updateBrief(
     slug?: string;
     overview?: BriefOverview | null;
     hookCategories?: BriefHookCategory[] | null;
+    accessCode?: string | null;
+    accessEnabled?: boolean;
   }
 ): Promise<Brief> {
   await ensureSchema();
@@ -434,9 +468,79 @@ export async function updateBrief(
   if (patch.hookCategories !== undefined) {
     await sql`UPDATE brief SET hook_categories = ${patch.hookCategories ? sql.json(patch.hookCategories as never) : null}, updated_at = NOW() WHERE slug = ${slug}`;
   }
+  if (patch.accessCode !== undefined) {
+    const trimmed = patch.accessCode?.trim() || null;
+    await sql`UPDATE brief SET access_code = ${trimmed}, updated_at = NOW() WHERE slug = ${slug}`;
+  }
+  if (patch.accessEnabled !== undefined) {
+    await sql`UPDATE brief SET access_enabled = ${patch.accessEnabled}, updated_at = NOW() WHERE slug = ${slug}`;
+  }
   const b = await getBrief(slug);
   if (!b) throw new Error("Brief not found after update");
   return b;
+}
+
+// ---------- Creator access (passcode + name gate) ----------
+
+function rowToCreator(r: {
+  id: string;
+  brief_slug: string;
+  name: string;
+  code: string | null;
+  answers: Record<string, unknown> | null;
+  created_at: Date;
+}): BriefCreator {
+  return {
+    id: r.id,
+    briefSlug: r.brief_slug,
+    name: r.name,
+    code: r.code,
+    answers: r.answers ?? {},
+    createdAt: r.created_at,
+  };
+}
+
+// Verify a creator's code against the brief's shared passcode and record them.
+// Returns the new creator on success, or null when the code doesn't match.
+export async function joinBrief(input: {
+  briefSlug: string;
+  name: string;
+  code: string;
+  answers?: Record<string, unknown>;
+}): Promise<BriefCreator | null> {
+  await ensureSchema();
+  const sql = getSql();
+  const brief = await getBrief(input.briefSlug);
+  if (!brief) return null;
+  const expected = (brief.accessCode ?? "").trim();
+  // When no code is set on the brief, any code passes (name-only style).
+  if (expected && input.code.trim() !== expected) return null;
+  const id = `cr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+  await sql`
+    INSERT INTO brief_creator (id, brief_slug, name, code, answers)
+    VALUES (${id}, ${input.briefSlug}, ${input.name.trim()}, ${input.code.trim() || null}, ${sql.json((input.answers ?? {}) as never)})
+  `;
+  const rows = await sql<Parameters<typeof rowToCreator>[0][]>`
+    SELECT id, brief_slug, name, code, answers, created_at FROM brief_creator WHERE id = ${id}
+  `;
+  return rowToCreator(rows[0]);
+}
+
+export async function listCreators(briefSlug: string): Promise<BriefCreator[]> {
+  await ensureSchema();
+  const sql = getSql();
+  const rows = await sql<Parameters<typeof rowToCreator>[0][]>`
+    SELECT id, brief_slug, name, code, answers, created_at
+    FROM brief_creator WHERE brief_slug = ${briefSlug}
+    ORDER BY created_at DESC
+  `;
+  return rows.map(rowToCreator);
+}
+
+export async function deleteCreator(id: string): Promise<void> {
+  await ensureSchema();
+  const sql = getSql();
+  await sql`DELETE FROM brief_creator WHERE id = ${id}`;
 }
 
 // Mark BRIEF_SELECT as used to keep linter happy if we remove inline SELECTs later

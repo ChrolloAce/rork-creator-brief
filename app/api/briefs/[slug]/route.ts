@@ -43,6 +43,8 @@ export async function PATCH(
     logoUrl?: string | null;
     overview?: BriefOverview | null;
     hookCategories?: BriefHookCategory[] | null;
+    accessCode?: string | null;
+    accessEnabled?: boolean;
   } = {};
   try {
     body = await req.json();
@@ -55,8 +57,16 @@ export async function PATCH(
     logoUrl?: string | null;
     overview?: BriefOverview | null;
     hookCategories?: BriefHookCategory[] | null;
+    accessCode?: string | null;
+    accessEnabled?: boolean;
   } = {};
   if (typeof body.name === "string") patch.name = body.name.trim();
+  if (body.accessCode !== undefined) {
+    patch.accessCode = body.accessCode === null ? null : String(body.accessCode);
+  }
+  if (typeof body.accessEnabled === "boolean") {
+    patch.accessEnabled = body.accessEnabled;
+  }
   if (typeof body.slug === "string") {
     const s = slugify(body.slug);
     if (!s) return NextResponse.json({ error: "invalid slug" }, { status: 400 });

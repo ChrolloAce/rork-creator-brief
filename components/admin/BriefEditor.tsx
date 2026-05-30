@@ -71,6 +71,8 @@ type BriefRecord = {
   logoUrl: string | null;
   overview?: BriefOverview | null;
   hookCategories?: BriefHookCategory[] | null;
+  accessCode?: string | null;
+  accessEnabled?: boolean;
 };
 
 function SectionStats({
@@ -646,6 +648,18 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
         </CollapsibleCard>
 
         <CollapsibleCard
+          storageKey={`brief-editor:${briefSlug}:access`}
+          title="Creator access"
+          meta={brief.accessEnabled ? "Gate ON" : "Not live"}
+        >
+          <CreatorAccess
+            brief={brief}
+            briefSlug={briefSlug}
+            onSave={saveBrief}
+          />
+        </CollapsibleCard>
+
+        <CollapsibleCard
           storageKey={`brief-editor:${briefSlug}:overview`}
           title="Overview page content"
           meta={cur.hideOverview ? "Hidden" : undefined}
@@ -959,6 +973,131 @@ function BriefSettings({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+type CreatorRow = {
+  id: string;
+  name: string;
+  createdAt: string;
+  answers: Record<string, unknown> | null;
+};
+
+function CreatorAccess({
+  brief,
+  briefSlug,
+  onSave,
+}: {
+  brief: BriefRecord;
+  briefSlug: string;
+  onSave: (patch: Partial<BriefRecord>) => Promise<void>;
+}) {
+  const [code, setCode] = useState(brief.accessCode ?? "");
+  const [creators, setCreators] = useState<CreatorRow[] | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function loadCreators() {
+    setLoading(true);
+    try {
+      const res = await fetch(
+        `/api/briefs/${encodeURIComponent(briefSlug)}/creators`,
+        { cache: "no-store" }
+      );
+      const j = await res.json();
+      if (j.ok) setCreators(j.creators as CreatorRow[]);
+    } finally {
+      setLoading(false);
+    }
+  }
+  useEffect(() => {
+    void loadCreators();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [briefSlug]);
+
+  const codeDirty = (code.trim() || null) !== (brief.accessCode || null);
+
+  return (
+    <div className="space-y-4">
+      <div className="border-2 border-line bg-paper rounded-md p-3 text-xs leading-relaxed">
+        <span className="font-bold">How it works:</span> set a shared passcode.
+        When the gate is live, creators open the brief, enter their{" "}
+        <span className="font-bold">name</span> + this{" "}
+        <span className="font-bold">code</span>, and get recorded below.{" "}
+        <span className="font-bold">Not live yet</span> — the toggle does nothing
+        public until the gate screen ships.
+      </div>
+
+      <label className="flex items-center gap-2 text-xs font-bold cursor-pointer">
+        <input
+          type="checkbox"
+          checked={!!brief.accessEnabled}
+          onChange={(e) => onSave({ accessEnabled: e.target.checked })}
+        />
+        <span>Require name + code to enter (not live yet)</span>
+      </label>
+
+      <div className="flex items-end gap-2 flex-wrap">
+        <label className="block flex-1 min-w-[200px]">
+          <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+            Brief passcode
+          </span>
+          <input
+            type="text"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            placeholder="e.g. LOVABLE2026"
+            className="mt-1 w-full border-2 border-line rounded-md px-2 py-1.5 font-mono text-sm focus:outline-none focus:border-accent bg-background"
+          />
+        </label>
+        {codeDirty && (
+          <button
+            type="button"
+            onClick={() => onSave({ accessCode: code.trim() || null })}
+            className="border-2 border-line bg-ink text-background font-black uppercase tracking-widest px-3 py-1.5 rounded-md nb-press text-xs"
+          >
+            Save code
+          </button>
+        )}
+      </div>
+
+      <div>
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+            Creators ({creators?.length ?? 0})
+          </div>
+          <button
+            type="button"
+            onClick={() => void loadCreators()}
+            className="text-[10px] font-bold uppercase tracking-widest text-muted hover:text-accent underline"
+          >
+            Refresh
+          </button>
+        </div>
+        {loading && creators === null ? (
+          <p className="text-xs text-muted">Loading…</p>
+        ) : (creators?.length ?? 0) === 0 ? (
+          <p className="text-xs text-muted italic">
+            No creators yet — they appear here once the gate is live and people
+            sign in.
+          </p>
+        ) : (
+          <ul className="space-y-1.5">
+            {creators!.map((c) => (
+              <li
+                key={c.id}
+                className="flex items-center justify-between gap-2 border-2 border-line bg-background rounded-md px-2.5 py-1.5"
+              >
+                <span className="font-bold text-sm truncate">{c.name}</span>
+                <span className="text-[10px] text-muted font-mono shrink-0">
+                  {new Date(c.createdAt).toLocaleDateString()} ·{" "}
+                  {Object.keys(c.answers ?? {}).length} answers
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }
