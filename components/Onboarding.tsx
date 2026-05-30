@@ -104,10 +104,48 @@ function Block({
     );
   }
   if (block.kind === "reviews") {
-    if (block.reviews.length === 0) return null;
+    const showCard = block.showCard !== false && !!block.appName;
+    if (!showCard && block.reviews.length === 0) return null;
     return (
-      <div className="grid gap-3 sm:grid-cols-2">
-        {block.reviews.map((r, i) => (
+      <div className="space-y-4">
+        {showCard && (
+          <div className="border-2 border-line bg-background rounded-md nb-shadow p-4 flex items-center gap-4">
+            {block.appIcon && (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={block.appIcon}
+                alt=""
+                className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl border-2 border-line bg-paper shrink-0"
+              />
+            )}
+            <div className="min-w-0 flex-1">
+              <div className="text-lg sm:text-xl font-black leading-tight truncate">
+                {block.appName}
+              </div>
+              {block.appSubtitle && (
+                <div className="text-sm text-muted truncate">
+                  {block.appSubtitle}
+                </div>
+              )}
+              {!!block.appRating && (
+                <div className="flex items-center gap-2 mt-1 flex-wrap">
+                  <Stars n={Math.round(block.appRating)} />
+                  <span className="text-sm font-black">
+                    {block.appRating.toFixed(1)}
+                  </span>
+                  {block.appRatingCount ? (
+                    <span className="text-xs text-muted">
+                      · {block.appRatingCount.toLocaleString()} ratings
+                    </span>
+                  ) : null}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        {block.reviews.length > 0 && (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {block.reviews.map((r, i) => (
           <div
             key={i}
             className="border-2 border-line bg-paper rounded-md nb-shadow-sm p-4 space-y-1.5"
@@ -121,7 +159,9 @@ function Block({
             {r.title && <div className="font-black leading-tight">{r.title}</div>}
             <p className="text-sm text-ink leading-relaxed">{r.body}</p>
           </div>
-        ))}
+            ))}
+          </div>
+        )}
       </div>
     );
   }

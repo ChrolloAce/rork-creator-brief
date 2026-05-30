@@ -15,15 +15,34 @@ export async function GET(req: Request) {
   }
 
   let appName: string | undefined;
+  let app:
+    | {
+        name?: string;
+        icon?: string;
+        subtitle?: string;
+        rating?: number;
+        ratingCount?: number;
+      }
+    | undefined;
   try {
     const lr = await fetch(
       `https://itunes.apple.com/lookup?id=${id}&country=${country}`,
       { cache: "no-store" }
     );
     const lj = await lr.json();
-    appName = lj?.results?.[0]?.trackName;
+    const a = lj?.results?.[0];
+    if (a) {
+      appName = a.trackName;
+      app = {
+        name: a.trackName,
+        icon: a.artworkUrl512 ?? a.artworkUrl100 ?? a.artworkUrl60,
+        subtitle: a.sellerName ?? a.primaryGenreName,
+        rating: a.averageUserRating,
+        ratingCount: a.userRatingCount,
+      };
+    }
   } catch {
-    /* name is optional */
+    /* metadata is optional */
   }
 
   try {
@@ -54,7 +73,7 @@ export async function GET(req: Request) {
         title: e.title?.label,
         body: e.content?.label ?? "",
       }));
-    return NextResponse.json({ ok: true, appName, country, reviews });
+    return NextResponse.json({ ok: true, appName, app, country, reviews });
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: (e as Error).message },

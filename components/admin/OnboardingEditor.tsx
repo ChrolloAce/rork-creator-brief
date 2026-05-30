@@ -818,7 +818,7 @@ function ReviewsBlock({
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  async function loadReviews(id: string, name?: string) {
+  async function loadReviews(id: string, fromSearch?: AppResult) {
     setLoading(true);
     setErr(null);
     setApps(null);
@@ -829,7 +829,18 @@ function ReviewsBlock({
       const j = await res.json();
       if (!j.ok) throw new Error(j.error ?? "Failed to load reviews");
       setFetched(j.reviews as OnboardingReview[]);
-      onChange({ ...block, appId: id, appName: name ?? j.appName, country });
+      const app = j.app ?? {};
+      onChange({
+        ...block,
+        appId: id,
+        country,
+        appName: fromSearch?.name ?? app.name ?? j.appName,
+        appIcon: fromSearch?.icon ?? app.icon,
+        appSubtitle: fromSearch?.developer ?? app.subtitle,
+        appRating: fromSearch?.rating ?? app.rating,
+        appRatingCount: fromSearch?.ratingCount ?? app.ratingCount,
+        showCard: block.showCard ?? true,
+      });
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -918,10 +929,45 @@ function ReviewsBlock({
         </button>
       </div>
 
-      {(block.appName || block.reviews.length > 0) && (
-        <div className="text-xs font-bold">
-          {block.appName ? `${block.appName} · ` : ""}
-          {block.reviews.length} selected
+      {block.appName && (
+        <div className="border-2 border-line bg-paper rounded-md p-2 space-y-2">
+          <div className="flex items-center gap-2">
+            {block.appIcon && (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img
+                src={block.appIcon}
+                alt=""
+                className="w-10 h-10 rounded-md border-2 border-line shrink-0"
+              />
+            )}
+            <div className="min-w-0 flex-1">
+              <div className="font-black text-sm truncate">{block.appName}</div>
+              {block.appSubtitle && (
+                <div className="text-[10px] text-muted truncate">
+                  {block.appSubtitle}
+                </div>
+              )}
+              {!!block.appRating && (
+                <div className="text-[10px] font-bold text-accent">
+                  {block.appRating.toFixed(1)} ★
+                  {block.appRatingCount
+                    ? ` · ${block.appRatingCount.toLocaleString()} ratings`
+                    : ""}
+                </div>
+              )}
+            </div>
+            <span className="text-[10px] font-bold text-muted shrink-0">
+              {block.reviews.length} picked
+            </span>
+          </div>
+          <label className="flex items-center gap-2 text-[11px] font-bold cursor-pointer">
+            <input
+              type="checkbox"
+              checked={block.showCard !== false}
+              onChange={(e) => onChange({ ...block, showCard: e.target.checked })}
+            />
+            <span>Show the app card (logo, title, rating) above the reviews</span>
+          </label>
         </div>
       )}
       {err && (
@@ -939,7 +985,7 @@ function ReviewsBlock({
               <button
                 key={a.id}
                 type="button"
-                onClick={() => loadReviews(a.id, a.name)}
+                onClick={() => loadReviews(a.id, a)}
                 className="w-full flex items-center gap-2 text-left border-2 border-line bg-background rounded-sm p-1.5 nb-press"
               >
                 {a.icon && (

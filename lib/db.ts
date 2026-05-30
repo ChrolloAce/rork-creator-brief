@@ -236,13 +236,19 @@ export type OnboardingBlock =
     }
   // ViewTrack example videos pinned into the step.
   | { kind: "videos"; id: string; videos: VideoExample[]; heading?: string }
-  // App Store reviews (snapshotted from the iTunes API at edit time).
+  // App Store reviews (snapshotted from the iTunes API at edit time), with an
+  // optional App Store-style app card header (logo, title, subtitle, rating).
   | {
       kind: "reviews";
       id: string;
       appId?: string;
       appName?: string;
       country?: string;
+      appIcon?: string;
+      appSubtitle?: string;
+      appRating?: number;
+      appRatingCount?: number;
+      showCard?: boolean;
       reviews: OnboardingReview[];
     };
 
