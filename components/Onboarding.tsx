@@ -49,7 +49,7 @@ function Block({
   onAnswer: (v: unknown) => void;
 }) {
   if (block.kind === "text") {
-    return <RichText text={block.text} />;
+    return <RichText html={block.text} />;
   }
   if (block.kind === "image") {
     if (!block.url) return null;

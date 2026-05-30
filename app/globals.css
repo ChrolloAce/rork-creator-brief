@@ -72,3 +72,10 @@ body {
   transform: translate(2px, 2px);
   box-shadow: 1px 1px 0 0 var(--line);
 }
+
+/* Placeholder for the onboarding WYSIWYG (contentEditable) when empty. */
+[contenteditable][data-placeholder]:empty::before {
+  content: attr(data-placeholder);
+  color: var(--muted);
+  pointer-events: none;
+}

@@ -7,7 +7,7 @@ import type {
   OnboardingStep,
   OnboardingQuestionType,
 } from "@/lib/db";
-import { RichText } from "@/components/RichText";
+import { PROSE_CLASS, isLikelyHtml, plainTextToHtml } from "@/components/RichText";
 
 function genId(): string {
   return `ob_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
@@ -464,8 +464,9 @@ function BlockEditor({
   );
 }
 
-// Textarea with a formatting toolbar (markdown-lite) + live preview. Keeps the
-// raw markdown as the value; RichText renders it the same way the viewer does.
+// True WYSIWYG editor: a contentEditable surface styled exactly like the public
+// render (PROSE_CLASS), so bold looks bold here too. Stores HTML. Uncontrolled
+// (seeded once via a memoized initial) so the caret never jumps while typing.
 function RichTextArea({
   value,
   onChange,
@@ -473,49 +474,62 @@ function RichTextArea({
   value: string;
   onChange: (v: string) => void;
 }) {
-  const ref = useRef<HTMLTextAreaElement>(null);
-  const [preview, setPreview] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  // Seed once. Plain-text legacy content is converted so line breaks survive.
+  const initial = useRef(isLikelyHtml(value) ? value : plainTextToHtml(value));
 
-  function surround(before: string, after: string) {
-    const ta = ref.current;
-    if (!ta) return;
-    const s = ta.selectionStart;
-    const e = ta.selectionEnd;
-    const sel = value.slice(s, e) || "text";
-    onChange(value.slice(0, s) + before + sel + after + value.slice(e));
-    requestAnimationFrame(() => {
-      ta.focus();
-      ta.setSelectionRange(s + before.length, s + before.length + sel.length);
-    });
+  function emit() {
+    if (ref.current) onChange(ref.current.innerHTML);
   }
-  function prefixLine(prefix: string) {
-    const ta = ref.current;
-    if (!ta) return;
-    const s = ta.selectionStart;
-    const lineStart = value.lastIndexOf("\n", s - 1) + 1;
-    onChange(value.slice(0, lineStart) + prefix + value.slice(lineStart));
-    requestAnimationFrame(() => {
-      ta.focus();
-      const pos = s + prefix.length;
-      ta.setSelectionRange(pos, pos);
-    });
+  function exec(command: string, arg?: string) {
+    ref.current?.focus();
+    document.execCommand(command, false, arg);
+    emit();
+  }
+  function toggleHighlight() {
+    ref.current?.focus();
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+    const range = sel.getRangeAt(0);
+    const node = range.commonAncestorContainer;
+    const el = node.nodeType === 3 ? node.parentElement : (node as Element);
+    const existing = el?.closest("mark");
+    if (existing) {
+      // Toggle off — unwrap the <mark>.
+      const parent = existing.parentNode;
+      if (parent) {
+        while (existing.firstChild) parent.insertBefore(existing.firstChild, existing);
+        parent.removeChild(existing);
+      }
+    } else {
+      const mark = document.createElement("mark");
+      mark.appendChild(range.extractContents());
+      range.insertNode(mark);
+    }
+    sel.removeAllRanges();
+    emit();
+  }
+  function addLink() {
+    const url = window.prompt("Link URL", "https://");
+    if (url) exec("createLink", url);
   }
 
   const tools: { title: string; label: ReactNode; run: () => void }[] = [
-    { title: "Heading", label: "H1", run: () => prefixLine("# ") },
-    { title: "Subheading", label: "H2", run: () => prefixLine("## ") },
-    { title: "Bold", label: <b>B</b>, run: () => surround("**", "**") },
-    { title: "Italic", label: <i>I</i>, run: () => surround("*", "*") },
+    { title: "Heading", label: "H1", run: () => exec("formatBlock", "<h2>") },
+    { title: "Subheading", label: "H2", run: () => exec("formatBlock", "<h3>") },
+    { title: "Normal text", label: "¶", run: () => exec("formatBlock", "<p>") },
+    { title: "Bold", label: <b>B</b>, run: () => exec("bold") },
+    { title: "Italic", label: <i>I</i>, run: () => exec("italic") },
     {
       title: "Highlight",
       label: (
         <span className="bg-accent text-accent-ink px-0.5 rounded-[2px]">H</span>
       ),
-      run: () => surround("==", "=="),
+      run: toggleHighlight,
     },
-    { title: "Quote", label: "❝", run: () => prefixLine("> ") },
-    { title: "Bullet list", label: "•", run: () => prefixLine("- ") },
-    { title: "Link", label: "🔗", run: () => surround("[", "](https://)") },
+    { title: "Quote", label: "❝", run: () => exec("formatBlock", "<blockquote>") },
+    { title: "Bullet list", label: "•", run: () => exec("insertUnorderedList") },
+    { title: "Link", label: "🔗", run: addLink },
   ];
 
   return (
@@ -533,34 +547,19 @@ function RichTextArea({
             {t.label}
           </button>
         ))}
-        <button
-          type="button"
-          onClick={() => setPreview((p) => !p)}
-          className={`ml-auto h-7 px-2 border-2 border-line rounded-sm text-[10px] font-black uppercase tracking-widest nb-press ${
-            preview ? "bg-accent text-accent-ink" : "bg-background"
-          }`}
-        >
-          {preview ? "Edit" : "Preview"}
-        </button>
       </div>
-      {preview ? (
-        <div className="p-3 bg-background min-h-[90px]">
-          {value.trim() ? (
-            <RichText text={value} />
-          ) : (
-            <span className="text-xs text-muted italic">Nothing to preview yet.</span>
-          )}
-        </div>
-      ) : (
-        <textarea
-          ref={ref}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          rows={5}
-          placeholder="Write the copy. Select text then tap B / highlight, or start a line with # heading, > quote, - list."
-          className="w-full px-2.5 py-2 text-sm focus:outline-none bg-background leading-relaxed resize-y block"
-        />
-      )}
+      <div
+        ref={ref}
+        contentEditable
+        suppressContentEditableWarning
+        role="textbox"
+        aria-multiline="true"
+        data-placeholder="Write the copy… select text and tap B, highlight, etc."
+        onInput={emit}
+        onBlur={emit}
+        dangerouslySetInnerHTML={{ __html: initial.current }}
+        className={`${PROSE_CLASS} min-h-[110px] px-3 py-2.5 bg-background focus:outline-none text-sm [&_h2]:text-xl [&_h3]:text-base`}
+      />
     </div>
   );
 }
