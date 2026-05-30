@@ -672,6 +672,7 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
         >
           <OnboardingEditor
             value={brief.onboarding}
+            scopedProjectIds={cur.scopedProjectIds}
             onSave={(onboarding) => {
               void saveBrief({ onboarding });
             }}

@@ -1,6 +1,7 @@
 import "server-only";
 import postgres from "postgres";
 import { formats as formatsMeta } from "./formats";
+import type { VideoExample } from "./types";
 
 declare global {
   // eslint-disable-next-line no-var
@@ -213,6 +214,13 @@ export type BriefHookCategory = {
 // ---------- Onboarding (multi-step intro flow) ----------
 export type OnboardingQuestionType = "short" | "long" | "select" | "checkbox";
 
+export type OnboardingReview = {
+  author: string;
+  rating: number;
+  title?: string;
+  body: string;
+};
+
 export type OnboardingBlock =
   | { kind: "text"; id: string; text: string }
   | { kind: "image"; id: string; url: string; caption?: string }
@@ -225,6 +233,17 @@ export type OnboardingBlock =
       required?: boolean;
       placeholder?: string;
       options?: string[];
+    }
+  // ViewTrack example videos pinned into the step.
+  | { kind: "videos"; id: string; videos: VideoExample[]; heading?: string }
+  // App Store reviews (snapshotted from the iTunes API at edit time).
+  | {
+      kind: "reviews";
+      id: string;
+      appId?: string;
+      appName?: string;
+      country?: string;
+      reviews: OnboardingReview[];
     };
 
 export type OnboardingStep = {

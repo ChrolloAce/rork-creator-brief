@@ -6,8 +6,12 @@ import type {
   OnboardingBlock,
   OnboardingStep,
   OnboardingQuestionType,
+  OnboardingReview,
 } from "@/lib/db";
 import { PROSE_CLASS, isLikelyHtml, plainTextToHtml } from "@/components/RichText";
+import { VideoPicker } from "@/components/admin/VideoPicker";
+import { VideoChip } from "@/components/admin/VideoChip";
+import type { VideoExample } from "@/lib/types";
 
 function genId(): string {
   return `ob_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
@@ -34,9 +38,11 @@ const QUESTION_TYPES: { value: OnboardingQuestionType; label: string }[] = [
 export function OnboardingEditor({
   value,
   onSave,
+  scopedProjectIds,
 }: {
   value: Onboarding | null | undefined;
   onSave: (next: Onboarding) => void | Promise<void>;
+  scopedProjectIds?: string[];
 }) {
   const [ob, setOb] = useState<Onboarding>(value ?? EMPTY);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -204,6 +210,7 @@ export function OnboardingEditor({
                       step.blocks.filter((b) => b.id !== block.id)
                     )
                   }
+                  scopedProjectIds={scopedProjectIds}
                 />
               ))}
 
@@ -219,6 +226,18 @@ export function OnboardingEditor({
                 <AddBlockButton
                   label="+ Video"
                   onClick={() => addBlock(step, { kind: "video", id: genId(), url: "" })}
+                />
+                <AddBlockButton
+                  label="+ Examples"
+                  onClick={() =>
+                    addBlock(step, { kind: "videos", id: genId(), videos: [] })
+                  }
+                />
+                <AddBlockButton
+                  label="+ Reviews"
+                  onClick={() =>
+                    addBlock(step, { kind: "reviews", id: genId(), reviews: [] })
+                  }
                 />
                 <AddBlockButton
                   label="+ Question"
@@ -267,6 +286,7 @@ function BlockEditor({
   onMove,
   onChange,
   onRemove,
+  scopedProjectIds,
 }: {
   block: OnboardingBlock;
   canUp: boolean;
@@ -274,6 +294,7 @@ function BlockEditor({
   onMove: (dir: -1 | 1) => void;
   onChange: (b: OnboardingBlock) => void;
   onRemove: () => void;
+  scopedProjectIds?: string[];
 }) {
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -285,7 +306,11 @@ function BlockEditor({
         ? "Image"
         : block.kind === "video"
           ? "Video"
-          : "Question";
+          : block.kind === "videos"
+            ? "Example videos"
+            : block.kind === "reviews"
+              ? "App Store reviews"
+              : "Question";
 
   return (
     <div className="border-2 border-line bg-background rounded-md p-2 flex gap-2">
@@ -368,6 +393,18 @@ function BlockEditor({
               className="w-full border-2 border-line rounded-sm px-2 py-1 text-xs focus:outline-none focus:border-accent bg-background"
             />
           </div>
+        )}
+
+        {block.kind === "videos" && (
+          <VideosBlock
+            block={block}
+            onChange={onChange}
+            scopedProjectIds={scopedProjectIds}
+          />
+        )}
+
+        {block.kind === "reviews" && (
+          <ReviewsBlock block={block} onChange={onChange} />
         )}
 
         {block.kind === "question" && (
@@ -560,6 +597,190 @@ function RichTextArea({
         dangerouslySetInnerHTML={{ __html: initial.current }}
         className={`${PROSE_CLASS} min-h-[110px] px-3 py-2.5 bg-background focus:outline-none text-sm [&_h2]:text-xl [&_h3]:text-base`}
       />
+    </div>
+  );
+}
+
+// ----- ViewTrack example videos block -----
+function VideosBlock({
+  block,
+  onChange,
+  scopedProjectIds,
+}: {
+  block: Extract<OnboardingBlock, { kind: "videos" }>;
+  onChange: (b: OnboardingBlock) => void;
+  scopedProjectIds?: string[];
+}) {
+  const keyOf = (v: VideoExample) => v.dbId ?? v.id;
+  const ids = new Set<string>();
+  for (const v of block.videos) ids.add(keyOf(v));
+
+  return (
+    <div className="space-y-2">
+      <input
+        type="text"
+        value={block.heading ?? ""}
+        onChange={(e) => onChange({ ...block, heading: e.target.value })}
+        placeholder="Heading (optional, e.g. Viral examples)"
+        className="w-full border-2 border-line rounded-sm px-2 py-1 text-sm font-bold focus:outline-none focus:border-accent bg-background"
+      />
+      {block.videos.length > 0 && (
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {block.videos.map((v) => (
+            <VideoChip
+              key={keyOf(v)}
+              video={v}
+              fallbackId={keyOf(v)}
+              onRemove={() =>
+                onChange({
+                  ...block,
+                  videos: block.videos.filter((x) => keyOf(x) !== keyOf(v)),
+                })
+              }
+            />
+          ))}
+        </div>
+      )}
+      <VideoPicker
+        excludedIds={ids}
+        scopedProjectIds={scopedProjectIds}
+        onPick={(v) => {
+          if (ids.has(keyOf(v))) return;
+          onChange({ ...block, videos: [...block.videos, v] });
+        }}
+        placeholder="Search ViewTrack videos…"
+      />
+    </div>
+  );
+}
+
+// ----- App Store reviews block (iTunes API) -----
+function ReviewsBlock({
+  block,
+  onChange,
+}: {
+  block: Extract<OnboardingBlock, { kind: "reviews" }>;
+  onChange: (b: OnboardingBlock) => void;
+}) {
+  const [appInput, setAppInput] = useState(block.appId ?? "");
+  const [country, setCountry] = useState(block.country ?? "us");
+  const [fetched, setFetched] = useState<OnboardingReview[] | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function load() {
+    setLoading(true);
+    setErr(null);
+    try {
+      const res = await fetch(
+        `/api/itunes-reviews?id=${encodeURIComponent(appInput)}&country=${encodeURIComponent(country)}`
+      );
+      const j = await res.json();
+      if (!j.ok) throw new Error(j.error ?? "Failed to load reviews");
+      setFetched(j.reviews as OnboardingReview[]);
+      onChange({ ...block, appId: appInput, appName: j.appName, country });
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const same = (a: OnboardingReview, b: OnboardingReview) =>
+    a.author === b.author && a.body === b.body;
+  const isSelected = (r: OnboardingReview) => block.reviews.some((x) => same(x, r));
+  function toggle(r: OnboardingReview) {
+    onChange({
+      ...block,
+      reviews: isSelected(r)
+        ? block.reviews.filter((x) => !same(x, r))
+        : [...block.reviews, r],
+    });
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-2 flex-wrap items-end">
+        <label className="block flex-1 min-w-[160px]">
+          <span className="text-[9px] uppercase tracking-widest font-bold text-muted">
+            App Store ID or URL
+          </span>
+          <input
+            type="text"
+            value={appInput}
+            onChange={(e) => setAppInput(e.target.value)}
+            placeholder="e.g. 1571684907 or the App Store link"
+            className="mt-1 w-full border-2 border-line rounded-sm px-2 py-1 text-sm font-mono focus:outline-none focus:border-accent bg-background"
+          />
+        </label>
+        <label className="block w-16">
+          <span className="text-[9px] uppercase tracking-widest font-bold text-muted">
+            Country
+          </span>
+          <input
+            type="text"
+            value={country}
+            onChange={(e) => setCountry(e.target.value)}
+            placeholder="us"
+            className="mt-1 w-full border-2 border-line rounded-sm px-2 py-1 text-sm font-mono focus:outline-none focus:border-accent bg-background"
+          />
+        </label>
+        <button
+          type="button"
+          onClick={load}
+          disabled={loading || !appInput.trim()}
+          className="border-2 border-line bg-ink text-background rounded-sm px-3 py-1.5 text-[10px] font-black uppercase tracking-widest nb-press disabled:opacity-40"
+        >
+          {loading ? "Loading…" : "Load reviews"}
+        </button>
+      </div>
+
+      {(block.appName || block.reviews.length > 0) && (
+        <div className="text-xs font-bold">
+          {block.appName ? `${block.appName} · ` : ""}
+          {block.reviews.length} selected
+        </div>
+      )}
+      {err && (
+        <p className="text-xs font-bold text-[#b91c1c] border-2 border-line bg-background px-2 py-1 rounded-sm">
+          {err}
+        </p>
+      )}
+
+      {fetched && (
+        <div className="space-y-1.5 max-h-72 overflow-y-auto border-2 border-line rounded-md p-2 bg-paper">
+          {fetched.length === 0 ? (
+            <p className="text-xs text-muted italic">No reviews returned for that app.</p>
+          ) : (
+            fetched.map((r, i) => {
+              const sel = isSelected(r);
+              return (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => toggle(r)}
+                  className={`w-full text-left border-2 rounded-sm p-2 nb-press ${
+                    sel ? "border-accent bg-accent/10" : "border-line bg-background"
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-accent text-xs">{"★".repeat(r.rating)}</span>
+                    <span className="text-[11px] font-black">{sel ? "✓ Added" : "Add"}</span>
+                  </div>
+                  {r.title && <div className="font-bold text-xs mt-0.5">{r.title}</div>}
+                  <div className="text-xs text-ink line-clamp-3 leading-relaxed">{r.body}</div>
+                  <div className="text-[10px] text-muted mt-0.5">— {r.author}</div>
+                </button>
+              );
+            })
+          )}
+        </div>
+      )}
+      <p className="text-[10px] text-muted">
+        The App Store ID is the number in the app&rsquo;s URL (after{" "}
+        <span className="font-mono">/id</span>). Selected reviews are saved and
+        shown to creators in the onboarding.
+      </p>
     </div>
   );
 }

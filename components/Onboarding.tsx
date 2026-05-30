@@ -4,6 +4,16 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { Onboarding, OnboardingBlock } from "@/lib/db";
 import { RichText } from "@/components/RichText";
+import { VideoCarousel } from "@/components/VideoCarousel";
+
+function Stars({ n }: { n: number }) {
+  return (
+    <span className="text-accent text-sm tracking-tight" aria-label={`${n} stars`}>
+      {"★".repeat(Math.max(0, Math.min(5, n)))}
+      <span className="text-line/30">{"★".repeat(Math.max(0, 5 - n))}</span>
+    </span>
+  );
+}
 
 function VideoEmbed({ url }: { url: string }) {
   const yt = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]+)/);
@@ -77,6 +87,41 @@ function Block({
         {block.caption && (
           <p className="text-sm text-muted text-center">{block.caption}</p>
         )}
+      </div>
+    );
+  }
+  if (block.kind === "videos") {
+    if (block.videos.length === 0) return null;
+    return (
+      <div className="space-y-2">
+        {block.heading && (
+          <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+            {block.heading}
+          </div>
+        )}
+        <VideoCarousel videos={block.videos} />
+      </div>
+    );
+  }
+  if (block.kind === "reviews") {
+    if (block.reviews.length === 0) return null;
+    return (
+      <div className="grid gap-3 sm:grid-cols-2">
+        {block.reviews.map((r, i) => (
+          <div
+            key={i}
+            className="border-2 border-line bg-paper rounded-md nb-shadow-sm p-4 space-y-1.5"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <Stars n={r.rating} />
+              <span className="text-[11px] font-bold text-muted truncate">
+                {r.author}
+              </span>
+            </div>
+            {r.title && <div className="font-black leading-tight">{r.title}</div>}
+            <p className="text-sm text-ink leading-relaxed">{r.body}</p>
+          </div>
+        ))}
       </div>
     );
   }
