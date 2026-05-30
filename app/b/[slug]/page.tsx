@@ -41,8 +41,14 @@ export default async function BriefOverview({
     getFormatsForRender(brief.slug),
     getCuration(brief.slug),
   ]);
-  // If the overview page is hidden for this brief, jump straight to the
-  // first visible format so users don't land on a blank shell.
+  // The content calendar is the main landing — if it's live, go straight there.
+  const calLive =
+    !!curation.contentCalendar?.enabled &&
+    (curation.contentCalendar.days?.length ?? 0) > 0;
+  if (calLive) {
+    redirect(`/b/${brief.slug}/calendar`);
+  }
+  // Otherwise, if the overview is hidden, jump to the first visible format.
   if (curation.hideOverview && formats.length > 0) {
     redirect(`/b/${brief.slug}/formats/${formats[0].slug}`);
   }

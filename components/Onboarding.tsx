@@ -346,7 +346,7 @@ export function OnboardingFlow({
       if (gated) setI(steps.length);
       else {
         clearSaved();
-        router.push(`/b/${brief.slug}`);
+        router.push(`/b/${brief.slug}/calendar`);
       }
     } else {
       setI((n) => n + 1);
@@ -422,7 +422,7 @@ export function OnboardingFlow({
         return;
       }
       clearSaved();
-      router.push(`/b/${brief.slug}`);
+      router.push(`/b/${brief.slug}/calendar`);
     } catch (e) {
       setGErr((e as Error).message);
       setGBusy(false);

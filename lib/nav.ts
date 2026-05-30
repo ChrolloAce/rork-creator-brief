@@ -30,6 +30,20 @@ export function buildNavSections(
   const includeCalendar = options?.includeCalendar === true;
   const includeOnboarding = options?.includeOnboarding === true;
   const sections: NavSection[] = [];
+  // The content calendar is the main thing — list it first.
+  if (includeCalendar) {
+    sections.push({
+      label: "Plan",
+      items: [
+        {
+          id: calendarId,
+          href: `${base}/calendar`,
+          title: "Content Calendar",
+          meta: "What to film each day",
+        },
+      ],
+    });
+  }
   const startItems: NavSection["items"] = [];
   if (includeOnboarding) {
     startItems.push({
@@ -49,19 +63,6 @@ export function buildNavSections(
   }
   if (startItems.length > 0) {
     sections.push({ label: "Start here", items: startItems });
-  }
-  if (includeCalendar) {
-    sections.push({
-      label: "Plan",
-      items: [
-        {
-          id: calendarId,
-          href: `${base}/calendar`,
-          title: "Content Calendar",
-          meta: "What to film each day",
-        },
-      ],
-    });
   }
   sections.push({
     label: "Formats",
