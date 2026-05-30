@@ -514,58 +514,146 @@ function RichTextArea({
   const ref = useRef<HTMLDivElement>(null);
   // Seed once. Plain-text legacy content is converted so line breaks survive.
   const initial = useRef(isLikelyHtml(value) ? value : plainTextToHtml(value));
+  // Last selection inside the editor — clicking a toolbar button can blur it,
+  // so we remember the range and restore it before applying formatting.
+  const saved = useRef<Range | null>(null);
 
   function emit() {
     if (ref.current) onChange(ref.current.innerHTML);
   }
-  function exec(command: string, arg?: string) {
-    ref.current?.focus();
-    document.execCommand(command, false, arg);
-    emit();
-  }
-  function toggleHighlight() {
-    ref.current?.focus();
+  function remember() {
     const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
-    const range = sel.getRangeAt(0);
-    const node = range.commonAncestorContainer;
-    const el = node.nodeType === 3 ? node.parentElement : (node as Element);
-    const existing = el?.closest("mark");
-    if (existing) {
-      // Toggle off — unwrap the <mark>.
+    if (
+      sel &&
+      sel.rangeCount > 0 &&
+      ref.current &&
+      ref.current.contains(sel.anchorNode)
+    ) {
+      saved.current = sel.getRangeAt(0).cloneRange();
+    }
+  }
+  function activeRange(): Range | null {
+    const sel = window.getSelection();
+    if (!sel) return null;
+    if (
+      saved.current &&
+      ref.current &&
+      ref.current.contains(saved.current.commonAncestorContainer)
+    ) {
+      sel.removeAllRanges();
+      sel.addRange(saved.current);
+      return saved.current;
+    }
+    return sel.rangeCount > 0 ? sel.getRangeAt(0) : null;
+  }
+
+  // Deterministic inline formatting — wrap the selection in a real tag (or
+  // unwrap it to toggle off). Does NOT rely on the flaky execCommand.
+  function wrapInline(tag: "strong" | "em" | "mark") {
+    ref.current?.focus();
+    const range = activeRange();
+    if (!range || range.collapsed) return;
+    const container = range.commonAncestorContainer;
+    const el =
+      container.nodeType === 3
+        ? container.parentElement
+        : (container as Element);
+    const existing = el?.closest(tag);
+    if (existing && ref.current?.contains(existing)) {
       const parent = existing.parentNode;
       if (parent) {
-        while (existing.firstChild) parent.insertBefore(existing.firstChild, existing);
+        while (existing.firstChild)
+          parent.insertBefore(existing.firstChild, existing);
         parent.removeChild(existing);
       }
     } else {
-      const mark = document.createElement("mark");
-      mark.appendChild(range.extractContents());
-      range.insertNode(mark);
+      const wrapper = document.createElement(tag);
+      try {
+        wrapper.appendChild(range.extractContents());
+        range.insertNode(wrapper);
+      } catch {
+        return;
+      }
     }
-    sel.removeAllRanges();
+    window.getSelection()?.removeAllRanges();
+    saved.current = null;
+    ref.current?.normalize();
     emit();
   }
+
+  // Block-level formatting — turn the current line/paragraph into a heading,
+  // quote, list, or plain paragraph by re-parenting its block.
+  function setBlock(tag: "h2" | "h3" | "p" | "blockquote" | "ul") {
+    ref.current?.focus();
+    const range = activeRange();
+    const root = ref.current;
+    if (!range || !root) return;
+    // Find the top-level child of the editor that contains the caret.
+    let node: Node | null = range.startContainer;
+    while (node && node.parentNode !== root) node = node.parentNode;
+    const lineEls: Element[] = [];
+    if (node && node.nodeType === 1) lineEls.push(node as Element);
+    // Build the replacement.
+    const makeEl = (html: string) => {
+      if (tag === "ul") {
+        const ul = document.createElement("ul");
+        const li = document.createElement("li");
+        li.innerHTML = html || "<br>";
+        ul.appendChild(li);
+        return ul;
+      }
+      const el = document.createElement(tag);
+      el.innerHTML = html || "<br>";
+      return el;
+    };
+    if (lineEls.length === 0) {
+      // No block wrapper (bare text node at root) — wrap everything selected.
+      const el = makeEl(root.innerHTML);
+      root.innerHTML = "";
+      root.appendChild(el);
+    } else {
+      for (const line of lineEls) {
+        const el = makeEl(line.innerHTML);
+        line.replaceWith(el);
+      }
+    }
+    saved.current = null;
+    emit();
+  }
+
   function addLink() {
     const url = window.prompt("Link URL", "https://");
-    if (url) exec("createLink", url);
+    if (!url) return;
+    ref.current?.focus();
+    const range = activeRange();
+    if (!range || range.collapsed) return;
+    const a = document.createElement("a");
+    a.href = url;
+    try {
+      a.appendChild(range.extractContents());
+      range.insertNode(a);
+    } catch {
+      return;
+    }
+    saved.current = null;
+    emit();
   }
 
   const tools: { title: string; label: ReactNode; run: () => void }[] = [
-    { title: "Heading", label: "H1", run: () => exec("formatBlock", "<h2>") },
-    { title: "Subheading", label: "H2", run: () => exec("formatBlock", "<h3>") },
-    { title: "Normal text", label: "¶", run: () => exec("formatBlock", "<p>") },
-    { title: "Bold", label: <b>B</b>, run: () => exec("bold") },
-    { title: "Italic", label: <i>I</i>, run: () => exec("italic") },
+    { title: "Heading", label: "H1", run: () => setBlock("h2") },
+    { title: "Subheading", label: "H2", run: () => setBlock("h3") },
+    { title: "Normal text", label: "¶", run: () => setBlock("p") },
+    { title: "Bold", label: <b>B</b>, run: () => wrapInline("strong") },
+    { title: "Italic", label: <i>I</i>, run: () => wrapInline("em") },
     {
       title: "Highlight",
       label: (
         <span className="bg-accent text-accent-ink px-0.5 rounded-[2px]">H</span>
       ),
-      run: toggleHighlight,
+      run: () => wrapInline("mark"),
     },
-    { title: "Quote", label: "❝", run: () => exec("formatBlock", "<blockquote>") },
-    { title: "Bullet list", label: "•", run: () => exec("insertUnorderedList") },
+    { title: "Quote", label: "❝", run: () => setBlock("blockquote") },
+    { title: "Bullet list", label: "•", run: () => setBlock("ul") },
     { title: "Link", label: "🔗", run: addLink },
   ];
 
@@ -593,7 +681,12 @@ function RichTextArea({
         aria-multiline="true"
         data-placeholder="Write the copy… select text and tap B, highlight, etc."
         onInput={emit}
-        onBlur={emit}
+        onKeyUp={remember}
+        onMouseUp={remember}
+        onBlur={() => {
+          remember();
+          emit();
+        }}
         dangerouslySetInnerHTML={{ __html: initial.current }}
         className={`${PROSE_CLASS} min-h-[110px] px-3 py-2.5 bg-background focus:outline-none text-sm [&_h2]:text-xl [&_h3]:text-base`}
       />
