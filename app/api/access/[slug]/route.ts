@@ -78,6 +78,7 @@ export async function POST(
       briefSlug: slug,
       name: user.name ?? name,
       email: user.email,
+      userId: user.id,
       code,
       answers,
       status: "approved",

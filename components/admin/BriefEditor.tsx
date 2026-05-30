@@ -1121,17 +1121,25 @@ function CreatorAccess({
       </div>
 
       <div>
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
           <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
             Creators
           </div>
-          <button
-            type="button"
-            onClick={() => void loadCreators()}
-            className="text-[10px] font-bold uppercase tracking-widest text-muted hover:text-accent underline"
-          >
-            Refresh
-          </button>
+          <div className="flex items-center gap-3">
+            <a
+              href={`/admin/b/${briefSlug}/creators`}
+              className="text-[10px] font-black uppercase tracking-widest text-accent hover:underline"
+            >
+              Submissions page →
+            </a>
+            <button
+              type="button"
+              onClick={() => void loadCreators()}
+              className="text-[10px] font-bold uppercase tracking-widest text-muted hover:text-accent underline"
+            >
+              Refresh
+            </button>
+          </div>
         </div>
         {loading && creators === null ? (
           <p className="text-xs text-muted">Loading…</p>

@@ -430,6 +430,7 @@ async function runSchema() {
   await sql`ALTER TABLE brief_creator ADD COLUMN IF NOT EXISTS client_id TEXT`;
   await sql`ALTER TABLE brief_creator ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`;
   await sql`ALTER TABLE brief_creator ADD COLUMN IF NOT EXISTS email TEXT`;
+  await sql`ALTER TABLE brief_creator ADD COLUMN IF NOT EXISTS user_id TEXT`;
   // Site-wide creator accounts (email + password). One login works everywhere.
   await sql`
     CREATE TABLE IF NOT EXISTS creator_user (
@@ -632,12 +633,14 @@ export async function upsertCreator(input: {
   answers?: Record<string, unknown>;
   status: CreatorStatus;
   clientId?: string;
+  userId?: string | null;
 }): Promise<BriefCreator> {
   await ensureSchema();
   const sql = getSql();
   const name = input.name.trim();
   const email = input.email?.trim().toLowerCase() || null;
   const code = input.code?.trim() || null;
+  const userId = input.userId ?? null;
   const answers = input.answers ?? {};
 
   if (input.clientId) {
@@ -651,6 +654,7 @@ export async function upsertCreator(input: {
         UPDATE brief_creator SET
           name = ${name},
           email = COALESCE(${email}, email),
+          user_id = COALESCE(${userId}, user_id),
           code = COALESCE(${code}, code),
           answers = ${sql.json(answers as never)},
           status = CASE WHEN status = 'approved' THEN 'approved' ELSE ${input.status} END,
@@ -666,13 +670,29 @@ export async function upsertCreator(input: {
 
   const id = `cr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
   await sql`
-    INSERT INTO brief_creator (id, brief_slug, name, email, code, answers, status, client_id)
-    VALUES (${id}, ${input.briefSlug}, ${name}, ${email}, ${code}, ${sql.json(answers as never)}, ${input.status}, ${input.clientId ?? null})
+    INSERT INTO brief_creator (id, brief_slug, name, email, user_id, code, answers, status, client_id)
+    VALUES (${id}, ${input.briefSlug}, ${name}, ${email}, ${userId}, ${code}, ${sql.json(answers as never)}, ${input.status}, ${input.clientId ?? null})
   `;
   const rows = await sql<Parameters<typeof rowToCreator>[0][]>`
     SELECT ${sql.unsafe(CREATOR_COLS)} FROM brief_creator WHERE id = ${id}
   `;
   return rowToCreator(rows[0]);
+}
+
+// Is this logged-in user approved for the brief? (DB-backed so revoking a
+// creator immediately locks them out, code required again.)
+export async function isApprovedForBrief(
+  briefSlug: string,
+  userId: string
+): Promise<boolean> {
+  await ensureSchema();
+  const sql = getSql();
+  const rows = await sql`
+    SELECT 1 FROM brief_creator
+    WHERE brief_slug = ${briefSlug} AND user_id = ${userId} AND status = 'approved'
+    LIMIT 1
+  `;
+  return rows.length > 0;
 }
 
 // ---------- Creator accounts (site-wide email + password) ----------
