@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Onboarding, OnboardingBlock } from "@/lib/db";
 import { RichText } from "@/components/RichText";
 import { VideoCarousel } from "@/components/VideoCarousel";
@@ -228,6 +228,11 @@ export function OnboardingFlow({
   const [i, setI] = useState(0);
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
   const step = steps[i];
+  const mainRef = useRef<HTMLDivElement>(null);
+  // Jump back to the top of the scroll area whenever the step changes.
+  useEffect(() => {
+    mainRef.current?.scrollTo({ top: 0 });
+  }, [i]);
   const isLast = i === steps.length - 1;
 
   // Block any required question on this step that's unanswered.
@@ -250,8 +255,8 @@ export function OnboardingFlow({
   }
 
   return (
-    <div className="min-h-screen flex flex-col bg-background text-ink">
-      <header className="border-b-2 border-line">
+    <div className="h-dvh flex flex-col bg-background text-ink overflow-hidden">
+      <header className="shrink-0 border-b-2 border-line bg-background">
         <div className="max-w-2xl mx-auto px-4 sm:px-6 py-4 flex items-center gap-3">
           <div className="w-9 h-9 border-2 border-line bg-background rounded-md overflow-hidden flex items-center justify-center shrink-0">
             {brief.logoUrl ? (
@@ -277,7 +282,7 @@ export function OnboardingFlow({
         </div>
       </header>
 
-      <main className="flex-1 overflow-y-auto">
+      <main ref={mainRef} className="flex-1 min-h-0 overflow-y-auto">
         <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8 sm:py-12 space-y-6">
           {step.title && (
             <h1 className="text-3xl sm:text-4xl font-black tracking-tight leading-tight">
@@ -300,7 +305,7 @@ export function OnboardingFlow({
         </div>
       </main>
 
-      <footer className="border-t-2 border-line bg-background">
+      <footer className="shrink-0 border-t-2 border-line bg-background">
         <div className="max-w-2xl mx-auto px-4 sm:px-6 py-4 flex items-center gap-3">
           <button
             type="button"
