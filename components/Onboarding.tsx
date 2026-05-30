@@ -222,11 +222,13 @@ export function OnboardingFlow({
   onboarding,
   brief,
   gated = false,
+  requireLogin = true,
   account = null,
 }: {
   onboarding: Onboarding;
   brief: { slug: string; name: string; logoUrl: string | null };
   gated?: boolean;
+  requireLogin?: boolean;
   account?: { name: string | null; email: string } | null;
 }) {
   const router = useRouter();
@@ -328,13 +330,20 @@ export function OnboardingFlow({
     }
   }
 
+  // Login is needed only when the brief requires it and they're not already in.
+  const needAuth = requireLogin && !account;
+
   async function unlock() {
     if (gBusy) return;
     if (!gCode.trim()) {
       setGErr("Enter your access code.");
       return;
     }
-    if (!account) {
+    if (!requireLogin && !gName.trim()) {
+      setGErr("Enter your name.");
+      return;
+    }
+    if (needAuth) {
       if (!gEmail.trim() || !gPassword) {
         setGErr("Enter your email and password.");
         return;
@@ -347,9 +356,9 @@ export function OnboardingFlow({
     setGBusy(true);
     setGErr(null);
     try {
-      let userName = account?.name ?? null;
-      // 1) Sign up / log in (unless already logged in) → sets the session.
-      if (!account) {
+      let userName = account?.name ?? gName.trim() ?? null;
+      // 1) Sign up / log in (only when required and not already logged in).
+      if (needAuth) {
         const authRes = await fetch(`/api/auth/${authMode}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -447,7 +456,21 @@ export function OnboardingFlow({
                 </a>
               )}
             <div className="border-2 border-line bg-paper rounded-md p-4 space-y-3">
-              {account ? (
+              {!requireLogin ? (
+                <label className="block">
+                  <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+                    Your name
+                  </span>
+                  <input
+                    type="text"
+                    value={gName}
+                    onChange={(e) => setGName(e.target.value)}
+                    onBlur={recordOnboarded}
+                    placeholder="First + last"
+                    className="mt-1 w-full border-2 border-line rounded-md px-3 py-2 text-base font-bold focus:outline-none focus:border-accent bg-background"
+                  />
+                </label>
+              ) : account ? (
                 <div className="text-sm font-bold">
                   Signed in as{" "}
                   <span className="text-accent">{account.email}</span>

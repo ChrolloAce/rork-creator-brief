@@ -2,6 +2,7 @@ import "server-only";
 import { cookies } from "next/headers";
 import { adminCookieName, verifyToken } from "./admin-auth";
 import { SESSION_COOKIE, readSessionToken } from "./session";
+import { accessCookieName, isAccessTokenValid } from "./creator-access";
 import { getUserById, isApprovedForBrief } from "./db";
 import type { Brief, CreatorUser } from "./db";
 
@@ -21,7 +22,15 @@ export async function briefAccessRequired(brief: Brief): Promise<boolean> {
   if (!brief.accessEnabled || !brief.accessCode) return false;
   const jar = await cookies();
   if (await verifyToken(jar.get(adminCookieName)?.value)) return false;
-  const userId = await readSessionToken(jar.get(SESSION_COOKIE)?.value);
-  if (!userId) return true;
-  return !(await isApprovedForBrief(brief.slug, userId));
+
+  if (brief.requireLogin) {
+    // Must be logged in AND approved (DB-backed, so removal revokes access).
+    const userId = await readSessionToken(jar.get(SESSION_COOKIE)?.value);
+    if (!userId) return true;
+    return !(await isApprovedForBrief(brief.slug, userId));
+  }
+
+  // Code-only: just need the access cookie from entering the right code.
+  const cookieVal = jar.get(accessCookieName(brief.slug))?.value;
+  return !(await isAccessTokenValid(brief.slug, brief.accessCode, cookieVal));
 }

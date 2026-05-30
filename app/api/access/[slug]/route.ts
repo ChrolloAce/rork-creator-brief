@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { upsertCreator, verifyBriefCode, getUserById } from "@/lib/db";
+import { upsertCreator, verifyBriefCode, getUserById, getBrief } from "@/lib/db";
 import { accessCookieName, accessToken } from "@/lib/creator-access";
 import { SESSION_COOKIE, readSessionToken } from "@/lib/session";
 
@@ -51,11 +51,12 @@ export async function POST(
       return NextResponse.json({ ok: true, creator });
     }
 
-    // approve — must be logged in.
+    // approve — require login only if the brief is set to require an account.
+    const brief = await getBrief(slug);
     const jar = await cookies();
     const userId = await readSessionToken(jar.get(SESSION_COOKIE)?.value);
     const user = userId ? await getUserById(userId) : null;
-    if (!user) {
+    if (brief?.requireLogin && !user) {
       return NextResponse.json(
         { ok: false, error: "not signed in" },
         { status: 401 }
@@ -66,8 +67,8 @@ export async function POST(
       // Wrong code — still capture them as a finished-onboarding lead.
       await upsertCreator({
         briefSlug: slug,
-        name: user.name ?? name,
-        email: user.email,
+        name: user?.name ?? name,
+        email: user?.email ?? null,
         answers,
         status: "onboarded",
         clientId,
@@ -76,9 +77,9 @@ export async function POST(
     }
     const creator = await upsertCreator({
       briefSlug: slug,
-      name: user.name ?? name,
-      email: user.email,
-      userId: user.id,
+      name: user?.name ?? name,
+      email: user?.email ?? null,
+      userId: user?.id ?? null,
       code,
       answers,
       status: "approved",

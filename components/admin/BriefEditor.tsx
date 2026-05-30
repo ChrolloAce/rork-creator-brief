@@ -74,6 +74,7 @@ type BriefRecord = {
   hookCategories?: BriefHookCategory[] | null;
   accessCode?: string | null;
   accessEnabled?: boolean;
+  requireLogin?: boolean;
   onboarding?: Onboarding | null;
 };
 
@@ -1099,7 +1100,21 @@ function CreatorAccess({
           checked={!!brief.accessEnabled}
           onChange={(e) => onSave({ accessEnabled: e.target.checked })}
         />
-        <span>Require name + code to enter (not live yet)</span>
+        <span>Lock the brief — require the code to enter</span>
+      </label>
+      <label
+        className={`flex items-center gap-2 text-xs font-bold cursor-pointer ${
+          brief.accessEnabled ? "" : "opacity-50"
+        }`}
+      >
+        <input
+          type="checkbox"
+          checked={brief.requireLogin !== false}
+          onChange={(e) => onSave({ requireLogin: e.target.checked })}
+        />
+        <span>
+          Also require an account (email + password). Off = code only, no login.
+        </span>
       </label>
 
       <div className="flex items-end gap-2 flex-wrap">

@@ -38,6 +38,7 @@ export default async function OnboardingPage({
       onboarding={ob}
       brief={{ slug: brief.slug, name: brief.name, logoUrl: brief.logoUrl }}
       gated={!!(brief.accessEnabled && brief.accessCode)}
+      requireLogin={brief.requireLogin}
       account={user ? { name: user.name, email: user.email } : null}
     />
   );

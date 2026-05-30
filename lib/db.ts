@@ -288,6 +288,8 @@ export type Brief = {
   // we go live with the gate).
   accessCode: string | null;
   accessEnabled: boolean;
+  // When gated, also require an email+password account (not just the code).
+  requireLogin: boolean;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -413,6 +415,7 @@ async function runSchema() {
   // Creator-access gate (passcode + name). Dormant until access_enabled flips on.
   await sql`ALTER TABLE brief ADD COLUMN IF NOT EXISTS access_code TEXT`;
   await sql`ALTER TABLE brief ADD COLUMN IF NOT EXISTS access_enabled BOOLEAN DEFAULT false`;
+  await sql`ALTER TABLE brief ADD COLUMN IF NOT EXISTS require_login BOOLEAN DEFAULT true`;
   await sql`ALTER TABLE brief ADD COLUMN IF NOT EXISTS onboarding JSONB`;
   await sql`
     CREATE TABLE IF NOT EXISTS brief_creator (
@@ -470,6 +473,7 @@ type BriefRow = {
   hook_categories: BriefHookCategory[] | null;
   access_code: string | null;
   access_enabled: boolean | null;
+  require_login: boolean | null;
   onboarding: Onboarding | null;
   created_at: Date;
   updated_at: Date;
@@ -484,20 +488,21 @@ function rowToBrief(r: BriefRow): Brief {
     hookCategories: r.hook_categories,
     accessCode: r.access_code,
     accessEnabled: !!r.access_enabled,
+    requireLogin: r.require_login !== false,
     onboarding: r.onboarding,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
 }
 
-const BRIEF_SELECT = `slug, name, logo_url, overview, hook_categories, access_code, access_enabled, onboarding, created_at, updated_at`;
+const BRIEF_SELECT = `slug, name, logo_url, overview, hook_categories, access_code, access_enabled, require_login, onboarding, created_at, updated_at`;
 
 export async function listBriefs(): Promise<Brief[]> {
   await ensureSchema();
   const sql = getSql();
   const rows = await sql<
     BriefRow[]
-  >`SELECT slug, name, logo_url, overview, hook_categories, access_code, access_enabled, onboarding, created_at, updated_at FROM brief ORDER BY created_at ASC`;
+  >`SELECT slug, name, logo_url, overview, hook_categories, access_code, access_enabled, require_login, onboarding, created_at, updated_at FROM brief ORDER BY created_at ASC`;
   return rows.map(rowToBrief);
 }
 
@@ -506,7 +511,7 @@ export async function getBrief(slug: string): Promise<Brief | null> {
   const sql = getSql();
   const rows = await sql<
     BriefRow[]
-  >`SELECT slug, name, logo_url, overview, hook_categories, access_code, access_enabled, onboarding, created_at, updated_at FROM brief WHERE slug = ${slug}`;
+  >`SELECT slug, name, logo_url, overview, hook_categories, access_code, access_enabled, require_login, onboarding, created_at, updated_at FROM brief WHERE slug = ${slug}`;
   if (rows.length === 0) return null;
   return rowToBrief(rows[0]);
 }
@@ -545,6 +550,7 @@ export async function updateBrief(
     hookCategories?: BriefHookCategory[] | null;
     accessCode?: string | null;
     accessEnabled?: boolean;
+    requireLogin?: boolean;
     onboarding?: Onboarding | null;
   }
 ): Promise<Brief> {
@@ -573,6 +579,9 @@ export async function updateBrief(
   }
   if (patch.accessEnabled !== undefined) {
     await sql`UPDATE brief SET access_enabled = ${patch.accessEnabled}, updated_at = NOW() WHERE slug = ${slug}`;
+  }
+  if (patch.requireLogin !== undefined) {
+    await sql`UPDATE brief SET require_login = ${patch.requireLogin}, updated_at = NOW() WHERE slug = ${slug}`;
   }
   if (patch.onboarding !== undefined) {
     await sql`UPDATE brief SET onboarding = ${patch.onboarding ? sql.json(patch.onboarding as never) : null}, updated_at = NOW() WHERE slug = ${slug}`;
