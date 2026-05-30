@@ -794,6 +794,15 @@ function VideosBlock({
 }
 
 // ----- App Store reviews block (iTunes API) -----
+type AppResult = {
+  id: string;
+  name: string;
+  developer: string;
+  icon: string;
+  rating: number;
+  ratingCount: number;
+};
+
 function ReviewsBlock({
   block,
   onChange,
@@ -801,27 +810,56 @@ function ReviewsBlock({
   block: Extract<OnboardingBlock, { kind: "reviews" }>;
   onChange: (b: OnboardingBlock) => void;
 }) {
-  const [appInput, setAppInput] = useState(block.appId ?? "");
+  const [term, setTerm] = useState(block.appName ?? block.appId ?? "");
   const [country, setCountry] = useState(block.country ?? "us");
+  const [apps, setApps] = useState<AppResult[] | null>(null);
+  const [searching, setSearching] = useState(false);
   const [fetched, setFetched] = useState<OnboardingReview[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  async function load() {
+  async function loadReviews(id: string, name?: string) {
     setLoading(true);
     setErr(null);
+    setApps(null);
     try {
       const res = await fetch(
-        `/api/itunes-reviews?id=${encodeURIComponent(appInput)}&country=${encodeURIComponent(country)}`
+        `/api/itunes-reviews?id=${encodeURIComponent(id)}&country=${encodeURIComponent(country)}`
       );
       const j = await res.json();
       if (!j.ok) throw new Error(j.error ?? "Failed to load reviews");
       setFetched(j.reviews as OnboardingReview[]);
-      onChange({ ...block, appId: appInput, appName: j.appName, country });
+      onChange({ ...block, appId: id, appName: name ?? j.appName, country });
     } catch (e) {
       setErr((e as Error).message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function search() {
+    const t = term.trim();
+    if (!t) return;
+    setErr(null);
+    // Pasted an App Store ID or URL? Load it directly.
+    const idm = t.match(/^\d{4,}$/) ?? t.match(/id(\d{4,})/);
+    if (idm) {
+      await loadReviews(idm[1] ?? idm[0]);
+      return;
+    }
+    setSearching(true);
+    setApps(null);
+    try {
+      const res = await fetch(
+        `/api/itunes-search?term=${encodeURIComponent(t)}&country=${encodeURIComponent(country)}`
+      );
+      const j = await res.json();
+      if (!j.ok) throw new Error(j.error ?? "Search failed");
+      setApps(j.apps as AppResult[]);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setSearching(false);
     }
   }
 
@@ -842,14 +880,20 @@ function ReviewsBlock({
       <div className="flex gap-2 flex-wrap items-end">
         <label className="block flex-1 min-w-[160px]">
           <span className="text-[9px] uppercase tracking-widest font-bold text-muted">
-            App Store ID or URL
+            Search the App Store by name
           </span>
           <input
             type="text"
-            value={appInput}
-            onChange={(e) => setAppInput(e.target.value)}
-            placeholder="e.g. 1571684907 or the App Store link"
-            className="mt-1 w-full border-2 border-line rounded-sm px-2 py-1 text-sm font-mono focus:outline-none focus:border-accent bg-background"
+            value={term}
+            onChange={(e) => setTerm(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                void search();
+              }
+            }}
+            placeholder="e.g. Prayer Lock"
+            className="mt-1 w-full border-2 border-line rounded-sm px-2 py-1 text-sm focus:outline-none focus:border-accent bg-background"
           />
         </label>
         <label className="block w-16">
@@ -866,11 +910,11 @@ function ReviewsBlock({
         </label>
         <button
           type="button"
-          onClick={load}
-          disabled={loading || !appInput.trim()}
+          onClick={() => void search()}
+          disabled={searching || loading || !term.trim()}
           className="border-2 border-line bg-ink text-background rounded-sm px-3 py-1.5 text-[10px] font-black uppercase tracking-widest nb-press disabled:opacity-40"
         >
-          {loading ? "Loading…" : "Load reviews"}
+          {searching ? "Searching…" : loading ? "Loading…" : "Search"}
         </button>
       </div>
 
@@ -884,6 +928,44 @@ function ReviewsBlock({
         <p className="text-xs font-bold text-[#b91c1c] border-2 border-line bg-background px-2 py-1 rounded-sm">
           {err}
         </p>
+      )}
+
+      {apps && (
+        <div className="space-y-1 max-h-60 overflow-y-auto border-2 border-line rounded-md p-2 bg-paper">
+          {apps.length === 0 ? (
+            <p className="text-xs text-muted italic">No apps found — try another name.</p>
+          ) : (
+            apps.map((a) => (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => loadReviews(a.id, a.name)}
+                className="w-full flex items-center gap-2 text-left border-2 border-line bg-background rounded-sm p-1.5 nb-press"
+              >
+                {a.icon && (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img
+                    src={a.icon}
+                    alt=""
+                    className="w-9 h-9 rounded-md border-2 border-line shrink-0"
+                  />
+                )}
+                <span className="min-w-0 flex-1">
+                  <span className="block font-bold text-xs truncate">{a.name}</span>
+                  <span className="block text-[10px] text-muted truncate">
+                    {a.developer}
+                    {a.ratingCount
+                      ? ` · ${a.ratingCount.toLocaleString()} ratings`
+                      : ""}
+                  </span>
+                </span>
+                <span className="text-[10px] font-black uppercase tracking-widest shrink-0">
+                  Use →
+                </span>
+              </button>
+            ))
+          )}
+        </div>
       )}
 
       {fetched && (
@@ -916,9 +998,9 @@ function ReviewsBlock({
         </div>
       )}
       <p className="text-[10px] text-muted">
-        The App Store ID is the number in the app&rsquo;s URL (after{" "}
-        <span className="font-mono">/id</span>). Selected reviews are saved and
-        shown to creators in the onboarding.
+        Type your app&rsquo;s name and hit Search, pick it, then choose which
+        reviews to show. (You can also paste an App Store ID or link.) Selected
+        reviews are saved and shown to creators in the onboarding.
       </p>
     </div>
   );
