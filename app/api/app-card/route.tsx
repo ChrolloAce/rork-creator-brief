@@ -10,7 +10,9 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const id = (searchParams.get("id") ?? "").match(/\d{4,}/)?.[0];
   const country = (searchParams.get("country") || "us").toLowerCase().slice(0, 2);
-  const n = Math.min(4, Math.max(0, parseInt(searchParams.get("n") || "3", 10) || 3));
+  // Default 0 = just the app card (logo, name, rating). n>0 adds review cards.
+  const n = Math.min(4, Math.max(0, parseInt(searchParams.get("n") || "0", 10) || 0));
+  const showReviews = n > 0;
   const download = searchParams.get("download") === "1";
   if (!id) return new Response("missing app id", { status: 400 });
 
@@ -38,7 +40,7 @@ export async function GET(req: Request) {
 
   type Review = { author: string; rating: number; title: string; body: string };
   let reviews: Review[] = [];
-  try {
+  if (showReviews) try {
     const rr = await fetch(
       `https://itunes.apple.com/${country}/rss/customerreviews/page=1/id=${id}/sortby=mostrecent/json`,
       { cache: "no-store" }
@@ -87,6 +89,7 @@ export async function GET(req: Request) {
           height: "100%",
           display: "flex",
           flexDirection: "column",
+          justifyContent: showReviews ? "flex-start" : "center",
           background: "#FFFFFF",
           padding: 56,
           fontFamily: "sans-serif",
@@ -141,7 +144,8 @@ export async function GET(req: Request) {
           </div>
         </div>
 
-        {/* Reviews */}
+        {/* Reviews (only when n > 0) */}
+        {showReviews && (
         <div
           style={{
             display: "flex",
@@ -187,11 +191,12 @@ export async function GET(req: Request) {
             </div>
           ))}
         </div>
+        )}
       </div>
     ),
     {
       width: 1080,
-      height: 1350,
+      height: showReviews ? 1350 : 440,
       headers: download
         ? {
             "Content-Disposition": `attachment; filename="${name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-reviews.png"`,

@@ -1649,10 +1649,10 @@ function AssetManager({
     update([
       ...assets,
       {
-        url: `/api/app-card?id=${app.id}&country=us&n=3`,
+        url: `/api/app-card?id=${app.id}&country=us`,
         mime: "image/png",
-        filename: `${app.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-reviews.png`,
-        label: `${app.name} — live reviews card`,
+        filename: `${app.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-card.png`,
+        label: `${app.name} — app card`,
         kind: "asset",
       },
     ]);
