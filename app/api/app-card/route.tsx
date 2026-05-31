@@ -92,7 +92,7 @@ export async function GET(req: Request) {
           alignItems: "center",
           justifyContent: showReviews ? "flex-start" : "center",
           background: "#FFFFFF",
-          padding: 72,
+          padding: 56,
           fontFamily: "sans-serif",
         }}
       >
@@ -109,42 +109,42 @@ export async function GET(req: Request) {
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={icon}
-              width={300}
-              height={300}
-              style={{ borderRadius: 64, border: "6px solid #161616", flexShrink: 0 }}
+              width={210}
+              height={210}
+              style={{ borderRadius: 46, border: "5px solid #161616", flexShrink: 0 }}
             />
           ) : null}
           <div
             style={{
               display: "flex",
               flexDirection: "column",
-              marginLeft: 44,
-              maxWidth: 600,
+              marginLeft: 34,
+              maxWidth: 620,
             }}
           >
-            <div style={{ fontSize: 64, fontWeight: 900, color: "#0A0A0A", lineHeight: 1.1 }}>
+            <div style={{ fontSize: 48, fontWeight: 900, color: "#0A0A0A", lineHeight: 1.1 }}>
               {name}
             </div>
             {subtitle ? (
-              <div style={{ fontSize: 34, color: "#6A6A6A", marginTop: 8 }}>
+              <div style={{ fontSize: 26, color: "#6A6A6A", marginTop: 6 }}>
                 {subtitle}
               </div>
             ) : null}
-            <div style={{ display: "flex", alignItems: "center", marginTop: 22 }}>
-              <StarRow value={rating} size={50} />
+            <div style={{ display: "flex", alignItems: "center", marginTop: 16 }}>
+              <StarRow value={rating} size={38} />
               <div
                 style={{
                   display: "flex",
-                  fontSize: 44,
+                  fontSize: 34,
                   fontWeight: 800,
                   color: "#0A0A0A",
-                  marginLeft: 18,
+                  marginLeft: 14,
                 }}
               >
                 {rating ? rating.toFixed(1) : ""}
               </div>
               {ratingCount ? (
-                <div style={{ display: "flex", fontSize: 32, color: "#6A6A6A", marginLeft: 14 }}>
+                <div style={{ display: "flex", fontSize: 24, color: "#6A6A6A", marginLeft: 12 }}>
                   {ratingCount.toLocaleString()} ratings
                 </div>
               ) : null}
@@ -204,7 +204,7 @@ export async function GET(req: Request) {
     ),
     {
       width: 1080,
-      height: showReviews ? 1520 : 480,
+      height: showReviews ? 1440 : 340,
       headers: download
         ? {
             "Content-Disposition": `attachment; filename="${name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-reviews.png"`,
