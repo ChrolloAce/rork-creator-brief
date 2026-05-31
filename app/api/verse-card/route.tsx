@@ -76,15 +76,25 @@ export async function GET(req: Request) {
   const s = getStyle(styleKey);
   const size = fontFor(text.length);
 
-  const body = (
-    <>
+  // The card content. Children fill the width (default flex stretch) so the
+  // verse wraps; textAlign centers each line. Quote glyph stays a straight " to
+  // avoid missing-glyph boxes in the default font.
+  const card = (
+    <div
+      style={{
+        width: "100%",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+      }}
+    >
       <div
         style={{
-          width: "100%",
+          maxWidth: 900,
           fontSize: size,
-          fontWeight: 800,
+          fontWeight: 700,
           color: s.color,
-          lineHeight: 1.32,
+          lineHeight: 1.35,
           textAlign: "center",
         }}
       >
@@ -93,34 +103,32 @@ export async function GET(req: Request) {
       {ref ? (
         <div
           style={{
-            width: "100%",
-            fontSize: 40,
+            maxWidth: 900,
+            fontSize: 38,
             fontWeight: 800,
             color: s.accent,
-            marginTop: 44,
+            marginTop: 48,
             textAlign: "center",
-            textTransform: "uppercase",
-            letterSpacing: 2,
+            letterSpacing: 3,
           }}
         >
-          {ref}
+          {ref.toUpperCase()}
         </div>
       ) : null}
       {version ? (
         <div
           style={{
-            width: "100%",
             fontSize: 24,
             color: s.color,
-            opacity: 0.6,
-            marginTop: 10,
+            opacity: 0.55,
+            marginTop: 12,
             textAlign: "center",
           }}
         >
           {version}
         </div>
       ) : null}
-    </>
+    </div>
   );
 
   const res = new ImageResponse(
@@ -130,9 +138,9 @@ export async function GET(req: Request) {
           width: "100%",
           height: "100%",
           display: "flex",
-          alignItems: "center",
+          flexDirection: "column",
           justifyContent: "center",
-          padding: 80,
+          padding: 90,
           fontFamily: "sans-serif",
           ...s.bg,
         }}
@@ -140,28 +148,18 @@ export async function GET(req: Request) {
         {s.photo ? (
           <div
             style={{
+              width: "100%",
               display: "flex",
               flexDirection: "column",
-              alignItems: "center",
-              background: "rgba(255,255,255,0.88)",
-              borderRadius: 28,
+              background: "rgba(255,255,255,0.9)",
+              borderRadius: 32,
               padding: 64,
-              width: "100%",
             }}
           >
-            {body}
+            {card}
           </div>
         ) : (
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              width: "100%",
-            }}
-          >
-            {body}
-          </div>
+          card
         )}
       </div>
     ),
