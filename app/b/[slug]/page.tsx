@@ -6,7 +6,7 @@ import { overviewId } from "@/lib/nav";
 import { getBrief, getCuration } from "@/lib/db";
 import type { HookCategory } from "@/lib/types";
 import { getFormatsForRender } from "@/lib/format-videos";
-import { briefAccessRequired } from "@/lib/brief-gate";
+import { briefAccessRequired, currentCreator, creatorHasAccess } from "@/lib/brief-gate";
 
 export const dynamic = "force-dynamic";
 
@@ -81,6 +81,12 @@ export default async function BriefOverview({
       contentCalendar={curation.contentCalendar}
       onboardingEnabled={
         !!(brief.onboarding?.enabled && (brief.onboarding.steps?.length ?? 0) > 0)
+      }
+      onboardingComplete={await creatorHasAccess(brief)}
+      account={
+        await currentCreator().then((u) =>
+          u ? { name: u.name, email: u.email } : null
+        )
       }
     />
   );

@@ -21,6 +21,8 @@ export function Shell({
   hideOverview = false,
   contentCalendar,
   onboardingEnabled = false,
+  onboardingComplete = false,
+  account = null,
 }: {
   formats: Format[];
   hookCategories: HookCategory[];
@@ -36,6 +38,8 @@ export function Shell({
   hideOverview?: boolean;
   contentCalendar?: ContentCalendar | null;
   onboardingEnabled?: boolean;
+  onboardingComplete?: boolean;
+  account?: { name: string | null; email: string } | null;
 }) {
   const calendarEnabled =
     !!contentCalendar?.enabled && (contentCalendar.days?.length ?? 0) > 0;
@@ -45,8 +49,16 @@ export function Shell({
         includeOverview: !hideOverview,
         includeCalendar: calendarEnabled,
         includeOnboarding: onboardingEnabled,
+        onboardingComplete,
       }),
-    [formats, brief.slug, hideOverview, calendarEnabled, onboardingEnabled]
+    [
+      formats,
+      brief.slug,
+      hideOverview,
+      calendarEnabled,
+      onboardingEnabled,
+      onboardingComplete,
+    ]
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
   const pathname = usePathname();
@@ -163,6 +175,7 @@ export function Shell({
           sections={sections}
           activeId={activeId}
           brief={brief}
+          account={account}
           onClose={() => setDrawerOpen(false)}
         />
       </aside>

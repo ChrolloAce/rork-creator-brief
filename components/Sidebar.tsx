@@ -8,6 +8,7 @@ export function Sidebar({
   sections,
   activeId,
   brief,
+  account = null,
   onNavigate,
   onClose,
 }: {
@@ -19,9 +20,18 @@ export function Sidebar({
     logoUrl: string | null;
     overview?: BriefOverview | null;
   };
+  account?: { name: string | null; email: string } | null;
   onNavigate?: () => void;
   onClose?: () => void;
 }) {
+  async function logout() {
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } catch {
+      /* ignore */
+    }
+    window.location.href = `/b/${brief.slug}`;
+  }
   const briefHome = `/b/${brief.slug}`;
   const ctaLabel = brief.overview?.ctaLabel?.trim();
   const ctaUrl = brief.overview?.ctaUrl?.trim();
@@ -132,6 +142,30 @@ export function Sidebar({
           >
             {ctaLabel} ↗
           </a>
+        </div>
+      )}
+
+      {account && (
+        <div className="p-3 border-t-2 border-line flex items-center gap-2.5">
+          <span className="w-9 h-9 shrink-0 border-2 border-line bg-accent text-accent-ink rounded-full flex items-center justify-center font-black text-sm uppercase">
+            {(account.name || account.email).slice(0, 1)}
+          </span>
+          <div className="min-w-0 flex-1">
+            {account.name && (
+              <div className="font-bold text-sm leading-tight truncate">
+                {account.name}
+              </div>
+            )}
+            <div className="text-[11px] text-muted truncate">{account.email}</div>
+          </div>
+          <button
+            type="button"
+            onClick={logout}
+            title="Log out"
+            className="text-[10px] font-bold uppercase tracking-widest text-muted hover:text-accent shrink-0"
+          >
+            Log out
+          </button>
         </div>
       )}
     </nav>

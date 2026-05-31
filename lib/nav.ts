@@ -23,12 +23,14 @@ export function buildNavSections(
     includeOverview?: boolean;
     includeCalendar?: boolean;
     includeOnboarding?: boolean;
+    onboardingComplete?: boolean;
   }
 ): NavSection[] {
   const base = `/b/${briefSlug}`;
   const includeOverview = options?.includeOverview !== false;
   const includeCalendar = options?.includeCalendar === true;
   const includeOnboarding = options?.includeOnboarding === true;
+  const onboardingComplete = options?.onboardingComplete === true;
   const sections: NavSection[] = [];
   // The content calendar is the main thing — list it first.
   if (includeCalendar) {
@@ -50,7 +52,7 @@ export function buildNavSections(
       id: onboardingId,
       href: `${base}/onboarding`,
       title: "Onboarding",
-      meta: "Start here",
+      meta: onboardingComplete ? "Complete ✓" : "Start here",
     });
   }
   if (includeOverview) {

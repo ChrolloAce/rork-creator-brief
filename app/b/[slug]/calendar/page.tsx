@@ -6,7 +6,7 @@ import { calendarId } from "@/lib/nav";
 import { getBrief, getCuration } from "@/lib/db";
 import type { HookCategory } from "@/lib/types";
 import { getFormatsForRender } from "@/lib/format-videos";
-import { briefAccessRequired } from "@/lib/brief-gate";
+import { briefAccessRequired, currentCreator, creatorHasAccess } from "@/lib/brief-gate";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +44,9 @@ export default async function BriefCalendarPage({
   // otherwise the direct link shouldn't leak an empty page.
   if (!calendar?.enabled || (calendar.days?.length ?? 0) === 0) notFound();
 
+  const account = await currentCreator();
+  const onboardingComplete = await creatorHasAccess(brief);
+
   const hooks: HookCategory[] =
     brief.hookCategories && brief.hookCategories.length > 0
       ? brief.hookCategories.map((c) => ({
@@ -74,6 +77,8 @@ export default async function BriefCalendarPage({
       onboardingEnabled={
         !!(brief.onboarding?.enabled && (brief.onboarding.steps?.length ?? 0) > 0)
       }
+      onboardingComplete={onboardingComplete}
+      account={account ? { name: account.name, email: account.email } : null}
     />
   );
 }
