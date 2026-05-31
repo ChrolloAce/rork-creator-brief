@@ -122,7 +122,7 @@ export async function GET(req: Request) {
               maxWidth: 600,
             }}
           >
-            <div style={{ fontSize: 64, fontWeight: 800, color: "#0A0A0A", lineHeight: 1.1 }}>
+            <div style={{ fontSize: 64, fontWeight: 900, color: "#0A0A0A", lineHeight: 1.1 }}>
               {name}
             </div>
             {subtitle ? (
