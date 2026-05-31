@@ -11,6 +11,7 @@ import type {
   ListItem,
 } from "@/lib/types";
 import { DEFAULT_SECTION_ORDER } from "@/lib/types";
+import { VERSE_STYLES } from "@/lib/verse-styles";
 
 // Resolve the effective section order: user's custom order with any
 // missing keys appended in default order, invalid keys dropped.
@@ -611,7 +612,8 @@ export function FormatView({
 
 function AssetsBlock({ assets }: { assets: FormatAsset[] }) {
   const overlay = assets.find((a) => a.kind === "overlay");
-  const rest = assets.filter((a) => a !== overlay);
+  const verses = assets.filter((a) => a.kind === "verse");
+  const rest = assets.filter((a) => a !== overlay && a.kind !== "verse");
   return (
     <section className="space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -649,6 +651,10 @@ function AssetsBlock({ assets }: { assets: FormatAsset[] }) {
         </div>
       )}
 
+      {verses.map((a, i) => (
+        <VerseCard key={`v${i}`} asset={a} />
+      ))}
+
       {rest.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {rest.map((a, i) => (
@@ -657,6 +663,53 @@ function AssetsBlock({ assets }: { assets: FormatAsset[] }) {
         </div>
       )}
     </section>
+  );
+}
+
+function VerseCard({ asset }: { asset: FormatAsset }) {
+  const [style, setStyle] = useState("light");
+  const base =
+    `/api/verse-card?ref=${encodeURIComponent(asset.verseRef ?? "")}` +
+    `&text=${encodeURIComponent(asset.verseText ?? "")}` +
+    `&version=${encodeURIComponent(asset.verseVersion ?? "")}`;
+  const previewUrl = `${base}&style=${style}`;
+  return (
+    <div className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 sm:p-5 space-y-4">
+      <div className="flex items-baseline justify-between gap-2 flex-wrap">
+        <h3 className="text-base font-black text-ink">
+          📖 {asset.verseRef || "Bible verse"}
+        </h3>
+        <a
+          href={`${previewUrl}&download=1`}
+          className="border-2 border-line bg-accent text-accent-ink px-2.5 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+        >
+          Download
+        </a>
+      </div>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={previewUrl}
+        alt={asset.verseRef ?? "verse"}
+        className="w-full max-w-xs mx-auto border-2 border-line rounded-md bg-paper"
+      />
+      <div className="flex flex-wrap gap-1.5 justify-center">
+        {VERSE_STYLES.map((s) => (
+          <button
+            key={s.key}
+            type="button"
+            onClick={() => setStyle(s.key)}
+            className={`border-2 border-line px-2.5 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest ${
+              style === s.key ? "bg-accent text-accent-ink" : "bg-background"
+            }`}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
+      <p className="text-[11px] text-muted text-center">
+        Pick a style, then tap Download.
+      </p>
+    </div>
   );
 }
 

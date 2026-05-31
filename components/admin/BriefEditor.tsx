@@ -43,7 +43,10 @@ type FormatAssetRow = {
   mime: string;
   filename?: string;
   label?: string;
-  kind?: "overlay" | "asset";
+  kind?: "overlay" | "asset" | "verse";
+  verseRef?: string;
+  verseText?: string;
+  verseVersion?: string;
 };
 
 type Curation = {
@@ -1626,9 +1629,61 @@ function AssetManager({
     { id: string; name: string; developer: string; icon: string }[] | null
   >(null);
   const [cardBusy, setCardBusy] = useState(false);
+  // Bible verse builder.
+  const [verseOpen, setVerseOpen] = useState(false);
+  const [verseRefInput, setVerseRefInput] = useState("");
+  const [verseData, setVerseData] = useState<{
+    ref: string;
+    text: string;
+    version: string;
+  } | null>(null);
+  const [verseBusy, setVerseBusy] = useState(false);
+  const [verseErr, setVerseErr] = useState<string | null>(null);
 
   function update(next: FormatAssetRow[]) {
     onChange(next.length === 0 ? undefined : next);
+  }
+
+  async function fetchVerse() {
+    const r = verseRefInput.trim();
+    if (!r) return;
+    setVerseBusy(true);
+    setVerseErr(null);
+    setVerseData(null);
+    try {
+      const res = await fetch(`/api/bible?ref=${encodeURIComponent(r)}`);
+      const j = await res.json();
+      if (!j.ok) {
+        setVerseErr(j.error ?? "Couldn't find that verse.");
+        return;
+      }
+      setVerseData({ ref: j.reference, text: j.text, version: j.translation });
+    } catch (e) {
+      setVerseErr((e as Error).message);
+    } finally {
+      setVerseBusy(false);
+    }
+  }
+  function addVerse() {
+    if (!verseData) return;
+    const q = (k: string, v: string) => `${k}=${encodeURIComponent(v)}`;
+    const url = `/api/verse-card?${q("ref", verseData.ref)}&${q("text", verseData.text)}&${q("version", verseData.version)}&style=light`;
+    update([
+      ...assets,
+      {
+        kind: "verse",
+        url,
+        mime: "image/png",
+        filename: `${verseData.ref.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.png`,
+        label: verseData.ref,
+        verseRef: verseData.ref,
+        verseText: verseData.text,
+        verseVersion: verseData.version,
+      },
+    ]);
+    setVerseOpen(false);
+    setVerseData(null);
+    setVerseRefInput("");
   }
 
   async function searchCardApps() {
@@ -1836,7 +1891,66 @@ function AssetManager({
         >
           + App card (live reviews)
         </button>
+        <button
+          type="button"
+          onClick={() => setVerseOpen((o) => !o)}
+          className="flex-1 min-w-[160px] border-2 border-dashed border-line bg-background rounded-md px-2 py-2 text-xs font-bold uppercase tracking-widest text-muted hover:text-accent hover:border-accent"
+        >
+          + Bible verse
+        </button>
       </div>
+
+      {verseOpen && (
+        <div className="mt-2 border-2 border-line bg-paper rounded-md p-2 space-y-2">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={verseRefInput}
+              onChange={(e) => setVerseRefInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void fetchVerse();
+                }
+              }}
+              placeholder="Verse reference (e.g. John 3:16, Psalm 23:1-3)"
+              className="flex-1 border-2 border-line rounded-sm px-2 py-1 text-sm focus:outline-none focus:border-accent bg-background"
+            />
+            <button
+              type="button"
+              onClick={() => void fetchVerse()}
+              disabled={verseBusy || !verseRefInput.trim()}
+              className="border-2 border-line bg-ink text-background rounded-sm px-3 py-1 text-[10px] font-black uppercase tracking-widest nb-press disabled:opacity-40"
+            >
+              {verseBusy ? "…" : "Fetch"}
+            </button>
+          </div>
+          {verseErr && (
+            <p className="text-xs font-bold text-[#b91c1c]">{verseErr}</p>
+          )}
+          {verseData && (
+            <div className="border-2 border-line bg-background rounded-sm p-2 space-y-2">
+              <div className="text-sm italic leading-relaxed">
+                “{verseData.text}”
+              </div>
+              <div className="text-[10px] uppercase tracking-widest font-bold text-muted">
+                {verseData.ref} · {verseData.version}
+              </div>
+              <button
+                type="button"
+                onClick={addVerse}
+                className="w-full border-2 border-line bg-accent text-accent-ink rounded-sm px-2 py-1.5 text-[10px] font-black uppercase tracking-widest nb-press"
+              >
+                Add verse (creators pick a style)
+              </button>
+            </div>
+          )}
+          <p className="text-[10px] text-muted">
+            Creators get this verse with multiple downloadable styles (clean,
+            pink, girly, boyish, photo, etc.).
+          </p>
+        </div>
+      )}
 
       {cardOpen && (
         <div className="mt-2 border-2 border-line bg-paper rounded-md p-2 space-y-2">

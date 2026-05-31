@@ -58,8 +58,11 @@ export type FormatAsset = {
   label?: string;
   // "overlay" assets render inline as a player on the public page so
   // creators can see the overlay style in context. Plain assets just
-  // get a download button.
-  kind?: "overlay" | "asset";
+  // get a download button. "verse" assets render a Bible-verse style picker.
+  kind?: "overlay" | "asset" | "verse";
+  verseRef?: string;
+  verseText?: string;
+  verseVersion?: string;
 };
 
 export type Format = {

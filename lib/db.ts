@@ -32,7 +32,10 @@ export type FormatOverrideAsset = {
   mime: string;
   filename?: string;
   label?: string;
-  kind?: "overlay" | "asset";
+  kind?: "overlay" | "asset" | "verse";
+  verseRef?: string;
+  verseText?: string;
+  verseVersion?: string;
 };
 export type FormatOverride = {
   title?: string;
