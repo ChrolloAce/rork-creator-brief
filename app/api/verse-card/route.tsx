@@ -46,8 +46,8 @@ function getStyle(key: string): StyleDef {
           backgroundImage: `url(${PHOTO})`,
           backgroundSize: "1080px 1350px",
         },
-        color: "#0A0A0A",
-        accent: "#F1610B",
+        color: "#FFFFFF",
+        accent: "#FFFFFF",
         photo: true,
       };
     default: // light
@@ -96,6 +96,7 @@ export async function GET(req: Request) {
           color: s.color,
           lineHeight: 1.35,
           textAlign: "center",
+          textShadow: s.photo ? "0 2px 16px rgba(0,0,0,0.6)" : "none",
         }}
       >
         {`“${text}”`}
@@ -110,6 +111,7 @@ export async function GET(req: Request) {
             marginTop: 48,
             textAlign: "center",
             letterSpacing: 3,
+            textShadow: s.photo ? "0 2px 14px rgba(0,0,0,0.6)" : "none",
           }}
         >
           {ref.toUpperCase()}
@@ -140,20 +142,23 @@ export async function GET(req: Request) {
           display: "flex",
           flexDirection: "column",
           justifyContent: "center",
-          padding: 90,
+          padding: s.photo ? 0 : 90,
           fontFamily: "sans-serif",
           ...s.bg,
         }}
       >
         {s.photo ? (
+          // Full-bleed dark overlay so the white text reads over the photo.
           <div
             style={{
               width: "100%",
+              height: "100%",
               display: "flex",
               flexDirection: "column",
-              background: "rgba(255,255,255,0.9)",
-              borderRadius: 32,
-              padding: 64,
+              justifyContent: "center",
+              alignItems: "center",
+              padding: 96,
+              background: "rgba(0,0,0,0.45)",
             }}
           >
             {card}
