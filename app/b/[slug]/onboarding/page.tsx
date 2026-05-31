@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { getBrief } from "@/lib/db";
 import { OnboardingFlow } from "@/components/Onboarding";
-import { currentCreator } from "@/lib/brief-gate";
+import { currentCreator, creatorHasAccess } from "@/lib/brief-gate";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +32,9 @@ export default async function OnboardingPage({
   if (!brief) notFound();
   const ob = brief.onboarding;
   if (!ob?.enabled || (ob.steps?.length ?? 0) === 0) notFound();
+  // Already approved (and not removed)? Skip onboarding → straight to the brief
+  // (which lands on the content calendar).
+  if (await creatorHasAccess(brief)) redirect(`/b/${brief.slug}`);
   const user = await currentCreator();
   return (
     <OnboardingFlow
