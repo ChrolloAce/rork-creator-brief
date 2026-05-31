@@ -628,7 +628,7 @@ function AssetsBlock({ assets }: { assets: FormatAsset[] }) {
               ▶ Overlay example
             </h3>
             <a
-              href={`${overlay.url}?download=1`}
+              href={`${overlay.url}${overlay.url.includes("?") ? "&" : "?"}download=1`}
               className="border-2 border-line bg-background px-2 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
             >
               Download
@@ -694,7 +694,7 @@ function AssetCard({ asset }: { asset: FormatAsset }) {
           )}
         </div>
         <a
-          href={`${asset.url}?download=1`}
+          href={`${asset.url}${asset.url.includes("?") ? "&" : "?"}download=1`}
           className="shrink-0 border-2 border-line bg-background px-2 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
         >
           Download

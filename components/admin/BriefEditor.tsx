@@ -1619,9 +1619,46 @@ function AssetManager({
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // "App card" asset builder.
+  const [cardOpen, setCardOpen] = useState(false);
+  const [cardTerm, setCardTerm] = useState("");
+  const [cardApps, setCardApps] = useState<
+    { id: string; name: string; developer: string; icon: string }[] | null
+  >(null);
+  const [cardBusy, setCardBusy] = useState(false);
 
   function update(next: FormatAssetRow[]) {
     onChange(next.length === 0 ? undefined : next);
+  }
+
+  async function searchCardApps() {
+    const t = cardTerm.trim();
+    if (!t) return;
+    setCardBusy(true);
+    try {
+      const res = await fetch(
+        `/api/itunes-search?term=${encodeURIComponent(t)}&country=us`
+      );
+      const j = await res.json();
+      if (j.ok) setCardApps(j.apps);
+    } finally {
+      setCardBusy(false);
+    }
+  }
+  function addCard(app: { id: string; name: string }) {
+    update([
+      ...assets,
+      {
+        url: `/api/app-card?id=${app.id}&country=us&n=3`,
+        mime: "image/png",
+        filename: `${app.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-reviews.png`,
+        label: `${app.name} — live reviews card`,
+        kind: "asset",
+      },
+    ]);
+    setCardOpen(false);
+    setCardApps(null);
+    setCardTerm("");
   }
 
   async function uploadFile(file: File) {
@@ -1783,14 +1820,81 @@ function AssetManager({
           if (f) void uploadFile(f);
         }}
       />
-      <button
-        type="button"
-        onClick={() => inputRef.current?.click()}
-        disabled={busy}
-        className="mt-2 w-full border-2 border-dashed border-line bg-background rounded-md px-2 py-2 text-xs font-bold uppercase tracking-widest text-muted hover:text-accent hover:border-accent disabled:opacity-40"
-      >
-        {busy ? progress ?? "Uploading…" : "+ Add asset (image or video, up to 100 MB)"}
-      </button>
+      <div className="mt-2 flex gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          disabled={busy}
+          className="flex-1 min-w-[160px] border-2 border-dashed border-line bg-background rounded-md px-2 py-2 text-xs font-bold uppercase tracking-widest text-muted hover:text-accent hover:border-accent disabled:opacity-40"
+        >
+          {busy ? progress ?? "Uploading…" : "+ Add file (image / video)"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setCardOpen((o) => !o)}
+          className="flex-1 min-w-[160px] border-2 border-dashed border-line bg-background rounded-md px-2 py-2 text-xs font-bold uppercase tracking-widest text-muted hover:text-accent hover:border-accent"
+        >
+          + App card (live reviews)
+        </button>
+      </div>
+
+      {cardOpen && (
+        <div className="mt-2 border-2 border-line bg-paper rounded-md p-2 space-y-2">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={cardTerm}
+              onChange={(e) => setCardTerm(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void searchCardApps();
+                }
+              }}
+              placeholder="Search your app (e.g. Prayer Lock)"
+              className="flex-1 border-2 border-line rounded-sm px-2 py-1 text-sm focus:outline-none focus:border-accent bg-background"
+            />
+            <button
+              type="button"
+              onClick={() => void searchCardApps()}
+              disabled={cardBusy || !cardTerm.trim()}
+              className="border-2 border-line bg-ink text-background rounded-sm px-3 py-1 text-[10px] font-black uppercase tracking-widest nb-press disabled:opacity-40"
+            >
+              {cardBusy ? "…" : "Search"}
+            </button>
+          </div>
+          {cardApps && (
+            <div className="space-y-1 max-h-52 overflow-y-auto">
+              {cardApps.length === 0 ? (
+                <p className="text-xs text-muted italic">No apps found.</p>
+              ) : (
+                cardApps.map((a) => (
+                  <button
+                    key={a.id}
+                    type="button"
+                    onClick={() => addCard(a)}
+                    className="w-full flex items-center gap-2 text-left border-2 border-line bg-background rounded-sm p-1.5 nb-press"
+                  >
+                    {a.icon && (
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img src={a.icon} alt="" className="w-9 h-9 rounded-md border-2 border-line shrink-0" />
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-bold text-xs truncate">{a.name}</span>
+                      <span className="block text-[10px] text-muted truncate">{a.developer}</span>
+                    </span>
+                    <span className="text-[10px] font-black uppercase tracking-widest shrink-0">Add →</span>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+          <p className="text-[10px] text-muted">
+            Adds a downloadable card image that always shows the app&rsquo;s
+            current rating + latest reviews.
+          </p>
+        </div>
+      )}
       {err && (
         <p className="mt-2 text-xs font-bold text-[#b91c1c] border-2 border-line bg-background px-2 py-1 rounded-sm">
           {err}
