@@ -1667,7 +1667,7 @@ function AssetManager({
   function addVerse() {
     if (!verseData) return;
     const q = (k: string, v: string) => `${k}=${encodeURIComponent(v)}`;
-    const url = `/api/verse-card?${q("ref", verseData.ref)}&${q("text", verseData.text)}&${q("version", verseData.version)}&style=light`;
+    const url = `/api/verse-card?${q("ref", verseData.ref)}&${q("text", verseData.text)}&${q("version", verseData.version)}&style=mountains`;
     update([
       ...assets,
       {

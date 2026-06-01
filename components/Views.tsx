@@ -11,7 +11,7 @@ import type {
   ListItem,
 } from "@/lib/types";
 import { DEFAULT_SECTION_ORDER } from "@/lib/types";
-import { VERSE_STYLES } from "@/lib/verse-styles";
+import { VERSE_BACKGROUNDS, randomBackgroundKey } from "@/lib/verse-styles";
 
 // Resolve the effective section order: user's custom order with any
 // missing keys appended in default order, invalid keys dropped.
@@ -667,12 +667,12 @@ function AssetsBlock({ assets }: { assets: FormatAsset[] }) {
 }
 
 function VerseCard({ asset }: { asset: FormatAsset }) {
-  const [style, setStyle] = useState("light");
+  const [bg, setBg] = useState(VERSE_BACKGROUNDS[0].key);
   const base =
     `/api/verse-card?ref=${encodeURIComponent(asset.verseRef ?? "")}` +
     `&text=${encodeURIComponent(asset.verseText ?? "")}` +
     `&version=${encodeURIComponent(asset.verseVersion ?? "")}`;
-  const previewUrl = `${base}&style=${style}`;
+  const previewUrl = `${base}&style=${bg}`;
   return (
     <div className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 sm:p-5 space-y-4">
       <div className="flex items-baseline justify-between gap-2 flex-wrap">
@@ -690,24 +690,30 @@ function VerseCard({ asset }: { asset: FormatAsset }) {
       <img
         src={previewUrl}
         alt={asset.verseRef ?? "verse"}
-        className="w-full max-w-xs mx-auto border-2 border-line rounded-md bg-paper"
+        className="w-full max-w-md mx-auto border-2 border-line rounded-md bg-paper"
       />
-      <div className="flex flex-wrap gap-1.5 justify-center">
-        {VERSE_STYLES.map((s) => (
-          <button
-            key={s.key}
-            type="button"
-            onClick={() => setStyle(s.key)}
-            className={`border-2 border-line px-2.5 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest ${
-              style === s.key ? "bg-accent text-accent-ink" : "bg-background"
-            }`}
-          >
-            {s.label}
-          </button>
-        ))}
+      <div className="flex items-center gap-2 justify-center flex-wrap">
+        <select
+          value={bg}
+          onChange={(e) => setBg(e.target.value)}
+          className="border-2 border-line bg-background px-3 py-1.5 rounded-sm text-xs font-bold nb-press"
+        >
+          {VERSE_BACKGROUNDS.map((b) => (
+            <option key={b.key} value={b.key}>
+              {b.label}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={() => setBg(randomBackgroundKey())}
+          className="border-2 border-line bg-background px-3 py-1.5 rounded-sm nb-press text-xs font-black uppercase tracking-widest"
+        >
+          🎲 Random
+        </button>
       </div>
       <p className="text-[11px] text-muted text-center">
-        Pick a style, then tap Download.
+        Pick a background (or go random), then tap Download.
       </p>
     </div>
   );
