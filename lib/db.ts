@@ -509,6 +509,24 @@ export async function listBriefs(): Promise<Brief[]> {
   return rows.map(rowToBrief);
 }
 
+// Briefs a logged-in creator has been approved for (their dashboard). Joins
+// the approved brief_creator rows back to the brief table; DISTINCT because a
+// creator can have more than one row per brief (e.g. re-onboarded).
+export async function briefsForCreator(userId: string): Promise<Brief[]> {
+  await ensureSchema();
+  const sql = getSql();
+  const rows = await sql<BriefRow[]>`
+    SELECT DISTINCT b.slug, b.name, b.logo_url, b.overview, b.hook_categories,
+      b.access_code, b.access_enabled, b.require_login, b.onboarding,
+      b.created_at, b.updated_at
+    FROM brief b
+    JOIN brief_creator bc ON bc.brief_slug = b.slug
+    WHERE bc.user_id = ${userId} AND bc.status = 'approved'
+    ORDER BY b.updated_at DESC
+  `;
+  return rows.map(rowToBrief);
+}
+
 export async function getBrief(slug: string): Promise<Brief | null> {
   await ensureSchema();
   const sql = getSql();

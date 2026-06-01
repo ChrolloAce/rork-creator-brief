@@ -20,6 +20,26 @@ export function absolutize(req: Request, url: string): string {
   return `${proto}://${host}${url}`;
 }
 
+// Recursively rewrite any uploaded-file URL ("/api/uploads/...") into an
+// absolute URL, walking arbitrary JSON (curation, calendar, overrides, etc.)
+// so callers always get clickable links no matter how deep the field sits.
+export function deepAbsolutize<T>(req: Request, value: T): T {
+  if (typeof value === "string") {
+    return (
+      value.startsWith("/api/uploads/") ? absolutize(req, value) : value
+    ) as T;
+  }
+  if (Array.isArray(value)) {
+    return value.map((v) => deepAbsolutize(req, v)) as unknown as T;
+  }
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) out[k] = deepAbsolutize(req, v);
+    return out as T;
+  }
+  return value;
+}
+
 export function publicizeAsset(req: Request, a: FormatAsset): FormatAsset {
   return {
     ...a,
