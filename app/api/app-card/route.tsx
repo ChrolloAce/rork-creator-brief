@@ -92,6 +92,12 @@ export async function GET(req: Request) {
   }
 
   const STAR = "#FFC400";
+  // Round the rating count UP and abbreviate: 23,125 -> "24k", 1,150,000 -> "1.2M".
+  const fmtCount = (n: number): string => {
+    if (n >= 1_000_000) return `${(Math.ceil(n / 100_000) / 10).toString()}M`;
+    if (n >= 1_000) return `${Math.ceil(n / 1_000)}k`;
+    return n.toString();
+  };
   const StarRow = ({ value, size }: { value: number; size: number }) => (
     <div style={{ display: "flex" }}>
       {[0, 1, 2, 3, 4].map((i) => (
@@ -133,9 +139,9 @@ export async function GET(req: Request) {
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={icon}
-              width={300}
-              height={300}
-              style={{ borderRadius: 64, border: "5px solid #2A2A2A", flexShrink: 0 }}
+              width={340}
+              height={340}
+              style={{ borderRadius: 72, border: "5px solid #2A2A2A", flexShrink: 0 }}
             />
           ) : null}
           <div
@@ -143,7 +149,7 @@ export async function GET(req: Request) {
               display: "flex",
               flexDirection: "column",
               marginLeft: 44,
-              maxWidth: 600,
+              maxWidth: 640,
             }}
           >
             <div style={{ fontSize: 64, fontWeight: 900, color: "#FFFFFF", lineHeight: 1.1 }}>
@@ -155,11 +161,11 @@ export async function GET(req: Request) {
               </div>
             ) : null}
             <div style={{ display: "flex", alignItems: "center", marginTop: 22 }}>
-              <StarRow value={rating} size={50} />
+              <StarRow value={rating} size={58} />
               <div
                 style={{
                   display: "flex",
-                  fontSize: 44,
+                  fontSize: 52,
                   fontWeight: 700,
                   color: "#FFFFFF",
                   marginLeft: 18,
@@ -168,8 +174,17 @@ export async function GET(req: Request) {
                 {rating ? rating.toFixed(1) : ""}
               </div>
               {ratingCount ? (
-                <div style={{ display: "flex", fontSize: 32, color: "#A0A0A0", marginLeft: 14 }}>
-                  {ratingCount.toLocaleString()} ratings
+                <div
+                  style={{
+                    display: "flex",
+                    fontSize: 36,
+                    color: "#A0A0A0",
+                    marginLeft: 16,
+                    whiteSpace: "nowrap",
+                    flexShrink: 0,
+                  }}
+                >
+                  {fmtCount(ratingCount)} ratings
                 </div>
               ) : null}
             </div>
@@ -272,7 +287,7 @@ export async function GET(req: Request) {
     ),
     {
       width: 1080,
-      height: showReviews ? 1560 : 540,
+      height: showReviews ? 1600 : 580,
       fonts: await loadFonts(),
       headers: download
         ? {
