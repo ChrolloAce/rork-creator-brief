@@ -276,6 +276,20 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [briefSlug]);
 
+  // Section editor modal: close on Escape + lock background scroll.
+  useEffect(() => {
+    if (!openSection) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpenSection(null);
+    };
+    window.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [openSection]);
+
   async function persist(next: Curation) {
     setSaving(true);
     try {
@@ -936,21 +950,30 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
             const override = cur.formatOverrides?.[slug] ?? {};
             const effectiveTitle = override.title ?? meta.title;
             return (
-              <section className="border-2 border-accent bg-background rounded-md nb-shadow-sm overflow-hidden">
-                <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 bg-paper border-b-2 border-line">
-                  <span className="text-sm font-black uppercase tracking-widest truncate">
-                    Editing · {effectiveTitle}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setOpenSection(null)}
-                    className="border-2 border-line bg-background px-2 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest shrink-0"
-                  >
-                    Close
-                  </button>
-                </div>
-                <div className="p-4 sm:p-5">
-                  <FormatSection
+              <div
+                className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-ink/50"
+                onClick={() => setOpenSection(null)}
+                role="dialog"
+                aria-modal="true"
+              >
+                <div
+                  className="w-full max-w-3xl max-h-[92vh] flex flex-col bg-background border-2 border-line rounded-md nb-shadow overflow-hidden"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="shrink-0 flex items-center justify-between gap-3 px-4 sm:px-5 py-3 bg-paper border-b-2 border-line">
+                    <span className="text-sm font-black uppercase tracking-widest truncate">
+                      Editing · {effectiveTitle}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setOpenSection(null)}
+                      className="border-2 border-line bg-background px-2.5 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest shrink-0"
+                    >
+                      ✕ Close
+                    </button>
+                  </div>
+                  <div className="p-4 sm:p-5 overflow-y-auto">
+                    <FormatSection
                     slug={slug}
                     briefName={brief.name}
             availableBriefs={allBriefs.filter((b) => b.slug !== briefSlug)}
@@ -1042,8 +1065,9 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
             }}
                     onChangeOverride={(next) => setAndSaveOverride(slug, next)}
                   />
+                  </div>
                 </div>
-              </section>
+              </div>
             );
           })()}
 
