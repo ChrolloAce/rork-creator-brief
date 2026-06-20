@@ -19,6 +19,7 @@ export function Shell({
   useAllHooks = false,
   publicStats,
   hideOverview = false,
+  hideFormatsList = false,
   contentCalendar,
   onboardingEnabled = false,
   onboardingComplete = false,
@@ -36,6 +37,7 @@ export function Shell({
   useAllHooks?: boolean;
   publicStats?: { enabled: boolean; visible?: string[] };
   hideOverview?: boolean;
+  hideFormatsList?: boolean;
   contentCalendar?: ContentCalendar | null;
   onboardingEnabled?: boolean;
   onboardingComplete?: boolean;
@@ -49,12 +51,14 @@ export function Shell({
         includeOverview: !hideOverview,
         includeCalendar: calendarEnabled,
         includeOnboarding: onboardingEnabled,
+        includeFormats: !hideFormatsList,
         onboardingComplete,
       }),
     [
       formats,
       brief.slug,
       hideOverview,
+      hideFormatsList,
       calendarEnabled,
       onboardingEnabled,
       onboardingComplete,

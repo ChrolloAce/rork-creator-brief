@@ -71,6 +71,7 @@ export default async function BriefFormatPage({
       }
       publicStats={curation.publicStats}
       hideOverview={curation.hideOverview}
+      hideFormatsList={curation.hideFormatsList}
       contentCalendar={curation.contentCalendar}
       onboardingEnabled={
         !!(brief.onboarding?.enabled && (brief.onboarding.steps?.length ?? 0) > 0)

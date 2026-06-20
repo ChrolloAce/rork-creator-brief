@@ -68,6 +68,7 @@ type Curation = {
   formatClones?: Record<string, string>;
   publicStats?: { enabled: boolean; visible?: string[] };
   hideOverview?: boolean;
+  hideFormatsList?: boolean;
   hiddenFormats?: string[];
   contentCalendar?: ContentCalendar;
 };
@@ -779,6 +780,29 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
               : "Hidden"
           }
         >
+          <label className="flex items-start gap-2 mb-4 text-xs font-bold cursor-pointer">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={!!cur.hideFormatsList}
+              onChange={(e) => {
+                const next: Curation = {
+                  ...cur,
+                  hideFormatsList: e.target.checked,
+                };
+                setCur(next);
+                void persist(next);
+              }}
+            />
+            <span>
+              Calendar-only mode — hide the Formats list from creators. They
+              won&apos;t see all your formats or their names; formats only show
+              up through the calendar as you schedule them.{" "}
+              <span className="text-muted font-normal">
+                (Format pages still open via calendar links.)
+              </span>
+            </span>
+          </label>
           <CalendarEditor
             value={cur.contentCalendar}
             formats={calendarFormats}

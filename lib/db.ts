@@ -90,6 +90,10 @@ export type CurationData = {
   // and the sidebar's "Overview" entry is dropped. Use when a brief doesn't
   // have a meaningful overview to show.
   hideOverview?: boolean;
+  // Calendar-only mode: hide the entire Formats list from the public brief
+  // nav so creators can't browse every format/name. Formats stay reachable via
+  // calendar links once scheduled. The format pages themselves are NOT blocked.
+  hideFormatsList?: boolean;
   // Format slugs hidden from the public brief. Hidden formats remain in the
   // admin editor (grayed out) so they can still be edited offline. Separate
   // from `formatOrder`, which now controls ordering only.

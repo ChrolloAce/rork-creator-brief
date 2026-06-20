@@ -23,6 +23,7 @@ export function buildNavSections(
     includeOverview?: boolean;
     includeCalendar?: boolean;
     includeOnboarding?: boolean;
+    includeFormats?: boolean;
     onboardingComplete?: boolean;
   }
 ): NavSection[] {
@@ -30,6 +31,7 @@ export function buildNavSections(
   const includeOverview = options?.includeOverview !== false;
   const includeCalendar = options?.includeCalendar === true;
   const includeOnboarding = options?.includeOnboarding === true;
+  const includeFormats = options?.includeFormats !== false;
   const onboardingComplete = options?.onboardingComplete === true;
   const sections: NavSection[] = [];
   // The content calendar is the main thing — list it first.
@@ -66,15 +68,17 @@ export function buildNavSections(
   if (startItems.length > 0) {
     sections.push({ label: "Start here", items: startItems });
   }
-  sections.push({
-    label: "Formats",
-    items: formats.map((f) => ({
-      id: formatId(f.slug),
-      href: `${base}/formats/${f.slug}`,
-      title: f.title,
-      meta: f.tagline,
-      thumbnail: f.thumbnail,
-    })),
-  });
+  if (includeFormats) {
+    sections.push({
+      label: "Formats",
+      items: formats.map((f) => ({
+        id: formatId(f.slug),
+        href: `${base}/formats/${f.slug}`,
+        title: f.title,
+        meta: f.tagline,
+        thumbnail: f.thumbnail,
+      })),
+    });
+  }
   return sections;
 }
