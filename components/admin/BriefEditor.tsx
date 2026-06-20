@@ -70,6 +70,7 @@ type Curation = {
   hideOverview?: boolean;
   hideFormatsList?: boolean;
   hiddenFormats?: string[];
+  deletedFormats?: string[];
   contentCalendar?: ContentCalendar;
 };
 
@@ -190,6 +191,8 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  // Which section's full editor is open below the grid (null = grid only).
+  const [openSection, setOpenSection] = useState<string | null>(null);
   const [allBriefs, setAllBriefs] = useState<
     Array<{ slug: string; name: string }>
   >([]);
@@ -403,9 +406,12 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
     );
   }
 
+  const deletedSet = new Set<string>(cur.deletedFormats ?? []);
   const baseSlugs = formatsMeta.map((f) => f.slug);
   const cloneSlugs = Object.keys(cur.formatClones ?? {});
-  const allSlugs = [...baseSlugs, ...cloneSlugs];
+  const allSlugs = [...baseSlugs, ...cloneSlugs].filter(
+    (s) => !deletedSet.has(s)
+  );
 
   // Resolve a (base OR clone) slug to its meta source.
   function metaFor(slug: string) {
@@ -602,6 +608,42 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
       formatOrder: effectiveOrder,
     };
     setCur(nextCur);
+    void persist(nextCur);
+  }
+
+  // Completely remove a section. Clones are deleted outright (clone mapping +
+  // its overrides/pins/buckets); base/static formats are recorded in
+  // deletedFormats so they stop appearing here and on the public brief.
+  function deleteFormat(slug: string) {
+    if (!cur) return;
+    const isClone = !!cur.formatClones?.[slug];
+    const nextClones = { ...(cur.formatClones ?? {}) };
+    const nextOverrides = { ...(cur.formatOverrides ?? {}) };
+    const nextPins = { ...cur.formatPins };
+    const nextBuckets = { ...cur.formatBuckets };
+    delete nextClones[slug];
+    delete nextOverrides[slug];
+    delete nextPins[slug];
+    delete nextBuckets[slug];
+    const nextCur: Curation = {
+      ...cur,
+      formatClones: nextClones,
+      formatOverrides: nextOverrides,
+      formatPins: nextPins,
+      formatBuckets: nextBuckets,
+      formatOrder: (cur.formatOrder ?? effectiveOrder).filter((s) => s !== slug),
+      hiddenFormats: (cur.hiddenFormats ?? []).filter((s) => s !== slug),
+      deletedFormats: isClone
+        ? (cur.deletedFormats ?? []).filter((s) => s !== slug)
+        : [...new Set([...(cur.deletedFormats ?? []), slug])],
+    };
+    setCur(nextCur);
+    setPreview((p) => {
+      const rest = { ...p };
+      delete rest[slug];
+      return rest;
+    });
+    if (openSection === slug) setOpenSection(null);
     void persist(nextCur);
   }
 
@@ -813,39 +855,104 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
         <div className="text-[10px] uppercase tracking-[0.3em] font-bold text-muted pt-2">
           Sections
         </div>
-        {effectiveOrder.map((slug, idx) => {
-          const meta = metaFor(slug);
-          if (!meta) return null;
-          const override = cur.formatOverrides?.[slug] ?? {};
-          const effectiveTitle = override.title ?? meta.title;
-          const pinCount = (cur.formatPins[slug] ?? []).length;
-          const isClone = !!cur.formatClones?.[slug];
-          const isHidden = hiddenSet.has(slug);
-          return (
-          <div key={slug} className={isHidden ? "opacity-50" : undefined}>
-          <CollapsibleCard
-            storageKey={`brief-editor:${briefSlug}:format:${slug}`}
-            title={effectiveTitle}
-            meta={`${isHidden ? "HIDDEN · " : ""}${isClone ? "COPY · " : ""}${pinCount} ${pinCount === 1 ? "video" : "videos"}`}
-            action={
-              <button
-                type="button"
-                onClick={() => toggleFormatHidden(slug)}
-                aria-label={isHidden ? "Show on public brief" : "Hide from public brief"}
-                title={
-                  isHidden
-                    ? "Hidden from public brief — click to publish"
-                    : "Hide from public brief (still editable here)"
-                }
-                className={`w-8 h-8 border-2 border-line rounded-sm font-black nb-press flex items-center justify-center shrink-0 ${isHidden ? "bg-paper text-muted" : "bg-background"}`}
+        {/* Compact tile grid — see every section at a glance, open one to edit. */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+          {effectiveOrder.map((slug) => {
+            const meta = metaFor(slug);
+            if (!meta) return null;
+            const override = cur.formatOverrides?.[slug] ?? {};
+            const effectiveTitle = override.title ?? meta.title;
+            const pinCount = (cur.formatPins[slug] ?? []).length;
+            const isClone = !!cur.formatClones?.[slug];
+            const isHidden = hiddenSet.has(slug);
+            const isOpen = openSection === slug;
+            return (
+              <div
+                key={slug}
+                className={`border-2 rounded-md bg-background p-2.5 flex flex-col gap-2 ${
+                  isOpen ? "border-accent nb-shadow-sm" : "border-line"
+                } ${isHidden ? "opacity-60" : ""}`}
               >
-                <EyeIcon off={isHidden} />
-              </button>
-            }
-          >
-          <FormatSection
-            slug={slug}
-            briefName={brief.name}
+                <button
+                  type="button"
+                  onClick={() => setOpenSection(isOpen ? null : slug)}
+                  className="text-left flex-1"
+                >
+                  <div className="text-xs font-black uppercase tracking-wide leading-snug line-clamp-2">
+                    {effectiveTitle}
+                  </div>
+                  <div className="text-[9px] uppercase tracking-[0.15em] font-bold text-muted mt-1">
+                    {isHidden ? "HIDDEN · " : ""}
+                    {isClone ? "COPY · " : ""}
+                    {pinCount} {pinCount === 1 ? "video" : "videos"}
+                  </div>
+                </button>
+                <div className="flex items-center gap-1 mt-auto">
+                  <button
+                    type="button"
+                    onClick={() => setOpenSection(isOpen ? null : slug)}
+                    className="border-2 border-line bg-background px-1.5 py-0.5 rounded-sm nb-press text-[9px] font-black uppercase tracking-widest"
+                  >
+                    {isOpen ? "Close" : "Edit"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => toggleFormatHidden(slug)}
+                    aria-label={isHidden ? "Show on public brief" : "Hide from public brief"}
+                    title={isHidden ? "Hidden — click to publish" : "Hide from public brief"}
+                    className={`w-7 h-7 border-2 border-line rounded-sm font-black nb-press flex items-center justify-center ${isHidden ? "bg-paper text-muted" : "bg-background"}`}
+                  >
+                    <EyeIcon off={isHidden} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          `Delete "${effectiveTitle}" completely? This can't be undone.`
+                        )
+                      )
+                        deleteFormat(slug);
+                    }}
+                    aria-label="Delete section"
+                    title="Delete this section completely"
+                    className="ml-auto w-7 h-7 border-2 border-line rounded-sm font-black nb-press flex items-center justify-center bg-background hover:bg-paper"
+                  >
+                    🗑
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Full editor for the open section */}
+        {openSection &&
+          (() => {
+            const slug = openSection;
+            const idx = effectiveOrder.indexOf(slug);
+            const meta = metaFor(slug);
+            if (idx < 0 || !meta) return null;
+            const override = cur.formatOverrides?.[slug] ?? {};
+            const effectiveTitle = override.title ?? meta.title;
+            return (
+              <section className="border-2 border-accent bg-background rounded-md nb-shadow-sm overflow-hidden">
+                <div className="flex items-center justify-between gap-3 px-4 sm:px-5 py-3 bg-paper border-b-2 border-line">
+                  <span className="text-sm font-black uppercase tracking-widest truncate">
+                    Editing · {effectiveTitle}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setOpenSection(null)}
+                    className="border-2 border-line bg-background px-2 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest shrink-0"
+                  >
+                    Close
+                  </button>
+                </div>
+                <div className="p-4 sm:p-5">
+                  <FormatSection
+                    slug={slug}
+                    briefName={brief.name}
             availableBriefs={allBriefs.filter((b) => b.slug !== briefSlug)}
             onCopyToBrief={(targetSlug) =>
               copySectionToBrief(targetSlug, slug)
@@ -933,12 +1040,12 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
               });
               void persist(nextCur);
             }}
-            onChangeOverride={(next) => setAndSaveOverride(slug, next)}
-          />
-          </CollapsibleCard>
-          </div>
-          );
-        })}
+                    onChangeOverride={(next) => setAndSaveOverride(slug, next)}
+                  />
+                </div>
+              </section>
+            );
+          })()}
 
         <CollapsibleCard
           storageKey={`brief-editor:${briefSlug}:excluded`}

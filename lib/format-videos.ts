@@ -79,10 +79,11 @@ export async function getAllFormatListings(
 export async function getFormatsForRender(briefSlug?: string): Promise<Format[]> {
   const curation = await getCuration(briefSlug);
   const listings = await getAllFormatListings(briefSlug);
+  const deletedSet = new Set<string>(curation.deletedFormats ?? []);
   const allSlugs = [
     ...formatsMeta.map((f) => f.slug),
     ...Object.keys(curation.formatClones ?? {}),
-  ];
+  ].filter((s) => !deletedSet.has(s));
   // Legacy: before hiddenFormats existed, hide was implemented by removing
   // the slug from formatOrder. Preserve that for old briefs that haven't
   // re-saved yet.

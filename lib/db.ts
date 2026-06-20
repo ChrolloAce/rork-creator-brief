@@ -102,6 +102,10 @@ export type CurationData = {
   // to record on each date and batch-record ahead. Rendered at
   // /b/{slug}/calendar when enabled.
   contentCalendar?: ContentCalendar;
+  // Slugs deleted by the admin. Clones are removed from formatClones outright;
+  // base (static) formats can't be removed from code, so they're recorded here
+  // and filtered out of both the admin list and the public brief.
+  deletedFormats?: string[];
 };
 
 // A single script/task assigned to a calendar day. It either links to one of
