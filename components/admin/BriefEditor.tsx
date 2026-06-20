@@ -4,6 +4,13 @@ import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { HookCategory, VideoExample } from "@/lib/types";
 import {
+  type ScriptVariant,
+  type ScriptStatus,
+  normalizeVariants,
+  firstLiveBody,
+  makeVariantId,
+} from "@/lib/scripts";
+import {
   SECTION_STAT_KEYS,
   SECTION_STAT_LABELS,
   SECTION_STAT_DEFAULTS,
@@ -30,6 +37,7 @@ type FormatOverride = {
   tagline?: string;
   description?: string;
   script?: string;
+  scriptVariants?: ScriptVariant[];
   structure?: { text: string; image?: string; hidden?: boolean }[];
   tips?: { text: string; image?: string; hidden?: boolean }[];
   bestFor?: { text: string; image?: string; hidden?: boolean }[];
@@ -348,6 +356,23 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
     });
   }
 
+  // Format-override edits (title/script/structure/assets/…) used to update
+  // local state only and relied on the user hitting Save — so script edits
+  // silently vanished on reload. Debounce-autosave them like the calendar.
+  const overrideSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function setAndSaveOverride(slug: string, next: FormatOverride) {
+    setCur((c) => {
+      if (!c) return c;
+      const nextCur: Curation = {
+        ...c,
+        formatOverrides: { ...(c.formatOverrides ?? {}), [slug]: next },
+      };
+      if (overrideSaveTimer.current) clearTimeout(overrideSaveTimer.current);
+      overrideSaveTimer.current = setTimeout(() => void persist(nextCur), 800);
+      return nextCur;
+    });
+  }
+
   const hookSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   function setAndSaveHooks(next: BriefHookCategory[] | null) {
     setBrief((b) => (b ? { ...b, hookCategories: next } : b));
@@ -506,6 +531,9 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
         overrideTouched = true;
       } else if (part === "script") {
         nextOv.script = srcOv.script ?? srcMeta?.script;
+        nextOv.scriptVariants = srcOv.scriptVariants
+          ? srcOv.scriptVariants.map((v) => ({ ...v, id: makeVariantId() }))
+          : undefined;
         overrideTouched = true;
       } else if (part === "structure") {
         nextOv.structure = srcOv.structure
@@ -881,19 +909,7 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
               });
               void persist(nextCur);
             }}
-            onChangeOverride={(next) =>
-              setCur((c) =>
-                c
-                  ? {
-                      ...c,
-                      formatOverrides: {
-                        ...(c.formatOverrides ?? {}),
-                        [slug]: next,
-                      },
-                    }
-                  : c
-              )
-            }
+            onChangeOverride={(next) => setAndSaveOverride(slug, next)}
           />
           </CollapsibleCard>
           </div>
@@ -2042,7 +2058,7 @@ function AskClaude({
   tips: string[];
   hooks: string[];
   currentScript: string;
-  onApply: (text: string, mode: "replace" | "append") => void;
+  onApply: (text: string, mode: "replace" | "append" | "new") => void;
 }) {
   const [open, setOpen] = useState(false);
   const [prompt, setPrompt] = useState("");
@@ -2183,6 +2199,16 @@ function AskClaude({
             <button
               type="button"
               onClick={() => {
+                onApply(draft, "new");
+                setDraft("");
+              }}
+              className="border-2 border-line bg-ink text-background px-3 py-1 rounded-md nb-press text-xs font-black uppercase tracking-widest"
+            >
+              + New variant
+            </button>
+            <button
+              type="button"
+              onClick={() => {
                 onApply(draft, "append");
                 setDraft("");
               }}
@@ -2210,6 +2236,309 @@ function AskClaude({
           {draft}
           {streaming && <span className="opacity-50">▍</span>}
         </pre>
+      )}
+    </div>
+  );
+}
+
+function nextVariantLabel(variants: ScriptVariant[]): string {
+  const used = new Set(variants.map((v) => v.label.trim().toUpperCase()));
+  for (let i = 0; i < 26; i++) {
+    const letter = String.fromCharCode(65 + i);
+    if (!used.has(letter)) return letter;
+  }
+  return `V${variants.length + 1}`;
+}
+
+const STATUS_STYLE: Record<ScriptStatus, string> = {
+  live: "bg-accent text-accent-ink border-line",
+  draft: "bg-paper text-ink border-line",
+  archived: "bg-background text-muted border-line",
+};
+
+function ScriptManager({
+  variants,
+  onChange,
+  isHidden,
+  onToggleHidden,
+  headerAction,
+  briefName,
+  formatTitle,
+  formatTagline,
+  formatDescription,
+  structure,
+  hooks,
+}: {
+  variants: ScriptVariant[];
+  onChange: (next: ScriptVariant[]) => void;
+  isHidden: boolean;
+  onToggleHidden: () => void;
+  headerAction: ReactNode;
+  briefName: string;
+  formatTitle: string;
+  formatTagline: string;
+  formatDescription: string;
+  structure: string[];
+  hooks: string[];
+}) {
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
+
+  const active = variants.filter((v) => v.status !== "archived");
+  const archived = variants.filter((v) => v.status === "archived");
+  const liveCount = variants.filter((v) => v.status === "live").length;
+
+  const selected =
+    (selectedId && active.find((v) => v.id === selectedId)) || active[0] || null;
+
+  function update(id: string, patch: Partial<ScriptVariant>) {
+    onChange(variants.map((v) => (v.id === id ? { ...v, ...patch } : v)));
+  }
+  function addVariant(body = "", select = true) {
+    const id = makeVariantId();
+    // First-ever variant goes live so the public page shows something;
+    // later ones start as drafts you promote when ready.
+    const status: ScriptStatus = variants.length === 0 ? "live" : "draft";
+    onChange([
+      ...variants,
+      { id, label: nextVariantLabel(variants), body, status },
+    ]);
+    if (select) setSelectedId(id);
+  }
+  function duplicate(v: ScriptVariant) {
+    const id = makeVariantId();
+    const idx = variants.findIndex((x) => x.id === v.id);
+    const copy: ScriptVariant = {
+      id,
+      label: `${nextVariantLabel(variants)} · copy of ${v.label}`,
+      body: v.body,
+      status: "draft",
+    };
+    const next = [...variants];
+    next.splice(idx + 1, 0, copy);
+    onChange(next);
+    setSelectedId(id);
+  }
+  function remove(id: string) {
+    onChange(variants.filter((v) => v.id !== id));
+    if (selectedId === id) setSelectedId(null);
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted flex items-center gap-2">
+          Scripts
+          <span className="text-muted/70 normal-case tracking-normal font-normal">
+            {active.length} active · {liveCount} live
+          </span>
+          {isHidden && (
+            <span className="px-1.5 py-0.5 bg-paper border-2 border-line rounded-sm text-[9px]">
+              HIDDEN
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5">
+          {headerAction}
+          <button
+            type="button"
+            onClick={() => addVariant()}
+            className="border-2 border-line bg-ink text-background px-2 py-0.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+          >
+            + New
+          </button>
+          <button
+            type="button"
+            onClick={onToggleHidden}
+            className="border-2 border-line bg-background px-2 py-0.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+          >
+            {isHidden ? "Show" : "Hide section"}
+          </button>
+        </div>
+      </div>
+
+      {active.length === 0 ? (
+        <button
+          type="button"
+          onClick={() => addVariant()}
+          className="w-full border-2 border-dashed border-line rounded-md py-8 text-sm font-bold text-muted hover:text-ink hover:border-accent nb-press"
+        >
+          + Add your first script
+        </button>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+          {active.map((v) => {
+            const isSel = selected?.id === v.id;
+            return (
+              <div
+                key={v.id}
+                className={`border-2 rounded-md bg-background p-2 flex flex-col gap-1.5 ${
+                  isSel ? "border-accent nb-shadow-sm" : "border-line"
+                }`}
+              >
+                <div className="flex items-center gap-1.5">
+                  <input
+                    value={v.label}
+                    onChange={(e) => update(v.id, { label: e.target.value })}
+                    className="flex-1 min-w-0 bg-transparent text-xs font-black uppercase tracking-wide focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      update(v.id, {
+                        status: v.status === "live" ? "draft" : "live",
+                      })
+                    }
+                    title={v.status === "live" ? "Live — click to make draft" : "Set live"}
+                    className={`px-1.5 py-0.5 rounded-sm border-2 text-[9px] font-black uppercase tracking-widest nb-press ${STATUS_STYLE[v.status]}`}
+                  >
+                    {v.status === "live" ? "● Live" : "Draft"}
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedId(v.id)}
+                  className="text-left"
+                >
+                  <pre className="text-[10px] font-mono whitespace-pre-wrap leading-snug text-ink/80 max-h-20 overflow-hidden">
+                    {v.body.trim() || "Empty — click to write…"}
+                  </pre>
+                </button>
+                <div className="flex items-center gap-1 mt-auto pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedId(v.id)}
+                    className="border-2 border-line bg-background px-1.5 py-0.5 rounded-sm nb-press text-[9px] font-black uppercase tracking-widest"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => duplicate(v)}
+                    className="border-2 border-line bg-background px-1.5 py-0.5 rounded-sm nb-press text-[9px] font-black uppercase tracking-widest"
+                  >
+                    Dup
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => update(v.id, { status: "archived" })}
+                    className="border-2 border-line bg-background px-1.5 py-0.5 rounded-sm nb-press text-[9px] font-black uppercase tracking-widest"
+                  >
+                    Hide
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => remove(v.id)}
+                    title="Delete variant"
+                    className="ml-auto border-2 border-line bg-background px-1.5 py-0.5 rounded-sm nb-press text-[9px] font-black"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {selected && (
+        <div className="mt-3 border-2 border-line bg-paper rounded-md p-3 nb-shadow-sm">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+              Editing · {selected.label}
+            </div>
+            <div className="flex items-center gap-1.5">
+              {(["live", "draft"] as const).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => update(selected.id, { status: s })}
+                  className={`px-2 py-0.5 rounded-sm border-2 text-[9px] font-black uppercase tracking-widest nb-press ${
+                    selected.status === s ? STATUS_STYLE[s] : "bg-background border-line text-muted"
+                  }`}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+          <textarea
+            value={selected.body}
+            onChange={(e) => update(selected.id, { body: e.target.value })}
+            rows={8}
+            placeholder={`00:00 First line of the script.\n00:03 Next line.\n00:11 ...`}
+            className="w-full border-2 border-line rounded-md px-2 py-2 text-sm focus:outline-none focus:border-accent bg-background leading-relaxed font-mono"
+          />
+          <p className="text-[10px] text-muted mt-1">
+            One line per beat — start each with a timestamp like{" "}
+            <code className="font-mono">00:03</code>. The <b>live</b> variant
+            renders on the public format page.
+          </p>
+          <AskClaude
+            briefName={briefName}
+            formatTitle={formatTitle}
+            formatTagline={formatTagline}
+            formatDescription={formatDescription}
+            structure={structure}
+            tips={[]}
+            hooks={hooks}
+            currentScript={selected.body}
+            onApply={(text, mode) => {
+              if (mode === "new") {
+                addVariant(text);
+                return;
+              }
+              const body =
+                mode === "replace"
+                  ? text
+                  : `${selected.body.trim()}\n${text}`.trim();
+              update(selected.id, { body });
+            }}
+          />
+        </div>
+      )}
+
+      {archived.length > 0 && (
+        <div className="mt-3">
+          <button
+            type="button"
+            onClick={() => setShowArchived((s) => !s)}
+            className="text-[10px] font-black uppercase tracking-widest text-muted hover:text-ink"
+          >
+            {showArchived ? "▾" : "▸"} Hidden ({archived.length})
+          </button>
+          {showArchived && (
+            <div className="mt-2 flex flex-col gap-1.5">
+              {archived.map((v) => (
+                <div
+                  key={v.id}
+                  className="flex items-center gap-2 border-2 border-line rounded-md bg-background px-2 py-1.5 opacity-70"
+                >
+                  <span className="text-xs font-black uppercase tracking-wide flex-1 min-w-0 truncate">
+                    {v.label}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      update(v.id, { status: "draft" });
+                      setSelectedId(v.id);
+                    }}
+                    className="border-2 border-line bg-background px-1.5 py-0.5 rounded-sm nb-press text-[9px] font-black uppercase tracking-widest"
+                  >
+                    Restore
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => remove(v.id)}
+                    className="border-2 border-line bg-background px-1.5 py-0.5 rounded-sm nb-press text-[9px] font-black"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
@@ -2773,48 +3102,47 @@ function FormatSection({
           }
         />
         <div className={isSectionHidden("script") ? "opacity-60" : undefined}>
-          <div className="flex items-center justify-between gap-2 mb-2">
-            <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
-              Script
-              {isSectionHidden("script") && (
-                <span className="ml-2 px-1.5 py-0.5 bg-paper border-2 border-line rounded-sm text-[9px]">
-                  HIDDEN
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-1.5">
+          <ScriptManager
+            variants={normalizeVariants(override)}
+            onChange={(next) =>
+              onChangeOverride({
+                ...override,
+                scriptVariants: next.length ? next : undefined,
+                script: firstLiveBody(next),
+              })
+            }
+            isHidden={isSectionHidden("script")}
+            onToggleHidden={() => toggleSectionHidden("script")}
+            headerAction={
               <SectionCopyButton
                 part="script"
                 label="script"
                 otherFormats={otherFormats}
                 onApply={onCopyPartsFrom}
               />
-              <button
-                type="button"
-                onClick={() => toggleSectionHidden("script")}
-                className="border-2 border-line bg-background px-2 py-0.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
-              >
-                {isSectionHidden("script") ? "Show" : "Hide section"}
-              </button>
-            </div>
-          </div>
-          <textarea
-            value={override.script ?? ""}
-            onChange={(e) =>
-              onChangeOverride({
-                ...override,
-                script: e.target.value || undefined,
-              })
             }
-            rows={8}
-            placeholder={`00:00 First line of the script.\n00:03 Next line.\n00:11 ...`}
-            className="w-full border-2 border-line rounded-md px-2 py-2 text-sm focus:outline-none focus:border-accent bg-background leading-relaxed font-mono"
+            briefName={briefName}
+            formatTitle={effectiveTitle}
+            formatTagline={override.tagline ?? defaultTagline}
+            formatDescription={override.description ?? defaultDescription}
+            structure={(override.structure ?? defaultStructure.map((t) => ({ text: t })))
+              .filter((i) => !("hidden" in i ? i.hidden : false))
+              .map((i) => (typeof i === "string" ? i : i.text))
+              .filter(Boolean)}
+            hooks={(() => {
+              const cats = hookCategories ?? [];
+              const linked = linkedHookSlugs
+                .map((s) => cats.find((c) => c.slug === s))
+                .filter((c): c is BriefHookCategory => !!c);
+              const fromBrief = linked.flatMap((c) =>
+                c.hooks.filter((h) => !h.hidden).map((h) => h.text)
+              );
+              if (fromBrief.length > 0) return fromBrief.filter(Boolean);
+              return defaultHookCategories
+                .flatMap((c) => c.hooks.map((h) => h.text))
+                .filter(Boolean);
+            })()}
           />
-          <p className="text-[10px] text-muted mt-1">
-            One line per beat — start each with a timestamp like{" "}
-            <code className="font-mono">00:03</code>. Renders as a styled
-            script block on the public format page.
-          </p>
           <div className="mt-6 pt-5 border-t-2 border-line">
             <AssetManager
               assets={override.assets ?? []}
@@ -2831,38 +3159,6 @@ function FormatSection({
               }
             />
           </div>
-          <AskClaude
-            briefName={briefName}
-            formatTitle={effectiveTitle}
-            formatTagline={override.tagline ?? defaultTagline}
-            formatDescription={override.description ?? defaultDescription}
-            structure={(override.structure ?? defaultStructure.map((t) => ({ text: t })))
-              .filter((i) => !("hidden" in i ? i.hidden : false))
-              .map((i) => (typeof i === "string" ? i : i.text))
-              .filter(Boolean)}
-            tips={[]}
-            hooks={(() => {
-              const cats = hookCategories ?? [];
-              const linked = linkedHookSlugs
-                .map((s) => cats.find((c) => c.slug === s))
-                .filter((c): c is BriefHookCategory => !!c);
-              const fromBrief = linked.flatMap((c) =>
-                c.hooks.filter((h) => !h.hidden).map((h) => h.text)
-              );
-              if (fromBrief.length > 0) return fromBrief.filter(Boolean);
-              return defaultHookCategories
-                .flatMap((c) => c.hooks.map((h) => h.text))
-                .filter(Boolean);
-            })()}
-            currentScript={override.script ?? ""}
-            onApply={(text, mode) => {
-              const next =
-                mode === "replace"
-                  ? text
-                  : `${(override.script ?? "").trim()}\n${text}`.trim();
-              onChangeOverride({ ...override, script: next || undefined });
-            }}
-          />
         </div>
         <div className={isSectionHidden("hooks") ? "opacity-60" : undefined}>
           <div className="flex items-center justify-end gap-2 mb-2">

@@ -2,6 +2,7 @@ import "server-only";
 import postgres from "postgres";
 import { formats as formatsMeta } from "./formats";
 import type { VideoExample } from "./types";
+import type { ScriptVariant } from "./scripts";
 import { hashPassword, verifyPassword } from "./passwords";
 
 declare global {
@@ -41,7 +42,12 @@ export type FormatOverride = {
   title?: string;
   tagline?: string;
   description?: string;
+  // Legacy single script. Kept in sync with the live script variant so
+  // back-compat readers (public page, v1 API) keep working. New writes go
+  // through `scriptVariants`; this mirrors the first live variant's body.
   script?: string;
+  // Multiple script versions for A/B testing — see lib/scripts.ts.
+  scriptVariants?: ScriptVariant[];
   structure?: FormatOverrideItem[];
   tips?: FormatOverrideItem[];
   bestFor?: FormatOverrideItem[];
