@@ -71,6 +71,8 @@ type Curation = {
   hideFormatsList?: boolean;
   hiddenFormats?: string[];
   deletedFormats?: string[];
+  sectionGroups?: { id: string; name: string }[];
+  sectionGroupOf?: Record<string, string>;
   contentCalendar?: ContentCalendar;
 };
 
@@ -191,8 +193,12 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
-  // Which section's full editor is open below the grid (null = grid only).
+  // Which section's full editor is open in the modal (null = none).
   const [openSection, setOpenSection] = useState<string | null>(null);
+  // Section groups that are collapsed in the editor (by group id).
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
+    new Set()
+  );
   const [allBriefs, setAllBriefs] = useState<
     Array<{ slug: string; name: string }>
   >([]);
@@ -661,6 +667,186 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
     void persist(nextCur);
   }
 
+  function createGroup() {
+    if (!cur) return;
+    const name = window.prompt("Name this group", "New group")?.trim();
+    if (!name) return;
+    const nextCur: Curation = {
+      ...cur,
+      sectionGroups: [
+        ...(cur.sectionGroups ?? []),
+        { id: makeVariantId(), name },
+      ],
+    };
+    setCur(nextCur);
+    void persist(nextCur);
+  }
+
+  function renameGroup(id: string, current: string) {
+    if (!cur) return;
+    const name = window.prompt("Rename group", current)?.trim();
+    if (!name) return;
+    const nextCur: Curation = {
+      ...cur,
+      sectionGroups: (cur.sectionGroups ?? []).map((g) =>
+        g.id === id ? { ...g, name } : g
+      ),
+    };
+    setCur(nextCur);
+    void persist(nextCur);
+  }
+
+  // Removes the group itself; its sections fall back to Ungrouped (not deleted).
+  function deleteGroup(id: string) {
+    if (!cur) return;
+    const nextMap = { ...(cur.sectionGroupOf ?? {}) };
+    for (const slug of Object.keys(nextMap)) {
+      if (nextMap[slug] === id) delete nextMap[slug];
+    }
+    const nextCur: Curation = {
+      ...cur,
+      sectionGroups: (cur.sectionGroups ?? []).filter((g) => g.id !== id),
+      sectionGroupOf: nextMap,
+    };
+    setCur(nextCur);
+    void persist(nextCur);
+  }
+
+  function setSectionGroup(slug: string, groupId: string) {
+    if (!cur) return;
+    const nextMap = { ...(cur.sectionGroupOf ?? {}) };
+    if (groupId) nextMap[slug] = groupId;
+    else delete nextMap[slug];
+    const nextCur: Curation = { ...cur, sectionGroupOf: nextMap };
+    setCur(nextCur);
+    void persist(nextCur);
+  }
+
+  // Add a new script to a group by cloning the last section already in it
+  // (so it inherits the same script — you just tweak the CTA). Falls back to
+  // the first section overall when the group is empty.
+  async function addScriptToGroup(groupId: string) {
+    if (!cur) return;
+    const inGroup = effectiveOrder.filter(
+      (s) => (cur.sectionGroupOf?.[s] ?? "") === groupId
+    );
+    const source = inGroup[inGroup.length - 1] ?? effectiveOrder[0];
+    if (!source) {
+      window.alert("Add a section to the brief first to copy from.");
+      return;
+    }
+    const res = await cloneSectionInBrief(source); // calls load()
+    if (!res.ok || !res.newSlug) {
+      window.alert(res.error ?? "Could not add script");
+      return;
+    }
+    const newSlug = res.newSlug;
+    setCur((c) => {
+      if (!c) return c;
+      const nextCur: Curation = {
+        ...c,
+        sectionGroupOf: { ...(c.sectionGroupOf ?? {}), [newSlug]: groupId },
+      };
+      void persist(nextCur);
+      return nextCur;
+    });
+    setOpenSection(newSlug);
+  }
+
+  function toggleGroupCollapsed(id: string) {
+    setCollapsedGroups((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  const sectionGroups = cur.sectionGroups ?? [];
+  // One compact section tile (used inside every group + the ungrouped grid).
+  const renderTile = (slug: string) => {
+    const meta = metaFor(slug);
+    if (!meta) return null;
+    const override = cur.formatOverrides?.[slug] ?? {};
+    const effectiveTitle = override.title ?? meta.title;
+    const pinCount = (cur.formatPins[slug] ?? []).length;
+    const isClone = !!cur.formatClones?.[slug];
+    const isHidden = hiddenSet.has(slug);
+    const isOpen = openSection === slug;
+    const groupId = cur.sectionGroupOf?.[slug] ?? "";
+    return (
+      <div
+        key={slug}
+        className={`border-2 rounded-md bg-background p-2.5 flex flex-col gap-2 ${
+          isOpen ? "border-accent nb-shadow-sm" : "border-line"
+        } ${isHidden ? "opacity-60" : ""}`}
+      >
+        <button
+          type="button"
+          onClick={() => setOpenSection(isOpen ? null : slug)}
+          className="text-left flex-1"
+        >
+          <div className="text-xs font-black uppercase tracking-wide leading-snug line-clamp-2">
+            {effectiveTitle}
+          </div>
+          <div className="text-[9px] uppercase tracking-[0.15em] font-bold text-muted mt-1">
+            {isHidden ? "HIDDEN · " : ""}
+            {isClone ? "COPY · " : ""}
+            {pinCount} {pinCount === 1 ? "video" : "videos"}
+          </div>
+        </button>
+        <select
+          value={groupId}
+          onChange={(e) => setSectionGroup(slug, e.target.value)}
+          onClick={(e) => e.stopPropagation()}
+          title="Move to group"
+          className="w-full border-2 border-line bg-background rounded-sm px-1 py-0.5 text-[9px] font-bold uppercase tracking-widest focus:outline-none focus:border-accent"
+        >
+          <option value="">Ungrouped</option>
+          {sectionGroups.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.name}
+            </option>
+          ))}
+        </select>
+        <div className="flex items-center gap-1 mt-auto">
+          <button
+            type="button"
+            onClick={() => setOpenSection(isOpen ? null : slug)}
+            className="border-2 border-line bg-background px-1.5 py-0.5 rounded-sm nb-press text-[9px] font-black uppercase tracking-widest"
+          >
+            {isOpen ? "Close" : "Edit"}
+          </button>
+          <button
+            type="button"
+            onClick={() => toggleFormatHidden(slug)}
+            aria-label={isHidden ? "Show on public brief" : "Hide from public brief"}
+            title={isHidden ? "Hidden — click to publish" : "Hide from public brief"}
+            className={`w-7 h-7 border-2 border-line rounded-sm font-black nb-press flex items-center justify-center ${isHidden ? "bg-paper text-muted" : "bg-background"}`}
+          >
+            <EyeIcon off={isHidden} />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (
+                window.confirm(
+                  `Delete "${effectiveTitle}" completely? This can't be undone.`
+                )
+              )
+                deleteFormat(slug);
+            }}
+            aria-label="Delete section"
+            title="Delete this section completely"
+            className="ml-auto w-7 h-7 border-2 border-line rounded-sm font-black nb-press flex items-center justify-center bg-background hover:bg-paper"
+          >
+            🗑
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <main className="min-h-screen bg-background text-ink">
       <header className="sticky top-0 z-20 bg-background border-b-2 border-line">
@@ -866,79 +1052,119 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
           />
         </CollapsibleCard>
 
-        <div className="text-[10px] uppercase tracking-[0.3em] font-bold text-muted pt-2">
-          Sections
+        <div className="flex items-center justify-between gap-2 pt-2">
+          <div className="text-[10px] uppercase tracking-[0.3em] font-bold text-muted">
+            Sections
+          </div>
+          <button
+            type="button"
+            onClick={createGroup}
+            className="border-2 border-line bg-ink text-background px-2 py-0.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+          >
+            + New group
+          </button>
         </div>
-        {/* Compact tile grid — see every section at a glance, open one to edit. */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-          {effectiveOrder.map((slug) => {
-            const meta = metaFor(slug);
-            if (!meta) return null;
-            const override = cur.formatOverrides?.[slug] ?? {};
-            const effectiveTitle = override.title ?? meta.title;
-            const pinCount = (cur.formatPins[slug] ?? []).length;
-            const isClone = !!cur.formatClones?.[slug];
-            const isHidden = hiddenSet.has(slug);
-            const isOpen = openSection === slug;
-            return (
-              <div
-                key={slug}
-                className={`border-2 rounded-md bg-background p-2.5 flex flex-col gap-2 ${
-                  isOpen ? "border-accent nb-shadow-sm" : "border-line"
-                } ${isHidden ? "opacity-60" : ""}`}
-              >
+
+        {/* Grouped sections — each group is a collapsible grid. */}
+        {sectionGroups.map((g) => {
+          const slugs = effectiveOrder.filter(
+            (s) => (cur.sectionGroupOf?.[s] ?? "") === g.id
+          );
+          const collapsed = collapsedGroups.has(g.id);
+          return (
+            <section
+              key={g.id}
+              className="border-2 border-line bg-background rounded-md nb-shadow-sm overflow-hidden"
+            >
+              <div className="flex items-center justify-between gap-2 px-3 py-2 bg-paper border-b-2 border-line">
                 <button
                   type="button"
-                  onClick={() => setOpenSection(isOpen ? null : slug)}
-                  className="text-left flex-1"
+                  onClick={() => toggleGroupCollapsed(g.id)}
+                  className="flex items-center gap-2 flex-1 min-w-0 text-left"
                 >
-                  <div className="text-xs font-black uppercase tracking-wide leading-snug line-clamp-2">
-                    {effectiveTitle}
-                  </div>
-                  <div className="text-[9px] uppercase tracking-[0.15em] font-bold text-muted mt-1">
-                    {isHidden ? "HIDDEN · " : ""}
-                    {isClone ? "COPY · " : ""}
-                    {pinCount} {pinCount === 1 ? "video" : "videos"}
-                  </div>
+                  <span
+                    className={`font-black text-base leading-none transition-transform ${collapsed ? "" : "rotate-180"}`}
+                  >
+                    ▾
+                  </span>
+                  <span className="text-xs font-black uppercase tracking-widest truncate">
+                    {g.name}
+                  </span>
+                  <span className="text-[9px] uppercase tracking-widest font-bold text-muted">
+                    {slugs.length}
+                  </span>
                 </button>
-                <div className="flex items-center gap-1 mt-auto">
+                <div className="flex items-center gap-1 shrink-0">
                   <button
                     type="button"
-                    onClick={() => setOpenSection(isOpen ? null : slug)}
-                    className="border-2 border-line bg-background px-1.5 py-0.5 rounded-sm nb-press text-[9px] font-black uppercase tracking-widest"
+                    onClick={() => void addScriptToGroup(g.id)}
+                    title="Add a script to this group (copies the last one so you just tweak the CTA)"
+                    className="border-2 border-line bg-background px-2 py-0.5 rounded-sm nb-press text-[9px] font-black uppercase tracking-widest"
                   >
-                    {isOpen ? "Close" : "Edit"}
+                    + Script
                   </button>
                   <button
                     type="button"
-                    onClick={() => toggleFormatHidden(slug)}
-                    aria-label={isHidden ? "Show on public brief" : "Hide from public brief"}
-                    title={isHidden ? "Hidden — click to publish" : "Hide from public brief"}
-                    className={`w-7 h-7 border-2 border-line rounded-sm font-black nb-press flex items-center justify-center ${isHidden ? "bg-paper text-muted" : "bg-background"}`}
+                    onClick={() => renameGroup(g.id, g.name)}
+                    className="border-2 border-line bg-background px-2 py-0.5 rounded-sm nb-press text-[9px] font-black uppercase tracking-widest"
                   >
-                    <EyeIcon off={isHidden} />
+                    Rename
                   </button>
                   <button
                     type="button"
                     onClick={() => {
                       if (
                         window.confirm(
-                          `Delete "${effectiveTitle}" completely? This can't be undone.`
+                          `Delete group "${g.name}"? Its scripts move to Ungrouped (they are NOT deleted).`
                         )
                       )
-                        deleteFormat(slug);
+                        deleteGroup(g.id);
                     }}
-                    aria-label="Delete section"
-                    title="Delete this section completely"
-                    className="ml-auto w-7 h-7 border-2 border-line rounded-sm font-black nb-press flex items-center justify-center bg-background hover:bg-paper"
+                    title="Delete group (keeps the scripts)"
+                    className="w-7 h-7 border-2 border-line bg-background rounded-sm nb-press text-[10px] font-black flex items-center justify-center"
                   >
-                    🗑
+                    ✕
                   </button>
                 </div>
               </div>
-            );
-          })}
-        </div>
+              {!collapsed && (
+                <div className="p-2.5">
+                  {slugs.length === 0 ? (
+                    <p className="text-[10px] text-muted text-center py-3">
+                      Empty — use the group dropdown on any tile to move scripts
+                      here, or hit “+ Script”.
+                    </p>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                      {slugs.map((slug) => renderTile(slug))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </section>
+          );
+        })}
+
+        {/* Ungrouped sections (also catches any orphaned group ids). */}
+        {(() => {
+          const slugs = effectiveOrder.filter((s) => {
+            const gid = cur.sectionGroupOf?.[s] ?? "";
+            return !gid || !sectionGroups.some((g) => g.id === gid);
+          });
+          if (slugs.length === 0) return null;
+          return (
+            <div>
+              {sectionGroups.length > 0 && (
+                <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-2 mt-1">
+                  Ungrouped
+                </div>
+              )}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {slugs.map((slug) => renderTile(slug))}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Full editor for the open section */}
         {openSection &&

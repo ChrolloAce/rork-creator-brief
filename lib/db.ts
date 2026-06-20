@@ -106,6 +106,11 @@ export type CurationData = {
   // base (static) formats can't be removed from code, so they're recorded here
   // and filtered out of both the admin list and the public brief.
   deletedFormats?: string[];
+  // Admin-only organization: group sections (e.g. one script with several CTA
+  // variants) in the editor. Does NOT affect public ordering (formatOrder).
+  sectionGroups?: { id: string; name: string }[];
+  // Maps a format/clone slug → group id. Slugs with no entry are "Ungrouped".
+  sectionGroupOf?: Record<string, string>;
 };
 
 // A single script/task assigned to a calendar day. It either links to one of
