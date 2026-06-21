@@ -80,10 +80,14 @@ function FormatThumb({
 export function CalendarEditor({
   value,
   formats,
+  scriptGroups = [],
   onChange,
 }: {
   value: ContentCalendar | undefined;
   formats: FormatOption[];
+  // Editor "script groups" (same script, different CTA) the calendar can
+  // alternate one-per-day across a date range.
+  scriptGroups?: { id: string; name: string; slugs: string[] }[];
   onChange: (next: ContentCalendar | undefined) => void;
 }) {
   const cal = value ?? EMPTY;
@@ -491,6 +495,7 @@ export function CalendarEditor({
             <AutoFill
               formats={formats}
               groups={cal.groups ?? []}
+              scriptGroups={scriptGroups}
               defaultStart={selected}
               onGenerate={(newDays) => {
                 // Merge generated assignments into existing days.
@@ -550,18 +555,32 @@ function itemToAssignment(it: CalendarGroupItem): CalendarAssignment {
 function AutoFill({
   formats,
   groups,
+  scriptGroups,
   defaultStart,
   onGenerate,
 }: {
   formats: FormatOption[];
   groups: CalendarGroup[];
+  scriptGroups: { id: string; name: string; slugs: string[] }[];
   defaultStart: string;
   onGenerate: (days: CalendarDay[]) => void;
 }) {
   const usableGroups = groups.filter((g) => g.items.length > 0);
-  const [source, setSource] = useState<"group" | "formats">(
-    usableGroups.length > 0 ? "group" : "formats"
+  const usableScriptGroups = scriptGroups.filter((g) => g.slugs.length > 0);
+  const [source, setSource] = useState<"scriptGroup" | "group" | "formats">(
+    usableScriptGroups.length > 0
+      ? "scriptGroup"
+      : usableGroups.length > 0
+        ? "group"
+        : "formats"
   );
+  const [pickedScriptGroup, setPickedScriptGroup] = useState<string>(
+    usableScriptGroups[0]?.id ?? ""
+  );
+  const chosenScriptGroup =
+    usableScriptGroups.find((g) => g.id === pickedScriptGroup) ?? null;
+  const fmtTitle = (slug: string) =>
+    formats.find((f) => f.slug === slug)?.title ?? slug;
   const [start, setStart] = useState(defaultStart);
   const [cadence, setCadence] = useState<Cadence>("daily");
   const [count, setCount] = useState(7);
@@ -607,6 +626,11 @@ function AutoFill({
     if (!startDate || count < 1) return;
     if (source === "group" && chosenGroups.length === 0) return;
     if (source === "formats" && picked.length === 0) return;
+    if (
+      source === "scriptGroup" &&
+      (!chosenScriptGroup || chosenScriptGroup.slugs.length === 0)
+    )
+      return;
     const days: CalendarDay[] = [];
     let cursor = startDate;
     if (cadence === "weekdays" && (cursor.getDay() === 0 || cursor.getDay() === 6)) {
@@ -615,7 +639,18 @@ function AutoFill({
     let last = -1;
     for (let i = 0; i < count; i++) {
       let assignments: CalendarAssignment[];
-      if (source === "group") {
+      if (source === "scriptGroup" && chosenScriptGroup) {
+        // Alternate ONE script from the group per day — rotate in order or
+        // shuffle (no two same in a row). This is the "same script, different
+        // CTA" rotation.
+        const slugs = chosenScriptGroup.slugs;
+        const idx =
+          distribution === "rotate"
+            ? i % slugs.length
+            : randomIndex(slugs.length, last);
+        last = idx;
+        assignments = [{ id: genId(), formatSlug: slugs[idx] }];
+      } else if (source === "group") {
         // Each day gets ONE whole group (all of its videos). Days rotate
         // through the chosen groups, or shuffle (avoiding back-to-back repeats).
         const idx =
@@ -634,30 +669,38 @@ function AutoFill({
   }
 
   const canGenerate =
-    source === "group" ? chosenGroups.length > 0 : picked.length > 0;
+    source === "scriptGroup"
+      ? !!chosenScriptGroup && chosenScriptGroup.slugs.length > 0
+      : source === "group"
+        ? chosenGroups.length > 0
+        : picked.length > 0;
 
   return (
     <div className="space-y-3">
       {/* Source toggle */}
-      <div className="inline-flex border-2 border-line rounded-sm overflow-hidden">
-        <button
-          type="button"
-          onClick={() => setSource("group")}
-          className={`px-2.5 py-1 text-[10px] font-black uppercase tracking-widest ${
-            source === "group" ? "bg-accent text-accent-ink" : "bg-background text-muted"
-          }`}
-        >
-          Alternate groups
-        </button>
-        <button
-          type="button"
-          onClick={() => setSource("formats")}
-          className={`px-2.5 py-1 text-[10px] font-black uppercase tracking-widest border-l-2 border-line ${
-            source === "formats" ? "bg-accent text-accent-ink" : "bg-background text-muted"
-          }`}
-        >
-          Pick formats
-        </button>
+      <div className="inline-flex border-2 border-line rounded-sm overflow-hidden flex-wrap">
+        {[
+          ...(usableScriptGroups.length > 0
+            ? [{ key: "scriptGroup" as const, label: "Alternate script group" }]
+            : []),
+          { key: "group" as const, label: "Alternate groups" },
+          { key: "formats" as const, label: "Pick formats" },
+        ].map((o, i) => (
+          <button
+            key={o.key}
+            type="button"
+            onClick={() => setSource(o.key)}
+            className={`px-2.5 py-1 text-[10px] font-black uppercase tracking-widest ${
+              i > 0 ? "border-l-2 border-line" : ""
+            } ${
+              source === o.key
+                ? "bg-accent text-accent-ink"
+                : "bg-background text-muted"
+            }`}
+          >
+            {o.label}
+          </button>
+        ))}
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
@@ -703,7 +746,64 @@ function AutoFill({
         </label>
       </div>
 
-      {source === "group" ? (
+      {source === "scriptGroup" ? (
+        <div className="space-y-2">
+          {/* Distribution */}
+          <div className="inline-flex border-2 border-line rounded-sm overflow-hidden">
+            {(["shuffle", "rotate"] as const).map((d) => (
+              <button
+                key={d}
+                type="button"
+                onClick={() => setDistribution(d)}
+                className={`px-2.5 py-1 text-[10px] font-black uppercase tracking-widest ${
+                  d === "rotate" ? "border-l-2 border-line" : ""
+                } ${
+                  distribution === d
+                    ? "bg-accent text-accent-ink"
+                    : "bg-background text-muted"
+                }`}
+              >
+                {d === "shuffle" ? "🎲 Shuffle" : "↻ Rotate"}
+              </button>
+            ))}
+          </div>
+          <label className="block">
+            <span className="text-[9px] uppercase tracking-widest font-bold text-muted">
+              Script group to alternate
+            </span>
+            <select
+              value={pickedScriptGroup}
+              onChange={(e) => setPickedScriptGroup(e.target.value)}
+              className="mt-1 w-full border-2 border-line rounded-sm px-2 py-1 text-sm font-bold focus:outline-none focus:border-accent bg-background"
+            >
+              {usableScriptGroups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name} · {g.slugs.length}
+                </option>
+              ))}
+            </select>
+          </label>
+          {chosenScriptGroup && (
+            <div className="flex gap-1.5 flex-wrap">
+              {chosenScriptGroup.slugs.map((s) => (
+                <span
+                  key={s}
+                  className="border-2 border-line rounded-md px-2 py-0.5 text-[10px] font-bold bg-background"
+                >
+                  {fmtTitle(s)}
+                </span>
+              ))}
+            </div>
+          )}
+          <p className="text-[10px] text-muted">
+            One script per day from{" "}
+            <span className="font-bold">{chosenScriptGroup?.name}</span>.{" "}
+            {distribution === "shuffle"
+              ? "Days pick a random one (no two same in a row)."
+              : "Days rotate through them in order."}
+          </p>
+        </div>
+      ) : source === "group" ? (
         usableGroups.length === 0 ? (
           <p className="text-xs text-muted">
             No groups with videos yet — add one in the{" "}

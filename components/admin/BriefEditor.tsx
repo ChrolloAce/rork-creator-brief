@@ -515,6 +515,18 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
       return [{ slug, title, thumbnail }];
     });
 
+  // Editor script groups → { id, name, slugs } for the calendar's alternation
+  // auto-fill. Only visible sections; only non-empty groups.
+  const calendarScriptGroups = (cur.sectionGroups ?? [])
+    .map((g) => ({
+      id: g.id,
+      name: g.name,
+      slugs: effectiveOrder.filter(
+        (s) => (cur.sectionGroupOf?.[s] ?? "") === g.id && !hiddenSet.has(s)
+      ),
+    }))
+    .filter((g) => g.slugs.length > 0);
+
   // All formats in this brief (incl. hidden) as { slug, title } — used by the
   // per-format "Copy from another format" picker.
   const allFormatsList = effectiveOrder.flatMap((slug) => {
@@ -1048,6 +1060,7 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
           <CalendarEditor
             value={cur.contentCalendar}
             formats={calendarFormats}
+            scriptGroups={calendarScriptGroups}
             onChange={setAndSaveCalendar}
           />
         </CollapsibleCard>
