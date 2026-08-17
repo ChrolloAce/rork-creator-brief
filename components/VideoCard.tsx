@@ -1,6 +1,7 @@
 "use client";
 
 import type { Platform, VideoExample } from "@/lib/types";
+import { thumbSrc } from "@/lib/thumb";
 
 const platformLabel: Record<Platform, string> = {
   instagram: "IG",
@@ -34,7 +35,7 @@ export function VideoCard({
       <div className="relative aspect-[9/16] bg-paper overflow-hidden">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={video.thumbnail}
+          src={thumbSrc(video.thumbnail, video.url)}
           alt={video.caption ?? `${video.creator} on ${video.platform}`}
           className="w-full h-full object-cover"
           loading="lazy"

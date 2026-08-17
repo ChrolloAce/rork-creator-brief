@@ -3,6 +3,8 @@ import { notFound, redirect } from "next/navigation";
 import { getBrief } from "@/lib/db";
 import { OnboardingFlow } from "@/components/Onboarding";
 import { currentCreator, creatorHasAccess } from "@/lib/brief-gate";
+import { getLang } from "@/lib/lang";
+import { localizeBriefContent } from "@/lib/translate";
 
 export const dynamic = "force-dynamic";
 
@@ -36,13 +38,16 @@ export default async function OnboardingPage({
   // (which lands on the content calendar).
   if (await creatorHasAccess(brief)) redirect(`/b/${brief.slug}`);
   const user = await currentCreator();
+  const lang = await getLang();
+  const loc = await localizeBriefContent(lang, brief.slug, { onboarding: ob });
   return (
     <OnboardingFlow
-      onboarding={ob}
+      onboarding={loc.onboarding ?? ob}
       brief={{ slug: brief.slug, name: brief.name, logoUrl: brief.logoUrl }}
       gated={!!(brief.accessEnabled && brief.accessCode)}
       requireLogin={brief.requireLogin}
       account={user ? { name: user.name, email: user.email } : null}
+      lang={lang}
     />
   );
 }

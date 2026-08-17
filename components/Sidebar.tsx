@@ -3,12 +3,16 @@
 import Link from "next/link";
 import type { NavSection } from "@/lib/nav";
 import type { BriefOverview } from "@/lib/db";
+import { t, type Lang } from "@/lib/i18n";
+import { LanguageToggle } from "./LanguageToggle";
+import { thumbSrc } from "@/lib/thumb";
 
 export function Sidebar({
   sections,
   activeId,
   brief,
   account = null,
+  lang = "en",
   onNavigate,
   onClose,
 }: {
@@ -21,6 +25,7 @@ export function Sidebar({
     overview?: BriefOverview | null;
   };
   account?: { name: string | null; email: string } | null;
+  lang?: Lang;
   onNavigate?: () => void;
   onClose?: () => void;
 }) {
@@ -62,14 +67,14 @@ export function Sidebar({
             {brief.name.toUpperCase()} / BRIEF
           </div>
           <div className="text-[10px] uppercase tracking-[0.2em] text-muted font-bold">
-            Creator guide
+            {t(lang, "creatorGuide")}
           </div>
         </div>
         {onClose && (
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close menu"
+            aria-label={t(lang, "closeMenu")}
             className="lg:hidden w-9 h-9 border-2 border-line bg-background rounded-md flex items-center justify-center font-black nb-press"
           >
             ✕
@@ -102,7 +107,7 @@ export function Sidebar({
                         <span className="w-9 h-9 border-2 border-line bg-paper overflow-hidden rounded-sm shrink-0">
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
-                            src={it.thumbnail}
+                            src={thumbSrc(it.thumbnail)}
                             alt=""
                             className="w-full h-full object-cover"
                             loading="lazy"
@@ -130,6 +135,13 @@ export function Sidebar({
             </ul>
           </div>
         ))}
+      </div>
+
+      <div className="p-3 border-t-2 border-line flex items-center justify-between gap-2">
+        <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+          {t(lang, "language")}
+        </span>
+        <LanguageToggle lang={lang} />
       </div>
 
       {ctaLabel && ctaUrl && (
@@ -161,10 +173,10 @@ export function Sidebar({
           <button
             type="button"
             onClick={logout}
-            title="Log out"
+            title={t(lang, "logOut")}
             className="text-[10px] font-bold uppercase tracking-widest text-muted hover:text-accent shrink-0"
           >
-            Log out
+            {t(lang, "logOut")}
           </button>
         </div>
       )}

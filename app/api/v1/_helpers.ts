@@ -80,6 +80,13 @@ export function publicizeFormat(req: Request, f: Format) {
     hiddenSections: f.hiddenSections ?? [],
     sectionOrder: f.sectionOrder ?? null,
     assets: (f.assets ?? []).map((a) => publicizeAsset(req, a)),
+    songs: (f.songs ?? []).map((s) => ({
+      url: s.url,
+      title: s.title ?? null,
+      artist: s.artist ?? null,
+      note: s.note ?? null,
+      hidden: !!s.hidden,
+    })),
   };
 }
 

@@ -13,6 +13,10 @@ type Body = {
   hooks?: string[];
   currentScript?: string;
   userPrompt?: string;
+  // A finished script in the shape the output should match. The single
+  // strongest lever on quality — structure alone tells the model what to say
+  // but not how it should sound.
+  example?: string;
 };
 
 const SYSTEM_PROMPT = `You are a short-form video script writer for TikTok, Instagram Reels, and YouTube Shorts. You write scripts for creators promoting products to founder/builder audiences.
@@ -23,6 +27,7 @@ Output format — MANDATORY:
 - No markdown, no labels, no "Hook:" / "Scene:" prefixes, no stage directions in brackets — just timestamp + the line the creator says or the on-screen text.
 - Total length 15–45 seconds unless the user asks otherwise.
 - Punchy, conversational, no corporate phrasing. Sound like a real person, not an ad.
+- Write in the same language as the format's description/current script (e.g. if the brief content is Spanish, the script must be Spanish) unless the user asks for a specific language.
 
 Output ONLY the script. No preamble, no commentary, no "Here's your script:".`;
 
@@ -75,6 +80,13 @@ ${bulletList(body.hooks)}`;
     ? `\n## Current script (edit this)\n${body.currentScript.trim()}\n`
     : "";
 
+  const exampleBlock = body.example?.trim()
+    ? `\n## Worked example
+A finished script written to the structure above. Match its shape: same beats, same rhythm, same line lengths, same level of specificity. Match the shape, never the content — do not reuse its lines, its angle, or its details.
+
+${body.example.trim()}\n`
+    : "";
+
   const client = new Anthropic({ apiKey });
 
   const stream = client.messages.stream({
@@ -100,7 +112,7 @@ ${bulletList(body.hooks)}`;
           },
           {
             type: "text",
-            text: `${currentScriptBlock}\n## Request\n${userPrompt}\n\nWrite the script now. Timestamps only, one beat per line, no preamble.`,
+            text: `${exampleBlock}${currentScriptBlock}\n## Request\n${userPrompt}\n\nWrite the script now. Timestamps only, one beat per line, no preamble.`,
           },
         ],
       },

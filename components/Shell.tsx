@@ -7,6 +7,7 @@ import type { Format, HookCategory } from "@/lib/types";
 import type { ContentCalendar } from "@/lib/db";
 import Link from "next/link";
 import { buildNavSections, calendarId } from "@/lib/nav";
+import { t, type Lang } from "@/lib/i18n";
 import { Sidebar } from "./Sidebar";
 import { FormatView, OverviewView } from "./Views";
 import { ContentCalendarView } from "./ContentCalendar";
@@ -24,6 +25,7 @@ export function Shell({
   onboardingEnabled = false,
   onboardingComplete = false,
   account = null,
+  lang = "en",
 }: {
   formats: Format[];
   hookCategories: HookCategory[];
@@ -42,6 +44,7 @@ export function Shell({
   onboardingEnabled?: boolean;
   onboardingComplete?: boolean;
   account?: { name: string | null; email: string } | null;
+  lang?: Lang;
 }) {
   const calendarEnabled =
     !!contentCalendar?.enabled && (contentCalendar.days?.length ?? 0) > 0;
@@ -53,6 +56,7 @@ export function Shell({
         includeOnboarding: onboardingEnabled,
         includeFormats: !hideFormatsList,
         onboardingComplete,
+        lang,
       }),
     [
       formats,
@@ -62,6 +66,7 @@ export function Shell({
       calendarEnabled,
       onboardingEnabled,
       onboardingComplete,
+      lang,
     ]
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -97,9 +102,9 @@ export function Shell({
       const it = s.items.find((i) => i.id === activeId);
       if (it) return it.title;
     }
-    if (activeId === "calendar") return "Content Calendar";
-    return "Overview";
-  }, [sections, activeId]);
+    if (activeId === "calendar") return t(lang, "contentCalendar");
+    return t(lang, "overview");
+  }, [sections, activeId, lang]);
 
   const view = renderView(
     activeId,
@@ -108,7 +113,8 @@ export function Shell({
     brief,
     useAllHooks,
     publicStats,
-    contentCalendar
+    contentCalendar,
+    lang
   );
 
   return (
@@ -117,11 +123,11 @@ export function Shell({
         <button
           type="button"
           onClick={() => setDrawerOpen(true)}
-          aria-label="Open menu"
+          aria-label={t(lang, "openMenu")}
           aria-expanded={drawerOpen}
           className="w-10 h-10 border-2 border-line bg-background rounded-md flex items-center justify-center nb-press"
         >
-          <span className="sr-only">Open menu</span>
+          <span className="sr-only">{t(lang, "openMenu")}</span>
           <svg width="18" height="14" viewBox="0 0 18 14" fill="none" aria-hidden>
             <rect y="0" width="18" height="2.5" fill="currentColor" />
             <rect y="5.75" width="18" height="2.5" fill="currentColor" />
@@ -148,7 +154,7 @@ export function Shell({
           </div>
           <div className="min-w-0">
             <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted leading-none">
-              {brief.name} / Brief
+              {brief.name} / {t(lang, "briefWord")}
             </div>
             <div className="font-black text-sm truncate leading-tight mt-0.5">
               {currentTitle}
@@ -160,7 +166,7 @@ export function Shell({
       {drawerOpen && (
         <button
           type="button"
-          aria-label="Close menu backdrop"
+          aria-label={t(lang, "closeMenu")}
           onClick={() => setDrawerOpen(false)}
           className="lg:hidden fixed inset-0 z-40 bg-ink/40"
         />
@@ -180,6 +186,7 @@ export function Shell({
           activeId={activeId}
           brief={brief}
           account={account}
+          lang={lang}
           onClose={() => setDrawerOpen(false)}
         />
       </aside>
@@ -198,7 +205,7 @@ export function Shell({
             <span className="font-bold uppercase tracking-widest">
               {brief.name}
             </span>
-            <span>Built for the team</span>
+            <span>{t(lang, "builtForTeam")}</span>
           </div>
         </footer>
       </main>
@@ -208,7 +215,7 @@ export function Shell({
           href={`/b/${brief.slug}/calendar`}
           className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 inline-flex items-center gap-2 border-2 border-line bg-accent text-accent-ink px-4 py-2.5 rounded-full nb-shadow font-black text-xs sm:text-sm uppercase tracking-widest"
         >
-          <span aria-hidden>📅</span> Go to Calendar
+          <span aria-hidden>📅</span> {t(lang, "goToCalendar")}
         </Link>
       )}
     </div>
@@ -226,13 +233,15 @@ function renderView(
   },
   useAllHooks: boolean,
   publicStats?: { enabled: boolean; visible?: string[] },
-  contentCalendar?: ContentCalendar | null
+  contentCalendar?: ContentCalendar | null,
+  lang: Lang = "en"
 ) {
   if (activeId === "overview")
     return (
       <OverviewView
         briefName={brief.name}
         overview={brief.overview ?? null}
+        lang={lang}
       />
     );
   if (activeId === "calendar" && contentCalendar)
@@ -241,6 +250,7 @@ function renderView(
         calendar={contentCalendar}
         formats={formats}
         briefSlug={brief.slug}
+        lang={lang}
       />
     );
   if (activeId.startsWith("format:")) {
@@ -253,10 +263,15 @@ function renderView(
           hookCategories={hookCategories}
           useAllHooks={useAllHooks}
           publicStats={publicStats}
+          lang={lang}
         />
       );
   }
   return (
-    <OverviewView briefName={brief.name} overview={brief.overview ?? null} />
+    <OverviewView
+      briefName={brief.name}
+      overview={brief.overview ?? null}
+      lang={lang}
+    />
   );
 }

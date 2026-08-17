@@ -1,4 +1,5 @@
 import type { Format } from "./types";
+import { t, type Lang } from "./i18n";
 
 export type NavSection = {
   label: string;
@@ -25,9 +26,11 @@ export function buildNavSections(
     includeOnboarding?: boolean;
     includeFormats?: boolean;
     onboardingComplete?: boolean;
+    lang?: Lang;
   }
 ): NavSection[] {
   const base = `/b/${briefSlug}`;
+  const lang = options?.lang ?? "en";
   const includeOverview = options?.includeOverview !== false;
   const includeCalendar = options?.includeCalendar === true;
   const includeOnboarding = options?.includeOnboarding === true;
@@ -37,13 +40,13 @@ export function buildNavSections(
   // The content calendar is the main thing — list it first.
   if (includeCalendar) {
     sections.push({
-      label: "Plan",
+      label: t(lang, "plan"),
       items: [
         {
           id: calendarId,
           href: `${base}/calendar`,
-          title: "Content Calendar",
-          meta: "What to film each day",
+          title: t(lang, "contentCalendar"),
+          meta: t(lang, "calendarMeta"),
         },
       ],
     });
@@ -53,24 +56,26 @@ export function buildNavSections(
     startItems.push({
       id: onboardingId,
       href: `${base}/onboarding`,
-      title: "Onboarding",
-      meta: onboardingComplete ? "Complete ✓" : "Start here",
+      title: t(lang, "onboarding"),
+      meta: onboardingComplete
+        ? t(lang, "onboardingComplete")
+        : t(lang, "startHere"),
     });
   }
   if (includeOverview) {
     startItems.push({
       id: overviewId,
       href: base,
-      title: "Overview",
-      meta: "The brief",
+      title: t(lang, "overview"),
+      meta: t(lang, "overviewMeta"),
     });
   }
   if (startItems.length > 0) {
-    sections.push({ label: "Start here", items: startItems });
+    sections.push({ label: t(lang, "startHere"), items: startItems });
   }
   if (includeFormats) {
     sections.push({
-      label: "Formats",
+      label: t(lang, "formats"),
       items: formats.map((f) => ({
         id: formatId(f.slug),
         href: `${base}/formats/${f.slug}`,

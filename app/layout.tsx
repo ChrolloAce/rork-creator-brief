@@ -28,7 +28,13 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full`}
     >
-      <body className="min-h-full flex flex-col bg-background text-ink">
+      {/* Browser extensions (ColorZilla adds cz-shortcut-listen, Grammarly adds
+          data-gr-* ) inject attributes onto <body> before React hydrates, which
+          React reports as a hydration mismatch even though nothing in our tree
+          differs. Suppressing here covers the body element's own attributes
+          only — children still hydrate normally and real mismatches inside the
+          app are still reported. */}
+      <body className="min-h-full flex flex-col bg-background text-ink" suppressHydrationWarning>
         {children}
       </body>
     </html>

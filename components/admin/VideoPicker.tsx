@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { VideoExample } from "@/lib/types";
 import { allVideos } from "@/lib/all-videos";
+import { thumbSrc } from "@/lib/thumb";
 
 function formatViews(n?: number) {
   if (!n) return "";
@@ -176,7 +177,7 @@ export function VideoPicker({
                 <div className="relative aspect-[9/16] bg-paper overflow-hidden">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={v.thumbnail}
+                    src={thumbSrc(v.thumbnail, v.url)}
                     alt=""
                     className="w-full h-full object-cover"
                     loading="lazy"

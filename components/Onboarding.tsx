@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import type { Onboarding, OnboardingBlock } from "@/lib/db";
 import { RichText } from "@/components/RichText";
 import { VideoCarousel } from "@/components/VideoCarousel";
+import { LanguageToggle } from "@/components/LanguageToggle";
+import { t, type Lang } from "@/lib/i18n";
 
 function Stars({ n }: { n: number }) {
   return (
@@ -15,7 +17,7 @@ function Stars({ n }: { n: number }) {
   );
 }
 
-function VideoEmbed({ url }: { url: string }) {
+function VideoEmbed({ url, lang = "en" }: { url: string; lang?: Lang }) {
   const yt = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]+)/);
   if (yt) {
     return (
@@ -44,7 +46,7 @@ function VideoEmbed({ url }: { url: string }) {
       rel="noreferrer"
       className="inline-flex border-2 border-line bg-accent text-accent-ink px-3 py-2 rounded-md nb-press text-sm font-black uppercase tracking-widest"
     >
-      Watch video ↗
+      {t(lang, "watchVideo")}
     </a>
   );
 }
@@ -53,10 +55,12 @@ function Block({
   block,
   answer,
   onAnswer,
+  lang = "en",
 }: {
   block: OnboardingBlock;
   answer: unknown;
   onAnswer: (v: unknown) => void;
+  lang?: Lang;
 }) {
   if (block.kind === "text") {
     return <RichText html={block.text} />;
@@ -83,7 +87,7 @@ function Block({
     if (!block.url) return null;
     return (
       <div className="space-y-2">
-        <VideoEmbed url={block.url} />
+        <VideoEmbed url={block.url} lang={lang} />
         {block.caption && (
           <p className="text-sm text-muted text-center">{block.caption}</p>
         )}
@@ -169,7 +173,7 @@ function Block({
   return (
     <label className="block space-y-1.5">
       <span className="text-sm font-black flex items-center gap-1">
-        {block.label || "Question"}
+        {block.label || t(lang, "question")}
         {block.required && <span className="text-accent">*</span>}
       </span>
       {block.field === "long" ? (
@@ -186,7 +190,7 @@ function Block({
           onChange={(e) => onAnswer(e.target.value)}
           className="w-full border-2 border-line rounded-md px-3 py-2 text-base font-bold bg-background focus:outline-none focus:border-accent"
         >
-          <option value="">Choose…</option>
+          <option value="">{t(lang, "choose")}</option>
           {(block.options ?? [])
             .filter((o) => o.trim())
             .map((o) => (
@@ -203,7 +207,9 @@ function Block({
             onChange={(e) => onAnswer(e.target.checked)}
             className="w-5 h-5"
           />
-          <span className="text-sm text-ink-soft">{block.placeholder || "Yes"}</span>
+          <span className="text-sm text-ink-soft">
+            {block.placeholder || t(lang, "yes")}
+          </span>
         </span>
       ) : (
         <input
@@ -224,12 +230,14 @@ export function OnboardingFlow({
   gated = false,
   requireLogin = true,
   account = null,
+  lang = "en",
 }: {
   onboarding: Onboarding;
   brief: { slug: string; name: string; logoUrl: string | null };
   gated?: boolean;
   requireLogin?: boolean;
   account?: { name: string | null; email: string } | null;
+  lang?: Lang;
 }) {
   const router = useRouter();
   const steps = onboarding.steps;
@@ -359,20 +367,20 @@ export function OnboardingFlow({
   async function unlock() {
     if (gBusy) return;
     if (!gCode.trim()) {
-      setGErr("Enter your access code.");
+      setGErr(t(lang, "errEnterCode"));
       return;
     }
     if (!requireLogin && !gName.trim()) {
-      setGErr("Enter your name.");
+      setGErr(t(lang, "errEnterName"));
       return;
     }
     if (needAuth) {
       if (!gEmail.trim() || !gPassword) {
-        setGErr("Enter your email and password.");
+        setGErr(t(lang, "errEnterEmailPw"));
         return;
       }
       if (authMode === "signup" && !gName.trim()) {
-        setGErr("Enter your name.");
+        setGErr(t(lang, "errEnterName"));
         return;
       }
     }
@@ -393,7 +401,7 @@ export function OnboardingFlow({
         });
         const aj = await authRes.json().catch(() => ({}));
         if (!authRes.ok || !aj.ok) {
-          setGErr(aj.error ?? "Could not sign you in.");
+          setGErr(aj.error ?? t(lang, "errSignIn"));
           setGBusy(false);
           return;
         }
@@ -415,8 +423,8 @@ export function OnboardingFlow({
       if (!res.ok || !j.ok) {
         setGErr(
           j.error === "wrong code"
-            ? "That code isn't right — check with us and try again."
-            : (j.error ?? "Something went wrong.")
+            ? t(lang, "errWrongCode")
+            : (j.error ?? t(lang, "errGeneric"))
         );
         setGBusy(false);
         return;
@@ -442,10 +450,13 @@ export function OnboardingFlow({
             )}
           </div>
           <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
-            {brief.name} · Onboarding
+            {brief.name} · {t(lang, "onboarding")}
           </div>
-          <div className="ml-auto text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
-            {i + 1} / {total}
+          <div className="ml-auto flex items-center gap-3">
+            <LanguageToggle lang={lang} />
+            <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+              {i + 1} / {total}
+            </div>
           </div>
         </div>
         {/* Progress bar */}
@@ -461,11 +472,10 @@ export function OnboardingFlow({
         {onGate ? (
           <div className="max-w-md mx-auto px-4 sm:px-6 py-8 sm:py-12 space-y-5">
             <h1 className="text-3xl sm:text-4xl font-black tracking-tight leading-tight">
-              {onboarding.gate?.heading?.trim() || "One last step to begin"}
+              {onboarding.gate?.heading?.trim() || t(lang, "gateHeading")}
             </h1>
             <p className="text-base sm:text-lg text-ink leading-relaxed whitespace-pre-line">
-              {onboarding.gate?.body?.trim() ||
-                "Message us to officially begin — once you reach out we'll send you your access code over WhatsApp. Enter it below to unlock the brief."}
+              {onboarding.gate?.body?.trim() || t(lang, "gateBody")}
             </p>
             {onboarding.gate?.ctaUrl?.trim() &&
               onboarding.gate?.ctaLabel?.trim() && (
@@ -483,20 +493,20 @@ export function OnboardingFlow({
               {!requireLogin ? (
                 <label className="block">
                   <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
-                    Your name
+                    {t(lang, "yourName")}
                   </span>
                   <input
                     type="text"
                     value={gName}
                     onChange={(e) => setGName(e.target.value)}
                     onBlur={recordOnboarded}
-                    placeholder="First + last"
+                    placeholder={t(lang, "namePlaceholder")}
                     className="mt-1 w-full border-2 border-line rounded-md px-3 py-2 text-base font-bold focus:outline-none focus:border-accent bg-background"
                   />
                 </label>
               ) : account ? (
                 <div className="text-sm font-bold">
-                  Signed in as{" "}
+                  {t(lang, "signedInAs")}{" "}
                   <span className="text-accent">{account.email}</span>
                 </div>
               ) : (
@@ -511,7 +521,7 @@ export function OnboardingFlow({
                           : "bg-background text-muted"
                       }`}
                     >
-                      Create account
+                      {t(lang, "createAccount")}
                     </button>
                     <button
                       type="button"
@@ -522,41 +532,41 @@ export function OnboardingFlow({
                           : "bg-background text-muted"
                       }`}
                     >
-                      Log in
+                      {t(lang, "logIn")}
                     </button>
                   </div>
 
                   {authMode === "signup" && (
                     <label className="block">
                       <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
-                        Your name
+                        {t(lang, "yourName")}
                       </span>
                       <input
                         type="text"
                         value={gName}
                         onChange={(e) => setGName(e.target.value)}
                         onBlur={recordOnboarded}
-                        placeholder="First + last"
+                        placeholder={t(lang, "namePlaceholder")}
                         className="mt-1 w-full border-2 border-line rounded-md px-3 py-2 text-base font-bold focus:outline-none focus:border-accent bg-background"
                       />
                     </label>
                   )}
                   <label className="block">
                     <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
-                      Email
+                      {t(lang, "email")}
                     </span>
                     <input
                       type="email"
                       autoComplete="email"
                       value={gEmail}
                       onChange={(e) => setGEmail(e.target.value)}
-                      placeholder="you@email.com"
+                      placeholder={t(lang, "emailPlaceholder")}
                       className="mt-1 w-full border-2 border-line rounded-md px-3 py-2 text-base focus:outline-none focus:border-accent bg-background"
                     />
                   </label>
                   <label className="block">
                     <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
-                      Password
+                      {t(lang, "password")}
                     </span>
                     <input
                       type="password"
@@ -566,7 +576,9 @@ export function OnboardingFlow({
                       value={gPassword}
                       onChange={(e) => setGPassword(e.target.value)}
                       placeholder={
-                        authMode === "signup" ? "At least 6 characters" : "Your password"
+                        authMode === "signup"
+                          ? t(lang, "passwordNewPlaceholder")
+                          : t(lang, "passwordPlaceholder")
                       }
                       className="mt-1 w-full border-2 border-line rounded-md px-3 py-2 text-base focus:outline-none focus:border-accent bg-background"
                     />
@@ -575,7 +587,7 @@ export function OnboardingFlow({
               )}
               <label className="block">
                 <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
-                  Access code
+                  {t(lang, "accessCode")}
                 </span>
                 <input
                   type="text"
@@ -587,7 +599,7 @@ export function OnboardingFlow({
                       void unlock();
                     }
                   }}
-                  placeholder="Code we send you"
+                  placeholder={t(lang, "codePlaceholder")}
                   className="mt-1 w-full border-2 border-line rounded-md px-3 py-2 text-base font-mono focus:outline-none focus:border-accent bg-background"
                 />
               </label>
@@ -614,6 +626,7 @@ export function OnboardingFlow({
                 block={b}
                 answer={answers[b.id]}
                 onAnswer={(v) => setAnswers((a) => ({ ...a, [b.id]: v }))}
+                lang={lang}
               />
             ))}
           </div>
@@ -628,7 +641,7 @@ export function OnboardingFlow({
             disabled={i === 0}
             className="border-2 border-line bg-background px-4 py-2.5 rounded-md nb-press font-black uppercase tracking-widest text-xs disabled:opacity-30"
           >
-            ← Back
+            {t(lang, "back")}
           </button>
           <button
             type="button"
@@ -638,13 +651,13 @@ export function OnboardingFlow({
           >
             {onGate
               ? gBusy
-                ? "Unlocking…"
-                : "Unlock the brief →"
+                ? t(lang, "unlocking")
+                : t(lang, "unlockBrief")
               : isLastStep
                 ? gated
-                  ? "Continue →"
-                  : "Enter the brief →"
-                : "Next →"}
+                  ? t(lang, "continueArrow")
+                  : t(lang, "enterBrief")
+                : t(lang, "next")}
           </button>
         </div>
       </footer>

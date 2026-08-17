@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
+import { vtFetch, vtKey } from "@/lib/viewtrack";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  const key = process.env.VIEWTRACK_API_KEY;
+  const key = vtKey();
   if (!key) {
     return NextResponse.json(
       { ok: false, error: "VIEWTRACK_API_KEY not set" },
@@ -11,10 +12,7 @@ export async function GET() {
     );
   }
   try {
-    const res = await fetch("https://viewtrack.app/api/v1/projects", {
-      headers: { "x-api-key": key },
-      cache: "no-store",
-    });
+    const res = await vtFetch("/projects", key);
     if (!res.ok) {
       return NextResponse.json(
         { ok: false, error: `ViewTrack ${res.status}` },

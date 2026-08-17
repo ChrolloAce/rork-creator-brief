@@ -6,12 +6,19 @@ import type {
   FormatAsset,
   FormatListItem,
   FormatSectionKey,
+  FormatSong,
   Hook,
   HookCategory,
   ListItem,
 } from "@/lib/types";
 import { DEFAULT_SECTION_ORDER } from "@/lib/types";
+import {
+  detectSongPlatform,
+  songTitleFromUrl,
+  SONG_PLATFORM_LABELS,
+} from "@/lib/songs";
 import { VERSE_BACKGROUNDS, randomBackgroundKey } from "@/lib/verse-styles";
+import { t, type Lang, type UIKey } from "@/lib/i18n";
 
 // Resolve the effective section order: user's custom order with any
 // missing keys appended in default order, invalid keys dropped.
@@ -51,6 +58,10 @@ function visibleItems(items: FormatListItem[]): ListItem[] {
 
 function isHidden(format: Format, key: FormatSectionKey): boolean {
   return format.hiddenSections?.includes(key) ?? false;
+}
+
+function visibleSongs(songs: FormatSong[] | undefined): FormatSong[] {
+  return (songs ?? []).filter((s) => !s.hidden && s.url?.trim());
 }
 
 function ItemRow({
@@ -143,13 +154,13 @@ function parseScriptLines(text: string): ScriptLine[] {
   return parts.length ? parts : [{ body: trimmed }];
 }
 
-function ScriptBlock({ text }: { text: string }) {
+function ScriptBlock({ text, lang = "en" }: { text: string; lang?: Lang }) {
   const lines = parseScriptLines(text);
   if (lines.length === 0) return null;
   return (
     <div className="border-2 border-line bg-paper rounded-md nb-shadow-sm p-4 sm:p-5">
       <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-3">
-        Script
+        {t(lang, "script")}
       </div>
       <ol className="space-y-2">
         {lines.map((l, i) => (
@@ -172,7 +183,7 @@ function ScriptBlock({ text }: { text: string }) {
 // Renders a format description. If the text contains a script marker like
 // "USE THIS SCRIPT:" or "SCRIPT:", the prose before the marker renders as a
 // paragraph and the rest renders as a timestamped script block.
-function FormatDescription({ text }: { text: string }) {
+function FormatDescription({ text, lang = "en" }: { text: string; lang?: Lang }) {
   const match = text.match(
     /^([\s\S]*?)\b(use this script:?|script:)\s*([\s\S]*)$/i
   );
@@ -183,12 +194,20 @@ function FormatDescription({ text }: { text: string }) {
   return (
     <div className="space-y-4 max-w-3xl">
       {prose && <p className="text-ink leading-relaxed">{prose}</p>}
-      <ScriptBlock text={match[3]} />
+      <ScriptBlock text={match[3]} lang={lang} />
     </div>
   );
 }
 
-function HookRow({ hook, index }: { hook: Hook; index: number }) {
+function HookRow({
+  hook,
+  index,
+  lang = "en",
+}: {
+  hook: Hook;
+  index: number;
+  lang?: Lang;
+}) {
   const [copied, setCopied] = useState(false);
   const onCopy = async () => {
     try {
@@ -205,8 +224,8 @@ function HookRow({ hook, index }: { hook: Hook; index: number }) {
         type="button"
         onClick={onCopy}
         className="group w-full text-left flex items-start gap-3 border-2 border-line bg-background px-3 py-2.5 rounded-md nb-press"
-        title="Click to copy"
-        aria-label={`Copy hook: ${hook.text}`}
+        title={t(lang, "clickToCopy")}
+        aria-label={`${t(lang, "copyHook")}: ${hook.text}`}
       >
         <span className="font-mono text-[11px] font-bold text-muted pt-1 min-w-[1.75rem]">
           {String(index + 1).padStart(2, "0")}
@@ -221,7 +240,7 @@ function HookRow({ hook, index }: { hook: Hook; index: number }) {
               : "bg-background text-ink opacity-0 group-hover:opacity-100 transition-opacity"
           }`}
         >
-          {copied ? "Copied" : "Copy"}
+          {copied ? t(lang, "copied") : t(lang, "copy")}
         </span>
       </button>
       {hook.note && (
@@ -279,9 +298,11 @@ function renderHeroHeadline(line?: string, accent?: string) {
 export function OverviewView({
   briefName,
   overview,
+  lang = "en",
 }: {
   briefName: string;
   overview: BriefOverview | null;
+  lang?: Lang;
 }) {
   const o: BriefOverview = overview ?? {};
   const valueProps = o.valueProps ?? [];
@@ -290,7 +311,7 @@ export function OverviewView({
   return (
     <div className="space-y-10">
       <header className="space-y-5">
-        <SectionLabel>{briefName} Creator Brief</SectionLabel>
+        <SectionLabel>{briefName} {t(lang, "creatorBrief")}</SectionLabel>
         {o.heroHeadline && (
           <h1 className="text-4xl sm:text-5xl font-black tracking-tight leading-[1.05]">
             {renderHeroHeadline(o.heroHeadline, o.heroAccentWord)}
@@ -309,14 +330,14 @@ export function OverviewView({
           <section className="border-2 border-line bg-background rounded-md nb-shadow p-5 sm:p-6 space-y-5">
             <div className="flex items-baseline justify-between gap-2 flex-wrap">
               <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
-                Account setup
+                {t(lang, "accountSetup")}
               </div>
               {(o.accountSetup.platforms ?? []).length > 0 && (
                 <Pill>
                   {(o.accountSetup.platforms ?? []).length}{" "}
                   {(o.accountSetup.platforms ?? []).length === 1
-                    ? "platform"
-                    : "platforms"}
+                    ? t(lang, "platformWord")
+                    : t(lang, "platformsWord")}
                 </Pill>
               )}
             </div>
@@ -378,7 +399,7 @@ export function OverviewView({
               {valueProps.length > 0 && (
                 <>
                   <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mt-6 mb-3">
-                    Core value props
+                    {t(lang, "coreValueProps")}
                   </div>
                   <ul className="space-y-2">
                     {valueProps.map((v) => (
@@ -400,7 +421,7 @@ export function OverviewView({
               {audience.length > 0 && (
                 <>
                   <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-3">
-                    Who you&rsquo;re talking to
+                    {t(lang, "audienceHeading")}
                   </div>
                   <ul className="space-y-2">
                     {audience.map((a) => (
@@ -419,7 +440,7 @@ export function OverviewView({
                   className={`${audience.length > 0 ? "mt-6" : ""} border-2 border-line bg-paper rounded-md p-4`}
                 >
                   <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-2">
-                    Brand tagline
+                    {t(lang, "brandTagline")}
                   </div>
                   <p className="text-xl font-black">&ldquo;{o.tagline}&rdquo;</p>
                   {o.taglineSub && (
@@ -437,7 +458,7 @@ export function OverviewView({
       {o.howToUse && (
         <section className="border-2 border-line bg-accent text-accent-ink rounded-md nb-shadow p-5 sm:p-6">
           <div className="text-[10px] uppercase tracking-[0.2em] font-bold mb-2">
-            How to use this brief
+            {t(lang, "howToUseBrief")}
           </div>
           <p className="leading-relaxed whitespace-pre-line">{o.howToUse}</p>
         </section>
@@ -451,11 +472,13 @@ export function FormatView({
   hookCategories,
   useAllHooks = false,
   publicStats,
+  lang = "en",
 }: {
   format: Format;
   hookCategories: HookCategory[];
   useAllHooks?: boolean;
   publicStats?: { enabled: boolean; visible?: string[] };
+  lang?: Lang;
 }) {
   const matchingRaw = useAllHooks
     ? hookCategories
@@ -470,16 +493,18 @@ export function FormatView({
   const sections: Record<FormatSectionKey, React.ReactNode> = {
     script:
       !isHidden(format, "script") && format.script ? (
-        <ScriptBlock text={format.script} />
+        <ScriptBlock text={format.script} lang={lang} />
       ) : null,
     examples:
       !isHidden(format, "examples") && format.examples.length > 0 ? (
         <section className="space-y-3">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
-              Top-performing examples
+              {t(lang, "topExamples")}
             </div>
-            <Pill tone="accent">{format.examples.length} videos</Pill>
+            <Pill tone="accent">
+              {format.examples.length} {t(lang, "videosWord")}
+            </Pill>
           </div>
           <VideoCarousel videos={format.examples} />
         </section>
@@ -488,7 +513,7 @@ export function FormatView({
       !isHidden(format, "structure") && visibleItems(format.structure).length > 0 ? (
         <section className="border-2 border-line bg-background rounded-md nb-shadow-sm p-5 sm:p-6">
           <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-4">
-            Shot-by-shot structure
+            {t(lang, "structure")}
           </div>
           <ol className="space-y-3">
             {visibleItems(format.structure).map((item, i) => (
@@ -513,11 +538,11 @@ export function FormatView({
         <section className="space-y-5">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
-              Hooks that fit this format
+              {t(lang, "hooksFit")}
             </div>
             <div className="flex items-center gap-2 flex-wrap">
-              <Pill tone="accent">{totalHooks} hooks</Pill>
-              <Pill>Click any to copy</Pill>
+              <Pill tone="accent">{totalHooks} {t(lang, "hooksWord")}</Pill>
+              <Pill>{t(lang, "clickToCopy")}</Pill>
             </div>
           </div>
           <div className="space-y-6">
@@ -529,7 +554,7 @@ export function FormatView({
                 <div className="flex items-baseline justify-between gap-2 flex-wrap mb-2">
                   <h3 className="text-lg font-black text-ink">{c.title}</h3>
                   <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
-                    {c.hooks.length} hooks
+                    {c.hooks.length} {t(lang, "hooksWord")}
                   </span>
                 </div>
                 <p className="text-sm text-ink-soft leading-relaxed mb-3">
@@ -537,13 +562,13 @@ export function FormatView({
                 </p>
                 <div className="border-l-2 border-accent pl-3 mb-4">
                   <p className="text-sm text-ink leading-relaxed">
-                    <span className="font-bold">Why it works for Rork: </span>
+                    <span className="font-bold">{t(lang, "whyItWorks")}</span>
                     {c.whyItWorks}
                   </p>
                 </div>
                 <ul className="space-y-2">
                   {c.hooks.map((h, i) => (
-                    <HookRow key={i} hook={h} index={i} />
+                    <HookRow key={i} hook={h} index={i} lang={lang} />
                   ))}
                 </ul>
               </div>
@@ -551,9 +576,13 @@ export function FormatView({
           </div>
         </section>
       ) : null,
+    songs:
+      !isHidden(format, "songs") && visibleSongs(format.songs).length > 0 ? (
+        <SongsBlock songs={visibleSongs(format.songs)} lang={lang} />
+      ) : null,
     assets:
       (format.assets?.length ?? 0) > 0 ? (
-        <AssetsBlock assets={format.assets!} />
+        <AssetsBlock assets={format.assets!} lang={lang} />
       ) : null,
   };
 
@@ -563,8 +592,10 @@ export function FormatView({
     <article className="space-y-8">
       <header className="space-y-4">
         <div className="flex items-center gap-2 flex-wrap">
-          <SectionLabel>Format</SectionLabel>
-          <Pill>{format.examples.length} references</Pill>
+          <SectionLabel>{t(lang, "formatLabel")}</SectionLabel>
+          <Pill>
+            {format.examples.length} {t(lang, "references")}
+          </Pill>
         </div>
         <div className="flex items-start gap-4">
           <Thumbnail
@@ -581,7 +612,7 @@ export function FormatView({
             </p>
           </div>
         </div>
-        <FormatDescription text={format.description} />
+        <FormatDescription text={format.description} lang={lang} />
         {publicStats?.enabled && format.examples.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {sanitizeVisibleStats(
@@ -595,7 +626,10 @@ export function FormatView({
                   {computeSectionStat(k, format.examples)}
                 </div>
                 <div className="text-[9px] uppercase tracking-widest font-bold text-muted mt-1 leading-none">
-                  {SECTION_STAT_LABELS[k]}
+                  {t(
+                    lang,
+                    `stat${k.charAt(0).toUpperCase()}${k.slice(1)}` as UIKey
+                  ) || SECTION_STAT_LABELS[k]}
                 </div>
               </div>
             ))}
@@ -610,7 +644,102 @@ export function FormatView({
   );
 }
 
-function AssetsBlock({ assets }: { assets: FormatAsset[] }) {
+function SongsBlock({
+  songs,
+  lang = "en",
+}: {
+  songs: FormatSong[];
+  lang?: Lang;
+}) {
+  return (
+    <section className="space-y-3">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+          {t(lang, "soundsToUse")}
+        </div>
+        <Pill tone="accent">
+          {songs.length}{" "}
+          {songs.length === 1 ? t(lang, "soundWord") : t(lang, "soundsWord")}
+        </Pill>
+      </div>
+      <ul className="space-y-2">
+        {songs.map((s, i) => (
+          <SongRow key={i} song={s} lang={lang} />
+        ))}
+      </ul>
+      <p className="text-[11px] text-muted">{t(lang, "soundsHint")}</p>
+    </section>
+  );
+}
+
+function SongRow({ song, lang = "en" }: { song: FormatSong; lang?: Lang }) {
+  const [copied, setCopied] = useState(false);
+  const platform = detectSongPlatform(song.url);
+  const title =
+    song.title?.trim() || songTitleFromUrl(song.url) || t(lang, "untitledSound");
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(song.url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch {
+      /* noop */
+    }
+  };
+  return (
+    <li className="border-2 border-line bg-background rounded-md nb-shadow-sm p-3 sm:p-4">
+      <div className="flex items-center gap-3">
+        <span
+          className="shrink-0 w-9 h-9 border-2 border-line bg-accent text-accent-ink rounded-sm flex items-center justify-center text-base"
+          aria-hidden
+        >
+          ♪
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <span className="font-black text-ink truncate">{title}</span>
+            <span className="text-[9px] uppercase tracking-[0.2em] font-bold text-muted shrink-0">
+              {SONG_PLATFORM_LABELS[platform]}
+            </span>
+          </div>
+          {song.artist && (
+            <div className="text-xs text-ink-soft truncate">{song.artist}</div>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={onCopy}
+            className="border-2 border-line bg-background px-2 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+          >
+            {copied ? t(lang, "copied") : t(lang, "copyLink")}
+          </button>
+          <a
+            href={song.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="border-2 border-line bg-accent text-accent-ink px-2 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+          >
+            {t(lang, "openSound")} ↗
+          </a>
+        </div>
+      </div>
+      {song.note && (
+        <p className="text-sm text-ink-soft leading-relaxed mt-2 pl-12">
+          {song.note}
+        </p>
+      )}
+    </li>
+  );
+}
+
+function AssetsBlock({
+  assets,
+  lang = "en",
+}: {
+  assets: FormatAsset[];
+  lang?: Lang;
+}) {
   const overlay = assets.find((a) => a.kind === "overlay");
   const verses = assets.filter((a) => a.kind === "verse");
   const rest = assets.filter((a) => a !== overlay && a.kind !== "verse");
@@ -618,22 +747,25 @@ function AssetsBlock({ assets }: { assets: FormatAsset[] }) {
     <section className="space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
-          Assets to use
+          {t(lang, "assetsToUse")}
         </div>
-        <Pill tone="accent">{assets.length} {assets.length === 1 ? "file" : "files"}</Pill>
+        <Pill tone="accent">
+          {assets.length}{" "}
+          {assets.length === 1 ? t(lang, "fileWord") : t(lang, "filesWord")}
+        </Pill>
       </div>
 
       {overlay && (
         <div className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 sm:p-5">
           <div className="flex items-baseline justify-between gap-2 flex-wrap mb-3">
             <h3 className="text-base font-black text-ink">
-              ▶ Overlay example
+              ▶ {t(lang, "overlayExample")}
             </h3>
             <a
               href={`${overlay.url}${overlay.url.includes("?") ? "&" : "?"}download=1`}
               className="border-2 border-line bg-background px-2 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
             >
-              Download
+              {t(lang, "download")}
             </a>
           </div>
           {overlay.label && (
@@ -652,13 +784,13 @@ function AssetsBlock({ assets }: { assets: FormatAsset[] }) {
       )}
 
       {verses.map((a, i) => (
-        <VerseCard key={`v${i}`} asset={a} />
+        <VerseCard key={`v${i}`} asset={a} lang={lang} />
       ))}
 
       {rest.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {rest.map((a, i) => (
-            <AssetCard key={i} asset={a} />
+            <AssetCard key={i} asset={a} lang={lang} />
           ))}
         </div>
       )}
@@ -666,7 +798,7 @@ function AssetsBlock({ assets }: { assets: FormatAsset[] }) {
   );
 }
 
-function VerseCard({ asset }: { asset: FormatAsset }) {
+function VerseCard({ asset, lang = "en" }: { asset: FormatAsset; lang?: Lang }) {
   const [bg, setBg] = useState(VERSE_BACKGROUNDS[0].key);
   const base =
     `/api/verse-card?ref=${encodeURIComponent(asset.verseRef ?? "")}` +
@@ -677,13 +809,13 @@ function VerseCard({ asset }: { asset: FormatAsset }) {
     <div className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 sm:p-5 space-y-4">
       <div className="flex items-baseline justify-between gap-2 flex-wrap">
         <h3 className="text-base font-black text-ink">
-          📖 {asset.verseRef || "Bible verse"}
+          📖 {asset.verseRef || t(lang, "bibleVerse")}
         </h3>
         <a
           href={`${previewUrl}&download=1`}
           className="border-2 border-line bg-accent text-accent-ink px-2.5 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
         >
-          Download
+          {t(lang, "download")}
         </a>
       </div>
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -709,17 +841,17 @@ function VerseCard({ asset }: { asset: FormatAsset }) {
           onClick={() => setBg(randomBackgroundKey())}
           className="border-2 border-line bg-background px-3 py-1.5 rounded-sm nb-press text-xs font-black uppercase tracking-widest"
         >
-          🎲 Random
+          🎲 {t(lang, "random")}
         </button>
       </div>
       <p className="text-[11px] text-muted text-center">
-        Pick a background (or go random), then tap Download.
+        {t(lang, "pickBackground")}
       </p>
     </div>
   );
 }
 
-function AssetCard({ asset }: { asset: FormatAsset }) {
+function AssetCard({ asset, lang = "en" }: { asset: FormatAsset; lang?: Lang }) {
   const isImage = asset.mime.startsWith("image/");
   const isVideo = asset.mime.startsWith("video/");
   const name = asset.label || asset.filename || "Asset";
@@ -756,7 +888,7 @@ function AssetCard({ asset }: { asset: FormatAsset }) {
           href={`${asset.url}${asset.url.includes("?") ? "&" : "?"}download=1`}
           className="shrink-0 border-2 border-line bg-background px-2 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
         >
-          Download
+          {t(lang, "download")}
         </a>
       </div>
     </div>

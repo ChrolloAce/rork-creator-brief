@@ -2,13 +2,20 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { HookCategory, VideoExample } from "@/lib/types";
+import type {
+  Format,
+  FormatSectionKey,
+  HookCategory,
+  VideoExample,
+} from "@/lib/types";
+import { FormatView } from "@/components/Views";
 import {
   type ScriptVariant,
   type ScriptStatus,
   normalizeVariants,
   firstLiveBody,
   makeVariantId,
+  resolveLiveScript,
 } from "@/lib/scripts";
 import {
   SECTION_STAT_KEYS,
@@ -19,8 +26,17 @@ import {
   type SectionStatKey,
 } from "@/lib/section-stats";
 import { allVideos } from "@/lib/all-videos";
+import {
+  detectSongPlatform,
+  normalizeSongUrl,
+  songTitleFromUrl,
+  SONG_PLATFORM_LABELS,
+} from "@/lib/songs";
 import { formats as formatsMeta } from "@/lib/formats";
 import { hookCategories as defaultHookCategories } from "@/lib/hooks";
+import { STRUCTURE_PRESETS, type StructurePreset } from "@/lib/structures";
+import type { RotationCreator } from "@/lib/rotation";
+import { onHistoryChange, readParam, writeParams } from "@/lib/url-state";
 import type { BriefOverview, BriefHookCategory, ContentCalendar, Onboarding } from "@/lib/db";
 import { CalendarEditor } from "@/components/admin/CalendarEditor";
 import { CollapsibleCard } from "@/components/admin/CollapsibleCard";
@@ -44,6 +60,7 @@ type FormatOverride = {
   hiddenSections?: string[];
   sectionOrder?: string[];
   assets?: FormatAssetRow[];
+  songs?: FormatSongRow[];
 };
 
 type FormatAssetRow = {
@@ -55,6 +72,14 @@ type FormatAssetRow = {
   verseRef?: string;
   verseText?: string;
   verseVersion?: string;
+};
+
+type FormatSongRow = {
+  url: string;
+  title?: string;
+  artist?: string;
+  note?: string;
+  hidden?: boolean;
 };
 
 type Curation = {
@@ -186,6 +211,19 @@ function SectionStats({
   );
 }
 
+type AdminTab = "scripts" | "calendar" | "creators" | "brief";
+
+const ADMIN_TABS: { id: AdminTab; label: string; hint: string }[] = [
+  { id: "scripts", label: "Scripts", hint: "Write and assemble" },
+  { id: "calendar", label: "Calendar", hint: "Who films what, when" },
+  { id: "creators", label: "Creators", hint: "Access and roster" },
+  { id: "brief", label: "Brief setup", hint: "Settings you rarely touch" },
+];
+
+function isAdminTab(v: string | null): v is AdminTab {
+  return !!v && ADMIN_TABS.some((t) => t.id === v);
+}
+
 export function BriefEditor({ briefSlug }: { briefSlug: string }) {
   const [brief, setBrief] = useState<BriefRecord | null>(null);
   const [cur, setCur] = useState<Curation | null>(null);
@@ -195,6 +233,11 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   // Which section's full editor is open in the modal (null = none).
   const [openSection, setOpenSection] = useState<string | null>(null);
+  // Workspace tab. Scripts is the landing surface because it is the thing you
+  // actually come here to do; everything else is setup you touch rarely.
+  const [tab, setTab] = useState<AdminTab>("scripts");
+  // Structure picker for the one-shot "new script" flow.
+  const [newScriptOpen, setNewScriptOpen] = useState(false);
   // Section groups that are collapsed in the editor (by group id).
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
     new Set()
@@ -202,6 +245,9 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
   const [allBriefs, setAllBriefs] = useState<
     Array<{ slug: string; name: string }>
   >([]);
+  // Roster, used by the calendar to show how a rotation pool would actually
+  // split across the people on this brief.
+  const [creators, setCreators] = useState<RotationCreator[]>([]);
 
   // Track object references for heavy fields we last persisted, so we can
   // omit them from subsequent save payloads when nothing changed.
@@ -282,11 +328,62 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [briefSlug]);
 
+  // Adopt whatever the URL says on mount and on back/forward. Applied in an
+  // effect rather than in useState so the server and client first render agree.
+  useEffect(() => {
+    const sync = () => {
+      const t = readParam("tab");
+      setTab(isAdminTab(t) ? t : "scripts");
+      setOpenSection(readParam("script"));
+    };
+    sync();
+    return onHistoryChange(sync);
+  }, []);
+
+  function selectTab(next: AdminTab) {
+    setTab(next);
+    writeParams({ tab: next === "scripts" ? null : next });
+  }
+
+  // Opening a script is a destination, so it pushes: Back closes the studio.
+  // Always lands on the Script panel; ?panel= is only for restoring a refresh.
+  function openStudio(slug: string | null) {
+    setOpenSection(slug);
+    writeParams({ script: slug, panel: null }, { push: true });
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/briefs/${encodeURIComponent(briefSlug)}/creators`)
+      .then((r) => r.json())
+      .then((j) => {
+        if (cancelled || !j?.ok) return;
+        const rows = (j.creators ?? []) as {
+          id: string;
+          name: string;
+          userId: string | null;
+          status: string;
+        }[];
+        setCreators(
+          rows.map((c) => ({
+            id: c.id,
+            name: c.name,
+            userId: c.userId ?? null,
+            status: c.status,
+          }))
+        );
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [briefSlug]);
+
   // Section editor modal: close on Escape + lock background scroll.
   useEffect(() => {
     if (!openSection) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpenSection(null);
+      if (e.key === "Escape") openStudio(null);
     };
     window.addEventListener("keydown", onKey);
     document.body.style.overflow = "hidden";
@@ -501,18 +598,30 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
   // Visible formats (title + a thumbnail) offered as calendar links. Hidden
   // formats are excluded since a public link to them would 404. Thumbnail
   // falls back through the format's first pinned/auto preview video.
+  // `script`/`structure` ride along so the calendar can preview what a script
+  // actually says before it gets scheduled — no extra fetch, the curation blob
+  // is already in hand here.
   const calendarFormats = effectiveOrder
     .filter((slug) => !hiddenSet.has(slug))
     .flatMap((slug) => {
       const meta = metaFor(slug);
       if (!meta) return [];
-      const title = cur.formatOverrides?.[slug]?.title ?? meta.title;
+      const ov = cur.formatOverrides?.[slug];
+      const title = ov?.title ?? meta.title;
       const p = preview[slug];
       const thumbnail =
         p?.pinnedVideos?.[0]?.thumbnail ??
         p?.autoVideos?.[0]?.thumbnail ??
         meta.thumbnail;
-      return [{ slug, title, thumbnail }];
+      const script = resolveLiveScript(normalizeVariants(ov)) ?? meta.script;
+      // Static meta items are plain strings; override items are objects that
+      // can be individually hidden.
+      const structure = (
+        ov?.structure && ov.structure.length > 0
+          ? ov.structure.filter((s) => !s.hidden).map((s) => s.text)
+          : meta.structure.map((i) => (typeof i === "string" ? i : i.text))
+      ).filter(Boolean);
+      return [{ slug, title, thumbnail, script, structure }];
     });
 
   // Editor script groups → { id, name, slugs } for the calendar's alternation
@@ -561,6 +670,9 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
     for (const part of parts) {
       if (part === "assets") {
         nextOv.assets = srcOv.assets ? srcOv.assets.map((a) => ({ ...a })) : undefined;
+        overrideTouched = true;
+      } else if (part === "songs") {
+        nextOv.songs = srcOv.songs ? srcOv.songs.map((s) => ({ ...s })) : undefined;
         overrideTouched = true;
       } else if (part === "sectionOrder") {
         nextOv.sectionOrder = srcOv.sectionOrder ? [...srcOv.sectionOrder] : undefined;
@@ -675,20 +787,28 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
       delete rest[slug];
       return rest;
     });
-    if (openSection === slug) setOpenSection(null);
+    if (openSection === slug) openStudio(null);
     void persist(nextCur);
   }
 
   function createGroup() {
+    createGroupWith(null);
+  }
+
+  // Create a group and, optionally, move a script into it in the SAME update.
+  // Doing it as two calls would have the second read a stale `cur` and drop
+  // the group that was just added.
+  function createGroupWith(slug: string | null) {
     if (!cur) return;
     const name = window.prompt("Name this group", "New group")?.trim();
     if (!name) return;
+    const id = makeVariantId();
     const nextCur: Curation = {
       ...cur,
-      sectionGroups: [
-        ...(cur.sectionGroups ?? []),
-        { id: makeVariantId(), name },
-      ],
+      sectionGroups: [...(cur.sectionGroups ?? []), { id, name }],
+      sectionGroupOf: slug
+        ? { ...(cur.sectionGroupOf ?? {}), [slug]: id }
+        : cur.sectionGroupOf,
     };
     setCur(nextCur);
     void persist(nextCur);
@@ -762,7 +882,62 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
       void persist(nextCur);
       return nextCur;
     });
-    setOpenSection(newSlug);
+    openStudio(newSlug);
+  }
+
+  // One-shot creation: clone a section to get a real slug, then stamp the
+  // chosen structure's beats and worked example onto it and open the studio.
+  // You land in one place with the shape already filled in, instead of making
+  // a blank section and then hunting for where the structure lives.
+  async function createScriptFromStructure(
+    name: string,
+    preset: StructurePreset | null
+  ) {
+    if (!cur) return;
+    const source = effectiveOrder[0];
+    if (!source) {
+      window.alert(
+        "This brief has no sections yet to base a script on. Add one first."
+      );
+      return;
+    }
+    const res = await cloneSectionInBrief(source); // calls load()
+    if (!res.ok || !res.newSlug) {
+      window.alert(res.error ?? "Could not create the script");
+      return;
+    }
+    const newSlug = res.newSlug;
+    const override: FormatOverride = {
+      title: name.trim() || preset?.name || "New script",
+      tagline: preset ? `${preset.seconds}s · ${preset.name}` : "",
+      // Start clean: a new script should not inherit the source's pins,
+      // examples or copy, only its slug plumbing.
+      structure: (preset?.beats ?? []).map((text) => ({ text })),
+      scriptVariants: preset
+        ? [
+            {
+              id: makeVariantId(),
+              label: "A",
+              body: preset.example,
+              status: "draft" as const,
+            },
+          ]
+        : [],
+      script: undefined,
+      assets: [],
+      songs: [],
+    };
+    setAndSaveOverride(newSlug, override);
+    setCur((c) => {
+      if (!c) return c;
+      const nextCur: Curation = {
+        ...c,
+        formatPins: { ...c.formatPins, [newSlug]: [] },
+      };
+      void persist(nextCur);
+      return nextCur;
+    });
+    openStudio(newSlug);
   }
 
   function toggleGroupCollapsed(id: string) {
@@ -795,7 +970,7 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
       >
         <button
           type="button"
-          onClick={() => setOpenSection(isOpen ? null : slug)}
+          onClick={() => openStudio(isOpen ? null : slug)}
           className="text-left flex-1"
         >
           <div className="text-xs font-black uppercase tracking-wide leading-snug line-clamp-2">
@@ -824,10 +999,27 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
         <div className="flex items-center gap-1 mt-auto">
           <button
             type="button"
-            onClick={() => setOpenSection(isOpen ? null : slug)}
+            onClick={() => openStudio(isOpen ? null : slug)}
             className="border-2 border-line bg-background px-1.5 py-0.5 rounded-sm nb-press text-[9px] font-black uppercase tracking-widest"
           >
             {isOpen ? "Close" : "Edit"}
+          </button>
+          {/* Rename without opening the script. The studio header can also
+              rename, but from the grid you are usually renaming several. */}
+          <button
+            type="button"
+            onClick={() => {
+              const next = window.prompt("Rename this script", effectiveTitle);
+              if (next === null) return;
+              const name = next.trim();
+              if (!name || name === effectiveTitle) return;
+              setAndSaveOverride(slug, { ...override, title: name });
+            }}
+            aria-label="Rename script"
+            title="Rename this script"
+            className="w-7 h-7 border-2 border-line bg-background rounded-sm font-black nb-press flex items-center justify-center"
+          >
+            ✎
           </button>
           <button
             type="button"
@@ -931,151 +1123,235 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
         )}
       </header>
 
-      <div className="max-w-5xl mx-auto p-4 sm:p-6 space-y-4">
-        <div className="text-[10px] uppercase tracking-[0.3em] font-bold text-muted">
-          Settings
-        </div>
-        <CollapsibleCard
-          storageKey={`brief-editor:${briefSlug}:brief-settings`}
-          title="Brief settings"
-        >
-          <BriefSettings brief={brief} onSave={saveBrief} />
-        </CollapsibleCard>
+      {/* The calendar runs a grid plus a day editor side by side, so it gets
+          more room than the reading-width used everywhere else. */}
+      <div
+        className={`mx-auto p-4 sm:p-6 space-y-4 ${
+          tab === "calendar" ? "max-w-[1500px]" : "max-w-5xl"
+        }`}
+      >
+        {/* Workspace tabs. The old build stacked every card vertically, so the
+            scripts you actually work on sat below seven setup panels. */}
+        <nav className="flex items-stretch gap-1.5 flex-wrap">
+          {ADMIN_TABS.map((tb) => {
+            const on = tab === tb.id;
+            const count =
+              tb.id === "scripts"
+                ? effectiveOrder.length
+                : tb.id === "calendar"
+                  ? (cur.contentCalendar?.days?.length ?? 0)
+                  : null;
+            return (
+              <button
+                key={tb.id}
+                type="button"
+                onClick={() => selectTab(tb.id)}
+                aria-pressed={on}
+                className={`border-2 border-line rounded-md px-3 py-2 text-left nb-press ${
+                  on ? "bg-ink text-background" : "bg-background"
+                }`}
+              >
+                <span className="block text-xs font-black uppercase tracking-widest">
+                  {tb.label}
+                  {count != null && (
+                    <span className={on ? "opacity-70" : "text-muted"}>
+                      {" "}
+                      {count}
+                    </span>
+                  )}
+                </span>
+                <span
+                  className={`block text-[10px] font-bold ${on ? "opacity-70" : "text-muted"}`}
+                >
+                  {tb.hint}
+                </span>
+              </button>
+            );
+          })}
+        </nav>
 
-        <CollapsibleCard
-          storageKey={`brief-editor:${briefSlug}:access`}
-          title="Creator access"
-          meta={brief.accessEnabled ? "Gate ON" : "Not live"}
-        >
-          <CreatorAccess
-            brief={brief}
-            briefSlug={briefSlug}
-            onSave={saveBrief}
-          />
-        </CollapsibleCard>
+        {tab === "brief" && (
+          <>
+            <CollapsibleCard
+              storageKey={`brief-editor:${briefSlug}:brief-settings`}
+              title="Brief settings"
+            >
+              <BriefSettings brief={brief} onSave={saveBrief} />
+            </CollapsibleCard>
 
-        <CollapsibleCard
-          storageKey={`brief-editor:${briefSlug}:onboarding`}
-          title="Onboarding"
-          meta={
-            brief.onboarding?.enabled
-              ? `${brief.onboarding.steps?.length ?? 0} steps`
-              : "Off"
-          }
-        >
-          <OnboardingEditor
-            value={brief.onboarding}
-            scopedProjectIds={cur.scopedProjectIds}
-            onSave={(onboarding) => {
-              void saveBrief({ onboarding });
-            }}
-          />
-        </CollapsibleCard>
+            <CollapsibleCard
+              storageKey={`brief-editor:${briefSlug}:onboarding`}
+              title="Onboarding"
+              meta={
+                brief.onboarding?.enabled
+                  ? `${brief.onboarding.steps?.length ?? 0} steps`
+                  : "Off"
+              }
+            >
+              <OnboardingEditor
+                value={brief.onboarding}
+                scopedProjectIds={cur.scopedProjectIds}
+                onSave={(onboarding) => {
+                  void saveBrief({ onboarding });
+                }}
+              />
+            </CollapsibleCard>
 
-        <CollapsibleCard
-          storageKey={`brief-editor:${briefSlug}:overview`}
-          title="Overview page content"
-          meta={cur.hideOverview ? "Hidden" : undefined}
-        >
-          <label className="flex items-center gap-2 mb-4 text-xs font-bold cursor-pointer">
-            <input
-              type="checkbox"
-              checked={!!cur.hideOverview}
-              onChange={(e) => {
-                const next: Curation = { ...cur, hideOverview: e.target.checked };
-                setCur(next);
-                void persist(next);
-              }}
-            />
-            <span>Hide overview page (visitors jump straight to the first format)</span>
-          </label>
-          <OverviewEditor
-            value={brief.overview}
-            onSave={async (overview) => {
-              await saveBrief({ overview });
-            }}
-          />
-        </CollapsibleCard>
+            <CollapsibleCard
+              storageKey={`brief-editor:${briefSlug}:overview`}
+              title="Overview page content"
+              meta={cur.hideOverview ? "Hidden" : undefined}
+            >
+              <label className="flex items-center gap-2 mb-4 text-xs font-bold cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={!!cur.hideOverview}
+                  onChange={(e) => {
+                    const next: Curation = { ...cur, hideOverview: e.target.checked };
+                    setCur(next);
+                    void persist(next);
+                  }}
+                />
+                <span>Hide overview page (visitors jump straight to the first format)</span>
+              </label>
+              <OverviewEditor
+                value={brief.overview}
+                onSave={async (overview) => {
+                  await saveBrief({ overview });
+                }}
+              />
+            </CollapsibleCard>
 
-        <CollapsibleCard
-          storageKey={`brief-editor:${briefSlug}:hooks`}
-          title="Hook library"
-        >
-          <HooksEditor
-            value={brief.hookCategories}
-            onSave={async (hookCategories) => {
-              await saveBrief({ hookCategories });
-            }}
-          />
-        </CollapsibleCard>
+            <CollapsibleCard
+              storageKey={`brief-editor:${briefSlug}:hooks`}
+              title="Hook library"
+            >
+              <HooksEditor
+                value={brief.hookCategories}
+                onSave={async (hookCategories) => {
+                  await saveBrief({ hookCategories });
+                }}
+              />
+            </CollapsibleCard>
 
-        <CollapsibleCard
-          storageKey={`brief-editor:${briefSlug}:sources`}
-          title="ViewTrack sources"
-          meta={`${(cur.scopedProjectIds ?? []).length} selected`}
-        >
-          <ProjectSources
-            value={cur.scopedProjectIds ?? []}
-            onChange={(next) => {
-              if (!cur) return;
-              const nextCur: Curation = { ...cur, scopedProjectIds: next };
-              setCur(nextCur);
-              void persist(nextCur);
-            }}
-          />
-        </CollapsibleCard>
+            <CollapsibleCard
+              storageKey={`brief-editor:${briefSlug}:sources`}
+              title="ViewTrack sources"
+              meta={`${(cur.scopedProjectIds ?? []).length} selected`}
+            >
+              <ProjectSources
+                value={cur.scopedProjectIds ?? []}
+                onChange={(next) => {
+                  if (!cur) return;
+                  const nextCur: Curation = { ...cur, scopedProjectIds: next };
+                  setCur(nextCur);
+                  void persist(nextCur);
+                }}
+              />
+            </CollapsibleCard>
 
-        <CollapsibleCard
-          storageKey={`brief-editor:${briefSlug}:calendar`}
-          title="Content calendar"
-          meta={
-            cur.contentCalendar?.enabled
-              ? `${cur.contentCalendar.days?.length ?? 0} days`
-              : "Hidden"
-          }
-        >
-          <label className="flex items-start gap-2 mb-4 text-xs font-bold cursor-pointer">
-            <input
-              type="checkbox"
-              className="mt-0.5"
-              checked={!!cur.hideFormatsList}
-              onChange={(e) => {
-                const next: Curation = {
-                  ...cur,
-                  hideFormatsList: e.target.checked,
-                };
-                setCur(next);
-                void persist(next);
-              }}
-            />
-            <span>
-              Calendar-only mode — hide the Formats list from creators. They
-              won&apos;t see all your formats or their names; formats only show
-              up through the calendar as you schedule them.{" "}
-              <span className="text-muted font-normal">
-                (Format pages still open via calendar links.)
-              </span>
-            </span>
-          </label>
-          <CalendarEditor
-            value={cur.contentCalendar}
-            formats={calendarFormats}
-            scriptGroups={calendarScriptGroups}
-            onChange={setAndSaveCalendar}
-          />
-        </CollapsibleCard>
+            <CollapsibleCard
+              storageKey={`brief-editor:${briefSlug}:excluded`}
+              title="Excluded globally"
+              meta={`${cur.exclude.length} excluded`}
+            >
+              <ExcludeSection
+                excluded={cur.exclude}
+                pickerExcluded={allInUse}
+                scopedProjectIds={cur.scopedProjectIds}
+                onChange={(next) => {
+                  if (!cur) return;
+                  const nextCur: Curation = { ...cur, exclude: next };
+                  setCur(nextCur);
+                  void persist(nextCur);
+                }}
+              />
+            </CollapsibleCard>
 
-        <div className="flex items-center justify-between gap-2 pt-2">
-          <div className="text-[10px] uppercase tracking-[0.3em] font-bold text-muted">
-            Sections
-          </div>
-          <button
-            type="button"
-            onClick={createGroup}
-            className="border-2 border-line bg-ink text-background px-2 py-0.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+            <details className="border-2 border-line rounded-md bg-paper p-3">
+              <summary className="cursor-pointer text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+                Raw JSON (advanced)
+              </summary>
+              <pre className="mt-3 text-xs overflow-auto whitespace-pre-wrap break-all">
+                {JSON.stringify(cur, null, 2)}
+              </pre>
+            </details>
+          </>
+        )}
+
+        {tab === "creators" && (
+          <CollapsibleCard
+            storageKey={`brief-editor:${briefSlug}:access`}
+            title="Creator access"
+            meta={brief.accessEnabled ? "Gate ON" : "Not live"}
           >
-            + New group
-          </button>
+            <CreatorAccess
+              brief={brief}
+              briefSlug={briefSlug}
+              onSave={saveBrief}
+            />
+          </CollapsibleCard>
+        )}
+
+        {tab === "calendar" && (
+          <>
+            <label className="flex items-start gap-2 text-xs font-bold cursor-pointer border-2 border-line bg-paper rounded-md p-3">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={!!cur.hideFormatsList}
+                onChange={(e) => {
+                  const next: Curation = {
+                    ...cur,
+                    hideFormatsList: e.target.checked,
+                  };
+                  setCur(next);
+                  void persist(next);
+                }}
+              />
+              <span>
+                Calendar-only mode — hide the Formats list from creators. They
+                won&apos;t see all your formats or their names; formats only show
+                up through the calendar as you schedule them.{" "}
+                <span className="text-muted font-normal">
+                  (Format pages still open via calendar links.)
+                </span>
+              </span>
+            </label>
+            <CalendarEditor
+              value={cur.contentCalendar}
+              formats={calendarFormats}
+              scriptGroups={calendarScriptGroups}
+              creators={creators}
+              requireLogin={!!brief.requireLogin}
+              onChange={setAndSaveCalendar}
+              onOpenScript={openStudio}
+            />
+          </>
+        )}
+
+        {tab === "scripts" && (
+        <>
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setNewScriptOpen(true)}
+              className="border-2 border-line bg-accent text-accent-ink px-3 py-1.5 rounded-md nb-press text-xs font-black uppercase tracking-widest"
+            >
+              + New script
+            </button>
+            <button
+              type="button"
+              onClick={createGroup}
+              className="border-2 border-line bg-background px-2.5 py-1.5 rounded-md nb-press text-[10px] font-black uppercase tracking-widest"
+            >
+              + Group
+            </button>
+          </div>
+          <span className="text-[10px] uppercase tracking-widest font-bold text-muted">
+            {effectiveOrder.length} scripts
+          </span>
         </div>
 
         {/* Grouped sections — each group is a collapsible grid. */}
@@ -1178,6 +1454,8 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
             </div>
           );
         })()}
+        </>
+        )}
 
         {/* Full editor for the open section */}
         {openSection &&
@@ -1189,30 +1467,195 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
             const override = cur.formatOverrides?.[slug] ?? {};
             const effectiveTitle = override.title ?? meta.title;
             return (
+              /* Full-page studio. This used to be a narrow centred modal, which
+                 meant scrolling a single tall column to build one script. */
               <div
-                className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-ink/50"
-                onClick={() => setOpenSection(null)}
+                className="fixed inset-0 z-50 flex flex-col bg-background"
                 role="dialog"
                 aria-modal="true"
               >
-                <div
-                  className="w-full max-w-3xl max-h-[92vh] flex flex-col bg-background border-2 border-line rounded-md nb-shadow overflow-hidden"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <div className="shrink-0 flex items-center justify-between gap-3 px-4 sm:px-5 py-3 bg-paper border-b-2 border-line">
-                    <span className="text-sm font-black uppercase tracking-widest truncate">
-                      Editing · {effectiveTitle}
-                    </span>
+                <div className="shrink-0 flex items-center justify-between gap-3 px-4 sm:px-6 py-3 bg-paper border-b-2 border-line">
+                  <div className="min-w-0 flex items-center gap-3">
+                    {/* Rename right here — renaming used to mean digging into
+                        the Details tab. Dashed box + pencil so it reads as an
+                        editable field; a bare heading was invisible as a
+                        control and nobody found it. */}
+                    <label
+                      className="min-w-0 flex items-center gap-1.5 border-2 border-dashed border-line rounded-sm px-1.5 py-0.5 focus-within:border-solid focus-within:border-accent bg-background/60"
+                      title="Rename this script"
+                    >
+                      <span aria-hidden className="text-[11px] text-muted shrink-0">
+                        ✎
+                      </span>
+                      <input
+                        value={effectiveTitle}
+                        onChange={(e) =>
+                          setAndSaveOverride(slug, {
+                            ...override,
+                            title: e.target.value,
+                          })
+                        }
+                        placeholder={meta.title}
+                        aria-label="Script name"
+                        size={1}
+                        style={{
+                          width: `${Math.min(46, Math.max(10, effectiveTitle.length + 2))}ch`,
+                        }}
+                        className="min-w-0 max-w-full bg-transparent border-0 text-sm font-black uppercase tracking-widest focus:outline-none"
+                      />
+                    </label>
+                    <code className="hidden sm:inline font-mono text-[10px] text-muted border-2 border-line bg-background px-1.5 py-0.5 rounded-sm shrink-0">
+                      {slug}
+                    </code>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <a
+                      href={`/b/${brief.slug}/formats/${slug}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="border-2 border-line bg-background px-2.5 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+                    >
+                      Open live ↗
+                    </a>
                     <button
                       type="button"
-                      onClick={() => setOpenSection(null)}
-                      className="border-2 border-line bg-background px-2.5 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest shrink-0"
+                      onClick={() => openStudio(null)}
+                      className="border-2 border-line bg-ink text-background px-2.5 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
                     >
                       ✕ Close
                     </button>
                   </div>
-                  <div className="p-4 sm:p-5 overflow-y-auto">
+                </div>
+
+                {/* Manage the script's place in the brief without leaving it:
+                    which group it lives in, hopping to its siblings, adding
+                    another to the group, and deleting. */}
+                {(() => {
+                  const groupId = cur.sectionGroupOf?.[slug] ?? "";
+                  const group = sectionGroups.find((g) => g.id === groupId);
+                  const siblings = effectiveOrder.filter(
+                    (s) => (cur.sectionGroupOf?.[s] ?? "") === groupId
+                  );
+                  const at = siblings.indexOf(slug);
+                  const go = (delta: number) => {
+                    const next = siblings[at + delta];
+                    if (next) openStudio(next);
+                  };
+                  return (
+                    <div className="shrink-0 flex items-center gap-2 flex-wrap px-4 sm:px-6 py-2 bg-background border-b-2 border-line">
+                      <span className="text-[9px] uppercase tracking-[0.2em] font-bold text-muted">
+                        Group
+                      </span>
+                      <select
+                        value={groupId}
+                        onChange={(e) => {
+                          if (e.target.value === "__new") {
+                            createGroupWith(slug);
+                            return;
+                          }
+                          setSectionGroup(slug, e.target.value);
+                        }}
+                        title="Move this script to another group"
+                        className="border-2 border-line bg-background rounded-sm px-1.5 py-1 text-[11px] font-bold max-w-[220px]"
+                      >
+                        <option value="">Ungrouped</option>
+                        {sectionGroups.map((g) => (
+                          <option key={g.id} value={g.id}>
+                            {g.name}
+                          </option>
+                        ))}
+                        <option value="__new">+ New group…</option>
+                      </select>
+
+                      <span className="w-px h-5 bg-line/40" />
+
+                      <button
+                        type="button"
+                        onClick={() => go(-1)}
+                        disabled={at <= 0}
+                        title="Previous script in this group"
+                        className="w-7 h-7 border-2 border-line bg-background rounded-sm font-black nb-press disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        ‹
+                      </button>
+                      <select
+                        value={slug}
+                        onChange={(e) => openStudio(e.target.value)}
+                        title="Jump to another script in this group"
+                        className="border-2 border-line bg-background rounded-sm px-1.5 py-1 text-[11px] font-bold max-w-[260px]"
+                      >
+                        {siblings.map((s) => {
+                          const m = metaFor(s);
+                          const t =
+                            cur.formatOverrides?.[s]?.title ?? m?.title ?? s;
+                          return (
+                            <option key={s} value={s}>
+                              {t}
+                            </option>
+                          );
+                        })}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => go(1)}
+                        disabled={at < 0 || at >= siblings.length - 1}
+                        title="Next script in this group"
+                        className="w-7 h-7 border-2 border-line bg-background rounded-sm font-black nb-press disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        ›
+                      </button>
+                      <span className="text-[10px] font-bold text-muted">
+                        {at + 1} of {siblings.length}
+                        {group ? ` in ${group.name}` : " ungrouped"}
+                      </span>
+
+                      <div className="ml-auto flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            groupId
+                              ? void addScriptToGroup(groupId)
+                              : void createScriptFromStructure("", null)
+                          }
+                          title={
+                            groupId
+                              ? "Add another script to this group (copies this one so you just tweak it)"
+                              : "Add another script"
+                          }
+                          className="border-2 border-line bg-background px-2 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+                        >
+                          + Script
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (
+                              window.confirm(
+                                `Delete "${effectiveTitle}" completely? This can't be undone.`
+                              )
+                            ) {
+                              // Step to a sibling first so the studio stays
+                              // open on something real instead of blanking.
+                              const nextSlug =
+                                siblings[at + 1] ?? siblings[at - 1] ?? null;
+                              deleteFormat(slug);
+                              openStudio(nextSlug);
+                            }
+                          }}
+                          title="Delete this script completely"
+                          className="w-7 h-7 border-2 border-line bg-background rounded-sm font-black nb-press hover:bg-[#fee2e2]"
+                        >
+                          🗑
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6">
+                  <div className="max-w-6xl mx-auto">
                     <FormatSection
+                    key={slug}
                     slug={slug}
                     briefName={brief.name}
             availableBriefs={allBriefs.filter((b) => b.slug !== briefSlug)}
@@ -1310,34 +1753,150 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
             );
           })()}
 
-        <CollapsibleCard
-          storageKey={`brief-editor:${briefSlug}:excluded`}
-          title="Excluded globally"
-          meta={`${cur.exclude.length} excluded`}
-        >
-          <ExcludeSection
-            excluded={cur.exclude}
-            pickerExcluded={allInUse}
-            scopedProjectIds={cur.scopedProjectIds}
-            onChange={(next) => {
-              if (!cur) return;
-              const nextCur: Curation = { ...cur, exclude: next };
-              setCur(nextCur);
-              void persist(nextCur);
+        {newScriptOpen && (
+          <NewScriptModal
+            onClose={() => setNewScriptOpen(false)}
+            onCreate={(name, preset) => {
+              setNewScriptOpen(false);
+              void createScriptFromStructure(name, preset);
             }}
           />
-        </CollapsibleCard>
-
-        <details className="border-2 border-line rounded-md bg-paper p-3">
-          <summary className="cursor-pointer text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
-            Raw JSON (advanced)
-          </summary>
-          <pre className="mt-3 text-xs overflow-auto whitespace-pre-wrap break-all">
-            {JSON.stringify(cur, null, 2)}
-          </pre>
-        </details>
+        )}
       </div>
     </main>
+  );
+}
+
+// Pick a shape, name it, done. Every preset shows its beats and a finished
+// example so you can see what you are choosing before you commit to it.
+function NewScriptModal({
+  onClose,
+  onCreate,
+}: {
+  onClose: () => void;
+  onCreate: (name: string, preset: StructurePreset | null) => void;
+}) {
+  const [name, setName] = useState("");
+  const [presetId, setPresetId] = useState<string>(STRUCTURE_PRESETS[0].id);
+  const preset = STRUCTURE_PRESETS.find((p) => p.id === presetId) ?? null;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-ink/50"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        className="w-full max-w-3xl max-h-[92vh] flex flex-col bg-background border-2 border-line rounded-md nb-shadow overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="shrink-0 flex items-center justify-between gap-3 px-4 sm:px-5 py-3 bg-paper border-b-2 border-line">
+          <span className="text-sm font-black uppercase tracking-widest">
+            New script
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="border-2 border-line bg-background px-2.5 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+          >
+            ✕ Close
+          </button>
+        </div>
+
+        <div className="p-4 sm:p-5 overflow-y-auto space-y-4">
+          <div>
+            <label className="block text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-1.5">
+              Name it
+            </label>
+            <input
+              value={name}
+              autoFocus
+              onChange={(e) => setName(e.target.value)}
+              placeholder={preset ? preset.name : "New script"}
+              className="w-full border-2 border-line bg-background px-3 py-2 rounded-md text-sm font-bold"
+            />
+          </div>
+
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-1.5">
+              Pick a structure
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {STRUCTURE_PRESETS.map((p) => {
+                const on = p.id === presetId;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setPresetId(p.id)}
+                    aria-pressed={on}
+                    className={`text-left border-2 border-line rounded-md p-2.5 nb-press ${
+                      on ? "bg-accent text-accent-ink" : "bg-background"
+                    }`}
+                  >
+                    <div className="text-xs font-black">{p.name}</div>
+                    <div
+                      className={`text-[10px] font-bold ${on ? "opacity-80" : "text-muted"}`}
+                    >
+                      {p.seconds}s · {p.beats.length} beats
+                    </div>
+                    <div
+                      className={`text-[10px] mt-1 leading-snug ${on ? "opacity-80" : "text-muted"}`}
+                    >
+                      {p.whenToUse}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {preset && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-1.5">
+                  Beats you will fill
+                </div>
+                <pre className="border-2 border-line bg-paper rounded-md p-2.5 text-[11px] leading-relaxed whitespace-pre-wrap max-h-56 overflow-y-auto">
+                  {preset.beats.join("\n")}
+                </pre>
+              </div>
+              <div>
+                <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-1.5">
+                  Example of a finished one
+                </div>
+                <pre className="border-2 border-line bg-paper rounded-md p-2.5 text-[11px] leading-relaxed whitespace-pre-wrap max-h-56 overflow-y-auto">
+                  {preset.example}
+                </pre>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="shrink-0 flex items-center justify-between gap-2 px-4 sm:px-5 py-3 bg-paper border-t-2 border-line">
+          <span className="text-[10px] text-muted font-bold">
+            Creates the script with these beats and the example as a draft
+            variant, then opens it.
+          </span>
+          <button
+            type="button"
+            onClick={() => onCreate(name, preset)}
+            className="border-2 border-line bg-ink text-background px-3 py-1.5 rounded-md nb-press text-xs font-black uppercase tracking-widest shrink-0"
+          >
+            Create
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1351,17 +1910,31 @@ function BriefSettings({
   const [name, setName] = useState(brief.name);
   const [slug, setSlug] = useState(brief.slug);
   const [logoUrl, setLogoUrl] = useState(brief.logoUrl ?? "");
+  const [logoMsg, setLogoMsg] = useState<string | null>(null);
 
+  // Resync only when we switch to a different brief. Keying this on the whole
+  // `brief` object meant every save response reset the fields, wiping anything
+  // typed in the meantime.
   useEffect(() => {
     setName(brief.name);
     setSlug(brief.slug);
     setLogoUrl(brief.logoUrl ?? "");
-  }, [brief]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brief.slug]);
 
-  const dirty =
-    name !== brief.name ||
-    slug !== brief.slug ||
-    (logoUrl || null) !== (brief.logoUrl || null);
+  // The logo saves itself. Everything else in this admin autosaves, so a logo
+  // change that sat behind a separate "Save brief settings" button looked like
+  // it had saved and then came back on reload — pressing the toolbar Save only
+  // writes the curation, not the brief row.
+  async function changeLogo(next: string | null) {
+    setLogoUrl(next ?? "");
+    setLogoMsg("Saving…");
+    await onSave({ logoUrl: next });
+    setLogoMsg(next ? "Logo saved ✓" : "Logo removed ✓");
+    setTimeout(() => setLogoMsg(null), 2500);
+  }
+
+  const dirty = name !== brief.name || slug !== brief.slug;
 
   return (
     <div>
@@ -1390,27 +1963,31 @@ function BriefSettings({
         </label>
         <div className="block sm:col-span-3">
           <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
-            Logo
+            Logo{" "}
+            <span className="text-muted/70 normal-case tracking-normal font-normal">
+              {logoMsg ?? "saves as soon as you change it"}
+            </span>
           </span>
           <div className="mt-1">
             <LogoUpload
               value={logoUrl || null}
-              onChange={(v) => setLogoUrl(v ?? "")}
+              onChange={(v) => void changeLogo(v)}
             />
           </div>
         </div>
       </div>
       {dirty && (
-        <div className="mt-3">
+        <div className="mt-3 flex items-center gap-2 flex-wrap">
           <button
             type="button"
-            onClick={() =>
-              onSave({ name, slug, logoUrl: logoUrl.trim() || null })
-            }
+            onClick={() => onSave({ name, slug })}
             className="border-2 border-line bg-ink text-background font-black uppercase tracking-widest px-3 py-1.5 rounded-md nb-press text-xs"
           >
-            Save brief settings
+            Save name + slug
           </button>
+          <span className="text-[10px] font-bold text-muted">
+            Unsaved. The toolbar Save does not cover these.
+          </span>
         </div>
       )}
     </div>
@@ -1882,6 +2459,7 @@ const SECTION_LABELS: Record<string, string> = {
   examples: "Example videos",
   structure: "Shot-by-shot structure",
   hooks: "Hooks",
+  songs: "Sounds to use",
   assets: "Downloadable assets",
 };
 const ALL_SECTION_KEYS = [
@@ -1889,6 +2467,7 @@ const ALL_SECTION_KEYS = [
   "examples",
   "structure",
   "hooks",
+  "songs",
   "assets",
 ];
 
@@ -2019,6 +2598,202 @@ function SectionOrderEditor({
   );
 }
 
+// Per-format sound list. A sound is just a link (usually a TikTok music page)
+// plus optional labels, so creators know exactly what audio to record with.
+function SongManager({
+  songs,
+  onChange,
+  hidden,
+  onToggleHidden,
+  headerAction,
+}: {
+  songs: FormatSongRow[];
+  onChange: (next: FormatSongRow[] | undefined) => void;
+  hidden: boolean;
+  onToggleHidden: () => void;
+  headerAction?: ReactNode;
+}) {
+  const [pasted, setPasted] = useState("");
+
+  function update(next: FormatSongRow[]) {
+    onChange(next.length === 0 ? undefined : next);
+  }
+
+  function addSong(rawUrl: string) {
+    const url = normalizeSongUrl(rawUrl);
+    if (!url) return;
+    update([...songs, { url, title: songTitleFromUrl(url) || undefined }]);
+    setPasted("");
+  }
+
+  function patch(i: number, p: Partial<FormatSongRow>) {
+    update(songs.map((s, j) => (j === i ? { ...s, ...p } : s)));
+  }
+
+  function move(i: number, dir: -1 | 1) {
+    const target = i + dir;
+    if (target < 0 || target >= songs.length) return;
+    const next = [...songs];
+    [next[i], next[target]] = [next[target], next[i]];
+    update(next);
+  }
+
+  return (
+    <div className={hidden ? "opacity-60" : undefined}>
+      <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+        <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+          Sounds to use ({songs.length})
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {headerAction}
+          {hidden && (
+            <span className="px-1.5 py-0.5 bg-paper border-2 border-line rounded-sm text-[9px] font-bold uppercase tracking-widest">
+              HIDDEN
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={onToggleHidden}
+            className="border-2 border-line bg-background px-2 py-0.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+          >
+            {hidden ? "Show sounds" : "Hide sounds"}
+          </button>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        {songs.map((s, i) => {
+          const platform = detectSongPlatform(s.url);
+          return (
+            <div
+              key={i}
+              className={`border-2 border-line rounded-md p-2 space-y-1.5 ${
+                s.hidden ? "bg-paper opacity-60" : "bg-background"
+              }`}
+            >
+              <div className="flex items-center gap-1.5">
+                <span className="shrink-0 text-[9px] uppercase tracking-[0.2em] font-bold text-muted w-16">
+                  {SONG_PLATFORM_LABELS[platform]}
+                </span>
+                <input
+                  type="url"
+                  value={s.url}
+                  onChange={(e) => patch(i, { url: e.target.value })}
+                  onBlur={(e) => {
+                    const url = normalizeSongUrl(e.target.value);
+                    patch(i, {
+                      url,
+                      title: s.title?.trim()
+                        ? s.title
+                        : songTitleFromUrl(url) || undefined,
+                    });
+                  }}
+                  placeholder="https://www.tiktok.com/music/…"
+                  className="flex-1 min-w-0 border-2 border-line rounded-sm px-2 py-1 text-xs font-mono focus:outline-none focus:border-accent bg-background"
+                />
+                <a
+                  href={s.url || "#"}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Open link"
+                  className="shrink-0 w-7 h-7 border-2 border-line bg-background rounded-sm nb-press flex items-center justify-center text-xs font-black"
+                >
+                  ↗
+                </a>
+                <button
+                  type="button"
+                  aria-label="Move up"
+                  disabled={i === 0}
+                  onClick={() => move(i, -1)}
+                  className="shrink-0 w-7 h-7 border-2 border-line bg-background rounded-sm font-black nb-press disabled:opacity-30"
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  aria-label="Move down"
+                  disabled={i === songs.length - 1}
+                  onClick={() => move(i, 1)}
+                  className="shrink-0 w-7 h-7 border-2 border-line bg-background rounded-sm font-black nb-press disabled:opacity-30"
+                >
+                  ↓
+                </button>
+                <button
+                  type="button"
+                  onClick={() => patch(i, { hidden: !s.hidden })}
+                  title={s.hidden ? "Show on public page" : "Hide from public page"}
+                  className="shrink-0 w-7 h-7 border-2 border-line bg-background rounded-sm nb-press text-xs"
+                >
+                  {s.hidden ? "🚫" : "👁"}
+                </button>
+                <button
+                  type="button"
+                  aria-label="Remove sound"
+                  onClick={() => update(songs.filter((_, j) => j !== i))}
+                  className="shrink-0 w-7 h-7 border-2 border-line bg-background rounded-sm font-black nb-press"
+                >
+                  ×
+                </button>
+              </div>
+              <div className="flex gap-1.5 flex-wrap">
+                <input
+                  type="text"
+                  value={s.title ?? ""}
+                  onChange={(e) => patch(i, { title: e.target.value })}
+                  placeholder="Sound name"
+                  className="flex-1 min-w-[140px] border-2 border-line rounded-sm px-2 py-1 text-xs font-bold focus:outline-none focus:border-accent bg-background"
+                />
+                <input
+                  type="text"
+                  value={s.artist ?? ""}
+                  onChange={(e) => patch(i, { artist: e.target.value })}
+                  placeholder="Artist (optional)"
+                  className="flex-1 min-w-[140px] border-2 border-line rounded-sm px-2 py-1 text-xs focus:outline-none focus:border-accent bg-background"
+                />
+              </div>
+              <input
+                type="text"
+                value={s.note ?? ""}
+                onChange={(e) => patch(i, { note: e.target.value })}
+                placeholder="Note for creators (e.g. start at the drop, keep volume low)"
+                className="w-full border-2 border-line rounded-sm px-2 py-1 text-xs focus:outline-none focus:border-accent bg-background"
+              />
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="flex gap-1.5 mt-2">
+        <input
+          type="url"
+          value={pasted}
+          onChange={(e) => setPasted(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              addSong(pasted);
+            }
+          }}
+          placeholder="Paste a sound link, e.g. https://www.tiktok.com/music/som-original-7448647634538580741"
+          className="flex-1 min-w-0 border-2 border-dashed border-line rounded-md px-2 py-1.5 text-xs focus:outline-none focus:border-accent bg-background"
+        />
+        <button
+          type="button"
+          onClick={() => addSong(pasted)}
+          disabled={!pasted.trim()}
+          className="shrink-0 border-2 border-line bg-accent text-accent-ink px-3 py-1.5 rounded-md nb-press text-[10px] font-black uppercase tracking-widest disabled:opacity-40"
+        >
+          + Add sound
+        </button>
+      </div>
+      <p className="text-[10px] text-muted mt-1.5">
+        Open the sound on TikTok, copy the link from the share sheet, paste it
+        here. The name fills in automatically.
+      </p>
+    </div>
+  );
+}
+
 function AssetManager({
   assets,
   onChange,
@@ -2039,9 +2814,13 @@ function AssetManager({
     { id: string; name: string; developer: string; icon: string }[] | null
   >(null);
   const [cardBusy, setCardBusy] = useState(false);
+  // "es" pulls the app's Spanish store listing (MX) and Spanish card labels.
+  const [cardLang, setCardLang] = useState<"en" | "es">("en");
   // Bible verse builder.
   const [verseOpen, setVerseOpen] = useState(false);
   const [verseRefInput, setVerseRefInput] = useState("");
+  // "es" fetches Reina-Valera 1960 with Spanish book names.
+  const [verseLang, setVerseLang] = useState<"en" | "es">("en");
   const [verseData, setVerseData] = useState<{
     ref: string;
     text: string;
@@ -2061,7 +2840,11 @@ function AssetManager({
     setVerseErr(null);
     setVerseData(null);
     try {
-      const res = await fetch(`/api/bible?ref=${encodeURIComponent(r)}`);
+      const res = await fetch(
+        `/api/bible?ref=${encodeURIComponent(r)}&translation=${
+          verseLang === "es" ? "rvr1960" : "web"
+        }`
+      );
       const j = await res.json();
       if (!j.ok) {
         setVerseErr(j.error ?? "Couldn't find that verse.");
@@ -2102,7 +2885,9 @@ function AssetManager({
     setCardBusy(true);
     try {
       const res = await fetch(
-        `/api/itunes-search?term=${encodeURIComponent(t)}&country=us`
+        `/api/itunes-search?term=${encodeURIComponent(t)}&country=${
+          cardLang === "es" ? "mx" : "us"
+        }`
       );
       const j = await res.json();
       if (j.ok) setCardApps(j.apps);
@@ -2111,13 +2896,14 @@ function AssetManager({
     }
   }
   function addCard(app: { id: string; name: string }) {
+    const es = cardLang === "es";
     update([
       ...assets,
       {
-        url: `/api/app-card?id=${app.id}&country=us`,
+        url: `/api/app-card?id=${app.id}&country=${es ? "mx" : "us"}${es ? "&lang=es" : ""}`,
         mime: "image/png",
         filename: `${app.name.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-card.png`,
-        label: `${app.name} — app card`,
+        label: es ? `${app.name}, app card` : `${app.name} — app card`,
         kind: "asset",
       },
     ]);
@@ -2323,9 +3109,18 @@ function AssetManager({
                   void fetchVerse();
                 }
               }}
-              placeholder="Verse reference (e.g. John 3:16, Psalm 23:1-3)"
+              placeholder="Verse reference (e.g. John 3:16, Marcos 16:15)"
               className="flex-1 border-2 border-line rounded-sm px-2 py-1 text-sm focus:outline-none focus:border-accent bg-background"
             />
+            <select
+              value={verseLang}
+              onChange={(e) => setVerseLang(e.target.value as "en" | "es")}
+              title="Bible language"
+              className="border-2 border-line rounded-sm px-1.5 py-1 text-xs font-bold bg-background focus:outline-none focus:border-accent"
+            >
+              <option value="en">EN · WEB</option>
+              <option value="es">ES · RVR1960</option>
+            </select>
             <button
               type="button"
               onClick={() => void fetchVerse()}
@@ -2378,6 +3173,18 @@ function AssetManager({
               placeholder="Search your app (e.g. Prayer Lock)"
               className="flex-1 border-2 border-line rounded-sm px-2 py-1 text-sm focus:outline-none focus:border-accent bg-background"
             />
+            <select
+              value={cardLang}
+              onChange={(e) => {
+                setCardLang(e.target.value as "en" | "es");
+                setCardApps(null);
+              }}
+              title="Store language — ES uses the Mexican App Store (Spanish app name + reviews)"
+              className="border-2 border-line rounded-sm px-1.5 py-1 text-xs font-bold bg-background focus:outline-none focus:border-accent"
+            >
+              <option value="en">EN · US store</option>
+              <option value="es">ES · MX store</option>
+            </select>
             <button
               type="button"
               onClick={() => void searchCardApps()}
@@ -2442,6 +3249,7 @@ function AskClaude({
   tips,
   hooks,
   currentScript,
+  example,
   onApply,
 }: {
   briefName: string;
@@ -2452,6 +3260,8 @@ function AskClaude({
   tips: string[];
   hooks: string[];
   currentScript: string;
+  // Another variant of this same format, handed over as the shape to match.
+  example?: string;
   onApply: (text: string, mode: "replace" | "append" | "new") => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -2482,6 +3292,7 @@ function AskClaude({
           tips,
           hooks,
           currentScript,
+          example,
           userPrompt: prompt,
         }),
       });
@@ -2685,6 +3496,17 @@ function ScriptManager({
   const selected =
     (selectedId && active.find((v) => v.id === selectedId)) || active[0] || null;
 
+  // Hand Claude one of this format's other variants as the shape to match, so
+  // a new variant sounds like a sibling rather than a fresh guess. Live ones
+  // are preferred because they are the versions you decided were good.
+  const exampleVariantBody = (() => {
+    const others = variants.filter(
+      (v) => v.id !== selected?.id && v.body.trim()
+    );
+    const live = others.find((v) => v.status === "live");
+    return (live ?? others[0])?.body.trim() || undefined;
+  })();
+
   function update(id: string, patch: Partial<ScriptVariant>) {
     onChange(variants.map((v) => (v.id === id ? { ...v, ...patch } : v)));
   }
@@ -2720,153 +3542,130 @@ function ScriptManager({
 
   return (
     <div>
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted flex items-center gap-2">
-          Scripts
-          <span className="text-muted/70 normal-case tracking-normal font-normal">
-            {active.length} active · {liveCount} live
+      {/* Variant strip. This used to be a grid of preview cards you had to
+          scroll past before reaching the editor — now it is one row of pills
+          so the pad is the first thing under your cursor. */}
+      <div className="flex items-center gap-1.5 flex-wrap mb-2">
+        {active.map((v) => {
+          const isSel = selected?.id === v.id;
+          return (
+            <button
+              key={v.id}
+              type="button"
+              onClick={() => setSelectedId(v.id)}
+              aria-pressed={isSel}
+              title={v.status === "live" ? "Live variant" : "Draft variant"}
+              className={`flex items-center gap-1.5 border-2 border-line rounded-sm px-2 py-1 nb-press text-[10px] font-black uppercase tracking-widest ${
+                isSel ? "bg-ink text-background" : "bg-background"
+              }`}
+            >
+              {v.status === "live" && (
+                <span className={isSel ? "opacity-80" : "text-accent"}>●</span>
+              )}
+              <span className="max-w-[160px] truncate">{v.label}</span>
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          onClick={() => addVariant()}
+          className="border-2 border-line bg-background px-2 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+        >
+          + New
+        </button>
+        {isHidden && (
+          <span className="px-1.5 py-0.5 bg-paper border-2 border-line rounded-sm text-[9px] font-black uppercase tracking-widest">
+            HIDDEN
           </span>
-          {isHidden && (
-            <span className="px-1.5 py-0.5 bg-paper border-2 border-line rounded-sm text-[9px]">
-              HIDDEN
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-1.5">
+        )}
+        <div className="ml-auto flex items-center gap-1.5">
           {headerAction}
           <button
             type="button"
-            onClick={() => addVariant()}
-            className="border-2 border-line bg-ink text-background px-2 py-0.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
-          >
-            + New
-          </button>
-          <button
-            type="button"
             onClick={onToggleHidden}
-            className="border-2 border-line bg-background px-2 py-0.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+            className="border-2 border-line bg-background px-2 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
           >
             {isHidden ? "Show" : "Hide section"}
           </button>
         </div>
       </div>
 
-      {active.length === 0 ? (
+      {active.length === 0 && (
         <button
           type="button"
           onClick={() => addVariant()}
-          className="w-full border-2 border-dashed border-line rounded-md py-8 text-sm font-bold text-muted hover:text-ink hover:border-accent nb-press"
+          className="w-full border-2 border-dashed border-line rounded-md py-16 text-sm font-bold text-muted hover:text-ink hover:border-accent nb-press"
         >
-          + Add your first script
+          + Start writing
         </button>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-          {active.map((v) => {
-            const isSel = selected?.id === v.id;
-            return (
-              <div
-                key={v.id}
-                className={`border-2 rounded-md bg-background p-2 flex flex-col gap-1.5 ${
-                  isSel ? "border-accent nb-shadow-sm" : "border-line"
-                }`}
-              >
-                <div className="flex items-center gap-1.5">
-                  <input
-                    value={v.label}
-                    onChange={(e) => update(v.id, { label: e.target.value })}
-                    className="flex-1 min-w-0 bg-transparent text-xs font-black uppercase tracking-wide focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() =>
-                      update(v.id, {
-                        status: v.status === "live" ? "draft" : "live",
-                      })
-                    }
-                    title={v.status === "live" ? "Live — click to make draft" : "Set live"}
-                    className={`px-1.5 py-0.5 rounded-sm border-2 text-[9px] font-black uppercase tracking-widest nb-press ${STATUS_STYLE[v.status]}`}
-                  >
-                    {v.status === "live" ? "● Live" : "Draft"}
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setSelectedId(v.id)}
-                  className="text-left"
-                >
-                  <pre className="text-[10px] font-mono whitespace-pre-wrap leading-snug text-ink/80 max-h-20 overflow-hidden">
-                    {v.body.trim() || "Empty — click to write…"}
-                  </pre>
-                </button>
-                <div className="flex items-center gap-1 mt-auto pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedId(v.id)}
-                    className="border-2 border-line bg-background px-1.5 py-0.5 rounded-sm nb-press text-[9px] font-black uppercase tracking-widest"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => duplicate(v)}
-                    className="border-2 border-line bg-background px-1.5 py-0.5 rounded-sm nb-press text-[9px] font-black uppercase tracking-widest"
-                  >
-                    Dup
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => update(v.id, { status: "archived" })}
-                    className="border-2 border-line bg-background px-1.5 py-0.5 rounded-sm nb-press text-[9px] font-black uppercase tracking-widest"
-                  >
-                    Hide
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => remove(v.id)}
-                    title="Delete variant"
-                    className="ml-auto border-2 border-line bg-background px-1.5 py-0.5 rounded-sm nb-press text-[9px] font-black"
-                  >
-                    ✕
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
       )}
 
       {selected && (
-        <div className="mt-3 border-2 border-line bg-paper rounded-md p-3 nb-shadow-sm">
-          <div className="flex items-center justify-between gap-2 mb-2">
-            <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
-              Editing · {selected.label}
-            </div>
-            <div className="flex items-center gap-1.5">
-              {(["live", "draft"] as const).map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => update(selected.id, { status: s })}
-                  className={`px-2 py-0.5 rounded-sm border-2 text-[9px] font-black uppercase tracking-widest nb-press ${
-                    selected.status === s ? STATUS_STYLE[s] : "bg-background border-line text-muted"
-                  }`}
-                >
-                  {s}
-                </button>
-              ))}
+        <div>
+          <div className="flex items-center gap-1.5 flex-wrap mb-1.5">
+            <input
+              value={selected.label}
+              onChange={(e) => update(selected.id, { label: e.target.value })}
+              aria-label="Variant name"
+              title="Name this variant"
+              className="w-[150px] border-2 border-line bg-background rounded-sm px-2 py-1 text-[11px] font-black uppercase tracking-widest focus:outline-none focus:border-accent"
+            />
+            {(["live", "draft"] as const).map((s) => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => update(selected.id, { status: s })}
+                className={`px-2 py-1 rounded-sm border-2 text-[9px] font-black uppercase tracking-widest nb-press ${
+                  selected.status === s
+                    ? STATUS_STYLE[s]
+                    : "bg-background border-line text-muted"
+                }`}
+              >
+                {s}
+              </button>
+            ))}
+            <span className="text-[10px] font-bold text-muted">
+              {active.length} active · {liveCount} live
+            </span>
+            <div className="ml-auto flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => duplicate(selected)}
+                className="border-2 border-line bg-background px-2 py-1 rounded-sm nb-press text-[9px] font-black uppercase tracking-widest"
+              >
+                Dup
+              </button>
+              <button
+                type="button"
+                onClick={() => update(selected.id, { status: "archived" })}
+                title="Move this variant to Hidden"
+                className="border-2 border-line bg-background px-2 py-1 rounded-sm nb-press text-[9px] font-black uppercase tracking-widest"
+              >
+                Hide
+              </button>
+              <button
+                type="button"
+                onClick={() => remove(selected.id)}
+                title="Delete variant"
+                className="border-2 border-line bg-background px-2 py-1 rounded-sm nb-press text-[9px] font-black hover:bg-[#fee2e2]"
+              >
+                ✕
+              </button>
             </div>
           </div>
           <textarea
             value={selected.body}
             onChange={(e) => update(selected.id, { body: e.target.value })}
-            rows={8}
+            rows={22}
+            autoFocus
             placeholder={`00:00 First line of the script.\n00:03 Next line.\n00:11 ...`}
-            className="w-full border-2 border-line rounded-md px-2 py-2 text-sm focus:outline-none focus:border-accent bg-background leading-relaxed font-mono"
+            className="w-full min-h-[62vh] resize-y border-2 border-line rounded-md px-3 py-3 text-[15px] focus:outline-none focus:border-accent bg-background leading-[1.9] font-mono nb-shadow-sm"
           />
           <p className="text-[10px] text-muted mt-1">
             One line per beat — start each with a timestamp like{" "}
             <code className="font-mono">00:03</code>. The <b>live</b> variant
-            renders on the public format page.
+            renders on the public format page. Shot-by-shot instructions live on
+            the <b>Structure</b> tab.
           </p>
           <AskClaude
             briefName={briefName}
@@ -2877,6 +3676,7 @@ function ScriptManager({
             tips={[]}
             hooks={hooks}
             currentScript={selected.body}
+            example={exampleVariantBody}
             onApply={(text, mode) => {
               if (mode === "new") {
                 addVariant(text);
@@ -2941,6 +3741,7 @@ function ScriptManager({
 const COPY_PARTS: { key: string; label: string }[] = [
   { key: "pins", label: "Videos" },
   { key: "assets", label: "Assets" },
+  { key: "songs", label: "Sounds" },
   { key: "script", label: "Script" },
   { key: "structure", label: "Structure" },
   { key: "sectionOrder", label: "Section order" },
@@ -3117,6 +3918,103 @@ function CopyFromFormat({
   );
 }
 
+type StudioTab =
+  | "script"
+  | "structure"
+  | "examples"
+  | "assets"
+  | "sounds"
+  | "hooks"
+  | "details"
+  | "preview";
+
+const STUDIO_TABS: { id: StudioTab; label: string; icon: string }[] = [
+  { id: "script", label: "Script", icon: "✎" },
+  { id: "structure", label: "Structure", icon: "◫" },
+  { id: "examples", label: "Examples", icon: "▶" },
+  { id: "assets", label: "Assets", icon: "⬇" },
+  { id: "sounds", label: "Sounds", icon: "♪" },
+  { id: "hooks", label: "Hooks", icon: "⚓" },
+  { id: "details", label: "Details", icon: "⚙" },
+  { id: "preview", label: "Preview", icon: "👁" },
+];
+
+// Vertical rail on desktop, horizontal scroller on mobile. Counts sit on the
+// tabs so a script's gaps are visible without opening every panel.
+function StudioRail({
+  tab,
+  onChange,
+  counts,
+}: {
+  tab: StudioTab;
+  onChange: (t: StudioTab) => void;
+  counts: Partial<Record<StudioTab, number>>;
+}) {
+  return (
+    <nav className="w-full lg:w-40 shrink-0 flex lg:flex-col gap-1 overflow-x-auto lg:overflow-visible pb-1 lg:pb-0 lg:sticky lg:top-2">
+      {STUDIO_TABS.map((t) => {
+        const on = t.id === tab;
+        const n = counts[t.id];
+        return (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => onChange(t.id)}
+            aria-pressed={on}
+            className={`shrink-0 flex items-center gap-2 border-2 border-line rounded-md px-2.5 py-2 nb-press text-left ${
+              on ? "bg-ink text-background" : "bg-background"
+            }`}
+          >
+            <span className="text-xs leading-none">{t.icon}</span>
+            <span className="text-[11px] font-black uppercase tracking-widest">
+              {t.label}
+            </span>
+            {n != null && n > 0 && (
+              <span
+                className={`ml-auto text-[10px] font-bold ${on ? "opacity-70" : "text-muted"}`}
+              >
+                {n}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
+// Renders the actual public component so the preview cannot drift from what
+// creators get.
+function CreatorPreview({
+  format,
+  hookCategories,
+  publicStats,
+}: {
+  format: Format;
+  hookCategories: HookCategory[];
+  publicStats: { enabled: boolean; visible?: string[] };
+}) {
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <span className="border-2 border-line bg-accent text-accent-ink px-2 py-0.5 rounded-sm text-[10px] font-black uppercase tracking-widest">
+          Creator view
+        </span>
+        <span className="text-[10px] text-muted font-bold">
+          Exactly what they see on the brief page.
+        </span>
+      </div>
+      <div className="border-2 border-line rounded-md bg-background p-4 sm:p-6 max-h-[70vh] overflow-y-auto">
+        <FormatView
+          format={format}
+          hookCategories={hookCategories}
+          publicStats={publicStats}
+        />
+      </div>
+    </div>
+  );
+}
+
 function FormatSection({
   slug,
   briefName,
@@ -3183,6 +4081,24 @@ function FormatSection({
   const [copyOpen, setCopyOpen] = useState(false);
   const [copyMsg, setCopyMsg] = useState<string | null>(null);
   const [copyBusy, setCopyBusy] = useState(false);
+  // Which workspace panel is showing. Script first: it is the thing you came
+  // here to write, everything else supports it. Mirrored into ?panel= so a
+  // refresh keeps you on the panel you were using.
+  const [tab, setTab] = useState<StudioTab>("script");
+
+  useEffect(() => {
+    const sync = () => {
+      const p = readParam("panel");
+      setTab(STUDIO_TABS.some((t) => t.id === p) ? (p as StudioTab) : "script");
+    };
+    sync();
+    return onHistoryChange(sync);
+  }, []);
+
+  function selectPanel(next: StudioTab) {
+    setTab(next);
+    writeParams({ panel: next === "script" ? null : next });
+  }
 
   // Picker excludes globally-blocked videos + the current section's own pins
   // (to prevent duplicate pin in the same section). Pins in OTHER sections
@@ -3228,8 +4144,53 @@ function FormatSection({
     });
   };
 
+  // Counts on the rail so you can see what a script is still missing without
+  // opening every tab.
+  const railCounts: Partial<Record<StudioTab, number>> = {
+    examples: pins.length,
+    assets: (override.assets ?? []).length,
+    sounds: (override.songs ?? []).length,
+    script: normalizeVariants(override).length,
+    structure: (override.structure ?? defaultStructure).length,
+  };
+
+  // The Preview tab renders the real creator component, not a mock-up, so what
+  // you see here is what ships.
+  const previewFormat: Format = {
+    slug,
+    // bestFor/tips are not part of FormatSectionKey, so the public view never
+    // renders them; empty keeps the shape valid without inventing content.
+    bestFor: [],
+    tips: [],
+    title: effectiveTitle,
+    tagline: override.tagline ?? defaultTagline,
+    description: override.description ?? defaultDescription,
+    script: resolveLiveScript(normalizeVariants(override)),
+    structure:
+      override.structure && override.structure.length > 0
+        ? override.structure
+        : defaultStructure.map((t) => ({ text: t })),
+    examples: pinnedVideos,
+    hiddenSections: (override.hiddenSections ?? []) as FormatSectionKey[],
+    sectionOrder: override.sectionOrder as FormatSectionKey[] | undefined,
+    assets: override.assets ?? [],
+    songs: override.songs ?? [],
+    hookCategorySlugs: linkedHookSlugs,
+  };
+  const previewHooks: HookCategory[] = (hookCategories ?? defaultHookCategories).map(
+    (c) => ({
+      slug: c.slug,
+      title: c.title,
+      summary: c.summary ?? "",
+      whyItWorks: c.whyItWorks ?? "",
+      hooks: c.hooks,
+    })
+  );
+
   return (
-    <div>
+    <div className="flex flex-col lg:flex-row gap-4 items-start">
+      <StudioRail tab={tab} onChange={selectPanel} counts={railCounts} />
+      <div className="flex-1 min-w-0 w-full">
       <div className="flex items-baseline justify-between gap-2 flex-wrap mb-3">
         <div className="flex items-center gap-2 flex-wrap">
           <code className="font-mono text-[11px] text-muted border-2 border-line bg-paper px-1.5 py-0.5 rounded-sm">
@@ -3331,251 +4292,306 @@ function FormatSection({
         </p>
       )}
 
-      <CopyFromFormat otherFormats={otherFormats} onApply={onCopyPartsFrom} />
-
-      <SectionStats
-        videos={pinnedVideos}
-        visible={publicStatsVisible}
-        publicEnabled={publicStatsEnabled}
-        onChange={onPublicStatsChange}
-      />
-
-      <div className="space-y-2 mb-4">
-        <label className="block">
-          <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
-            Title
-          </span>
-          <input
-            type="text"
-            value={override.title ?? defaultTitle}
-            onChange={(e) =>
-              onChangeOverride({ ...override, title: e.target.value })
-            }
-            className="mt-1 w-full border-2 border-line rounded-md px-2 py-1.5 text-lg font-black focus:outline-none focus:border-accent bg-background"
-          />
-        </label>
-        <label className="block">
-          <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
-            Tagline
-          </span>
-          <input
-            type="text"
-            value={override.tagline ?? defaultTagline}
-            onChange={(e) =>
-              onChangeOverride({ ...override, tagline: e.target.value })
-            }
-            className="mt-1 w-full border-2 border-line rounded-md px-2 py-1.5 text-sm focus:outline-none focus:border-accent bg-background"
-          />
-        </label>
-        <details className="mt-1">
-          <summary className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted cursor-pointer">
-            Description
-          </summary>
-          <textarea
-            value={override.description ?? defaultDescription}
-            onChange={(e) =>
-              onChangeOverride({ ...override, description: e.target.value })
-            }
-            rows={5}
-            className="mt-2 w-full border-2 border-line rounded-md px-2 py-2 text-sm focus:outline-none focus:border-accent bg-background leading-relaxed"
-          />
-        </details>
-        {(override.title ||
-          override.tagline ||
-          override.description ||
-          override.script ||
-          override.structure ||
-          override.hiddenSections ||
-          override.sectionOrder ||
-          override.assets) && (
-          <button
-            type="button"
-            onClick={() => onChangeOverride({})}
-            className="text-[10px] font-bold uppercase tracking-widest text-muted hover:text-accent underline"
-          >
-            Reset to default
-          </button>
-        )}
-      </div>
-
-      <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">
-        <h3 className="text-base font-black">
-          {effectiveTitle}
-          {isSectionHidden("examples") && (
-            <span className="ml-2 px-1.5 py-0.5 bg-paper border-2 border-line rounded-sm text-[9px] font-bold uppercase tracking-widest align-middle">
-              VIDEOS HIDDEN
-            </span>
-          )}
-        </h3>
-        <div className="flex items-center gap-1.5">
-          <SectionCopyButton
-            part="pins"
-            label="videos"
-            otherFormats={otherFormats}
-            onApply={onCopyPartsFrom}
-          />
-          <button
-            type="button"
-            onClick={() => toggleSectionHidden("examples")}
-            className="border-2 border-line bg-background px-2 py-0.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
-          >
-            {isSectionHidden("examples") ? "Show videos" : "Hide videos"}
-          </button>
-        </div>
-      </div>
-      <p className="text-xs text-muted mb-3">
-        {pinnedVideos.length > 0
-          ? `Showing ${pinnedVideos.length} ${pinnedVideos.length === 1 ? "video" : "videos"} to viewers.`
-          : "No videos yet — add them below."}
-      </p>
-
-      {pinnedVideos.length > 0 ? (
-        <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1 mb-4">
-          {pinnedVideos.map((v) => (
-            <VideoChip
-              key={v.dbId}
-              video={v}
-              fallbackId={v.dbId}
-              onRemove={() => {
-                if (v.dbId) onChangePins(pins.filter((x) => x !== v.dbId));
-              }}
-            />
-          ))}
-        </div>
-      ) : (
-        <p className="text-xs text-muted mb-3 italic">
-          Empty. Use the picker below.
-        </p>
-      )}
-
-      <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-2">
-        Add a video
-      </div>
-      <VideoPicker
-        excludedIds={sectionExcluded}
-        scopedProjectIds={scopedProjectIds}
-        onPick={onPickVideo}
-        placeholder="Search @creator or caption…"
-      />
-
-      <div className="mt-6 pt-5 border-t-2 border-line space-y-5">
-        <SectionOrderEditor
-          value={override.sectionOrder}
-          onChange={(next) =>
-            onChangeOverride({ ...override, sectionOrder: next })
-          }
-          headerAction={
-            <SectionCopyButton
-              part="sectionOrder"
-              label="section order"
-              otherFormats={otherFormats}
-              onApply={onCopyPartsFrom}
-            />
-          }
-        />
-        <ListEditor
-          label="Shot-by-shot structure"
-          items={override.structure}
-          defaults={defaultStructure}
-          itemLabel="segment"
-          rows={2}
-          placeholder="0–2s: Hook. ..."
-          numbered
-          hidden={isSectionHidden("structure")}
-          onToggleHidden={() => toggleSectionHidden("structure")}
-          onChange={(next) =>
-            onChangeOverride({ ...override, structure: next })
-          }
-          headerAction={
-            <SectionCopyButton
-              part="structure"
-              label="structure"
-              otherFormats={otherFormats}
-              onApply={onCopyPartsFrom}
-            />
-          }
-        />
-        <div className={isSectionHidden("script") ? "opacity-60" : undefined}>
-          <ScriptManager
-            variants={normalizeVariants(override)}
+      {/* Structure lives on its own tab: opening Script should drop you
+          straight into the writing pad, not a wall of shot instructions. */}
+      {tab === "structure" && (
+        <>
+          <ListEditor
+            label="Shot-by-shot structure"
+            items={override.structure}
+            defaults={defaultStructure}
+            itemLabel="segment"
+            rows={2}
+            placeholder="0–2s: Hook. ..."
+            numbered
+            hidden={isSectionHidden("structure")}
+            onToggleHidden={() => toggleSectionHidden("structure")}
             onChange={(next) =>
-              onChangeOverride({
-                ...override,
-                scriptVariants: next.length ? next : undefined,
-                script: firstLiveBody(next),
-              })
+              onChangeOverride({ ...override, structure: next })
             }
-            isHidden={isSectionHidden("script")}
-            onToggleHidden={() => toggleSectionHidden("script")}
             headerAction={
               <SectionCopyButton
-                part="script"
-                label="script"
+                part="structure"
+                label="structure"
                 otherFormats={otherFormats}
                 onApply={onCopyPartsFrom}
               />
             }
-            briefName={briefName}
-            formatTitle={effectiveTitle}
-            formatTagline={override.tagline ?? defaultTagline}
-            formatDescription={override.description ?? defaultDescription}
-            structure={(override.structure ?? defaultStructure.map((t) => ({ text: t })))
-              .filter((i) => !("hidden" in i ? i.hidden : false))
-              .map((i) => (typeof i === "string" ? i : i.text))
-              .filter(Boolean)}
-            hooks={(() => {
-              const cats = hookCategories ?? [];
-              const linked = linkedHookSlugs
-                .map((s) => cats.find((c) => c.slug === s))
-                .filter((c): c is BriefHookCategory => !!c);
-              const fromBrief = linked.flatMap((c) =>
-                c.hooks.filter((h) => !h.hidden).map((h) => h.text)
-              );
-              if (fromBrief.length > 0) return fromBrief.filter(Boolean);
-              return defaultHookCategories
-                .flatMap((c) => c.hooks.map((h) => h.text))
-                .filter(Boolean);
-            })()}
           />
-          <div className="mt-6 pt-5 border-t-2 border-line">
-            <AssetManager
-              assets={override.assets ?? []}
+        </>
+      )}
+
+      {tab === "script" && (
+        <>
+  <div className={isSectionHidden("script") ? "opacity-60" : undefined}>
+            <ScriptManager
+              variants={normalizeVariants(override)}
               onChange={(next) =>
-                onChangeOverride({ ...override, assets: next })
+                onChangeOverride({
+                  ...override,
+                  scriptVariants: next.length ? next : undefined,
+                  script: firstLiveBody(next),
+                })
               }
+              isHidden={isSectionHidden("script")}
+              onToggleHidden={() => toggleSectionHidden("script")}
               headerAction={
                 <SectionCopyButton
-                  part="assets"
-                  label="assets"
+                  part="script"
+                  label="script"
+                  otherFormats={otherFormats}
+                  onApply={onCopyPartsFrom}
+                />
+              }
+              briefName={briefName}
+              formatTitle={effectiveTitle}
+              formatTagline={override.tagline ?? defaultTagline}
+              formatDescription={override.description ?? defaultDescription}
+              structure={(override.structure ?? defaultStructure.map((t) => ({ text: t })))
+                .filter((i) => !("hidden" in i ? i.hidden : false))
+                .map((i) => (typeof i === "string" ? i : i.text))
+                .filter(Boolean)}
+              hooks={(() => {
+                const cats = hookCategories ?? [];
+                const linked = linkedHookSlugs
+                  .map((s) => cats.find((c) => c.slug === s))
+                  .filter((c): c is BriefHookCategory => !!c);
+                const fromBrief = linked.flatMap((c) =>
+                  c.hooks.filter((h) => !h.hidden).map((h) => h.text)
+                );
+                if (fromBrief.length > 0) return fromBrief.filter(Boolean);
+                return defaultHookCategories
+                  .flatMap((c) => c.hooks.map((h) => h.text))
+                  .filter(Boolean);
+              })()}
+            />
+  </div>
+        </>
+      )}
+
+      {tab === "examples" && (
+        <>
+        <SectionStats
+          videos={pinnedVideos}
+          visible={publicStatsVisible}
+          publicEnabled={publicStatsEnabled}
+          onChange={onPublicStatsChange}
+        />
+
+        <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">
+          <h3 className="text-base font-black">
+            {effectiveTitle}
+            {isSectionHidden("examples") && (
+              <span className="ml-2 px-1.5 py-0.5 bg-paper border-2 border-line rounded-sm text-[9px] font-bold uppercase tracking-widest align-middle">
+                VIDEOS HIDDEN
+              </span>
+            )}
+          </h3>
+          <div className="flex items-center gap-1.5">
+            <SectionCopyButton
+              part="pins"
+              label="videos"
+              otherFormats={otherFormats}
+              onApply={onCopyPartsFrom}
+            />
+            <button
+              type="button"
+              onClick={() => toggleSectionHidden("examples")}
+              className="border-2 border-line bg-background px-2 py-0.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+            >
+              {isSectionHidden("examples") ? "Show videos" : "Hide videos"}
+            </button>
+          </div>
+        </div>
+        <p className="text-xs text-muted mb-3">
+          {pinnedVideos.length > 0
+            ? `Showing ${pinnedVideos.length} ${pinnedVideos.length === 1 ? "video" : "videos"} to viewers.`
+            : "No videos yet — add them below."}
+        </p>
+
+        {pinnedVideos.length > 0 ? (
+          <div className="flex gap-3 overflow-x-auto pb-2 -mx-1 px-1 mb-4">
+            {pinnedVideos.map((v) => (
+              <VideoChip
+                key={v.dbId}
+                video={v}
+                fallbackId={v.dbId}
+                onRemove={() => {
+                  if (v.dbId) onChangePins(pins.filter((x) => x !== v.dbId));
+                }}
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-muted mb-3 italic">
+            Empty. Use the picker below.
+          </p>
+        )}
+
+        <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-2">
+          Add a video
+        </div>
+        <VideoPicker
+          excludedIds={sectionExcluded}
+          scopedProjectIds={scopedProjectIds}
+          onPick={onPickVideo}
+          placeholder="Search @creator or caption…"
+        />
+        </>
+      )}
+
+      {tab === "assets" && (
+        <>
+              <AssetManager
+                assets={override.assets ?? []}
+                onChange={(next) =>
+                  onChangeOverride({ ...override, assets: next })
+                }
+                headerAction={
+                  <SectionCopyButton
+                    part="assets"
+                    label="assets"
+                    otherFormats={otherFormats}
+                    onApply={onCopyPartsFrom}
+                  />
+                }
+              />
+        </>
+      )}
+
+      {tab === "sounds" && (
+        <>
+            <SongManager
+              songs={override.songs ?? []}
+              onChange={(next) => onChangeOverride({ ...override, songs: next })}
+              hidden={isSectionHidden("songs")}
+              onToggleHidden={() => toggleSectionHidden("songs")}
+              headerAction={
+                <SectionCopyButton
+                  part="songs"
+                  label="sounds"
                   otherFormats={otherFormats}
                   onApply={onCopyPartsFrom}
                 />
               }
             />
+        </>
+      )}
+
+      {tab === "hooks" && (
+        <>
+          <div className={isSectionHidden("hooks") ? "opacity-60" : undefined}>
+            <div className="flex items-center justify-end gap-2 mb-2">
+              {isSectionHidden("hooks") && (
+                <span className="px-1.5 py-0.5 bg-paper border-2 border-line rounded-sm text-[9px] font-bold uppercase tracking-widest">
+                  HIDDEN
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => toggleSectionHidden("hooks")}
+                className="border-2 border-line bg-background px-2 py-0.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+              >
+                {isSectionHidden("hooks") ? "Show hooks" : "Hide hooks"}
+              </button>
+            </div>
+            <FormatHooksInline
+              linkedSlugs={linkedHookSlugs}
+              defaults={defaultHookCategories}
+              hookCategories={hookCategories}
+              onChange={onChangeHookCategories}
+            />
           </div>
-        </div>
-        <div className={isSectionHidden("hooks") ? "opacity-60" : undefined}>
-          <div className="flex items-center justify-end gap-2 mb-2">
-            {isSectionHidden("hooks") && (
-              <span className="px-1.5 py-0.5 bg-paper border-2 border-line rounded-sm text-[9px] font-bold uppercase tracking-widest">
-                HIDDEN
-              </span>
-            )}
+        </>
+      )}
+
+      {tab === "details" && (
+        <>
+        <CopyFromFormat otherFormats={otherFormats} onApply={onCopyPartsFrom} />
+
+        <div className="space-y-2 mb-4">
+          <label className="block">
+            <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+              Title
+            </span>
+            <input
+              type="text"
+              value={override.title ?? defaultTitle}
+              onChange={(e) =>
+                onChangeOverride({ ...override, title: e.target.value })
+              }
+              className="mt-1 w-full border-2 border-line rounded-md px-2 py-1.5 text-lg font-black focus:outline-none focus:border-accent bg-background"
+            />
+          </label>
+          <label className="block">
+            <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+              Tagline
+            </span>
+            <input
+              type="text"
+              value={override.tagline ?? defaultTagline}
+              onChange={(e) =>
+                onChangeOverride({ ...override, tagline: e.target.value })
+              }
+              className="mt-1 w-full border-2 border-line rounded-md px-2 py-1.5 text-sm focus:outline-none focus:border-accent bg-background"
+            />
+          </label>
+          <details className="mt-1">
+            <summary className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted cursor-pointer">
+              Description
+            </summary>
+            <textarea
+              value={override.description ?? defaultDescription}
+              onChange={(e) =>
+                onChangeOverride({ ...override, description: e.target.value })
+              }
+              rows={5}
+              className="mt-2 w-full border-2 border-line rounded-md px-2 py-2 text-sm focus:outline-none focus:border-accent bg-background leading-relaxed"
+            />
+          </details>
+          {(override.title ||
+            override.tagline ||
+            override.description ||
+            override.script ||
+            override.structure ||
+            override.hiddenSections ||
+            override.sectionOrder ||
+            override.assets ||
+            override.songs) && (
             <button
               type="button"
-              onClick={() => toggleSectionHidden("hooks")}
-              className="border-2 border-line bg-background px-2 py-0.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+              onClick={() => onChangeOverride({})}
+              className="text-[10px] font-bold uppercase tracking-widest text-muted hover:text-accent underline"
             >
-              {isSectionHidden("hooks") ? "Show hooks" : "Hide hooks"}
+              Reset to default
             </button>
-          </div>
-          <FormatHooksInline
-            linkedSlugs={linkedHookSlugs}
-            defaults={defaultHookCategories}
-            hookCategories={hookCategories}
-            onChange={onChangeHookCategories}
-          />
+          )}
         </div>
+
+          <SectionOrderEditor
+            value={override.sectionOrder}
+            onChange={(next) =>
+              onChangeOverride({ ...override, sectionOrder: next })
+            }
+            headerAction={
+              <SectionCopyButton
+                part="sectionOrder"
+                label="section order"
+                otherFormats={otherFormats}
+                onApply={onCopyPartsFrom}
+              />
+            }
+          />
+        </>
+      )}
+
+      {tab === "preview" && (
+        <CreatorPreview
+          format={previewFormat}
+          hookCategories={previewHooks}
+          publicStats={{ enabled: publicStatsEnabled, visible: publicStatsVisible }}
+        />
+      )}
       </div>
     </div>
   );

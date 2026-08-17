@@ -7,6 +7,8 @@ import { getBrief, getCuration } from "@/lib/db";
 import type { HookCategory } from "@/lib/types";
 import { getFormatsForRender } from "@/lib/format-videos";
 import { briefAccessRequired, currentCreator, creatorHasAccess } from "@/lib/brief-gate";
+import { getLang } from "@/lib/lang";
+import { localizeBriefContent } from "@/lib/translate";
 
 export const dynamic = "force-dynamic";
 
@@ -62,16 +64,24 @@ export default async function BriefOverview({
           hooks: c.hooks,
         }))
       : defaultHooks;
+  const lang = await getLang();
+  const loc = await localizeBriefContent(lang, brief.slug, {
+    overview: brief.overview,
+    hookCategories: hooks,
+    formats,
+    contentCalendar: curation.contentCalendar ?? null,
+  });
   return (
     <Shell
-      formats={formats}
-      hookCategories={hooks}
+      formats={loc.formats ?? formats}
+      hookCategories={loc.hookCategories ?? hooks}
       activeId={overviewId}
+      lang={lang}
       brief={{
         slug: brief.slug,
         name: brief.name,
         logoUrl: brief.logoUrl,
-        overview: brief.overview,
+        overview: loc.overview ?? brief.overview,
       }}
       useAllHooks={
         !!(brief.hookCategories && brief.hookCategories.length > 0)
@@ -79,7 +89,7 @@ export default async function BriefOverview({
       publicStats={curation.publicStats}
       hideOverview={curation.hideOverview}
       hideFormatsList={curation.hideFormatsList}
-      contentCalendar={curation.contentCalendar}
+      contentCalendar={loc.contentCalendar ?? curation.contentCalendar}
       onboardingEnabled={
         !!(brief.onboarding?.enabled && (brief.onboarding.steps?.length ?? 0) > 0)
       }

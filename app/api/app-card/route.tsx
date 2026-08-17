@@ -29,11 +29,16 @@ async function loadFonts(): Promise<FontDef[]> {
 // Generates a live App Store-style card PNG (logo, title, rating, recent
 // reviews) for a given App Store id. Always pulls fresh reviews, so the asset
 // stays current instead of being a stale screenshot.
-// GET /api/app-card?id=<appId>&country=us&n=3[&download=1]
+// GET /api/app-card?id=<appId>&country=us&n=3[&lang=es][&download=1]
+// country controls the store the metadata comes from (mx/es give the app's
+// localized Spanish name + Spanish reviews); lang localizes the card's own
+// labels ("ratings" → "calificaciones").
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const id = (searchParams.get("id") ?? "").match(/\d{4,}/)?.[0];
   const country = (searchParams.get("country") || "us").toLowerCase().slice(0, 2);
+  const lang = (searchParams.get("lang") || "en").toLowerCase().slice(0, 2);
+  const ratingsWord = lang === "es" ? "calificaciones" : "ratings";
   // Default 0 = just the app card (logo, name, rating). n>0 adds review cards.
   const n = Math.min(4, Math.max(0, parseInt(searchParams.get("n") || "0", 10) || 0));
   const showReviews = n > 0;
@@ -160,7 +165,16 @@ export async function GET(req: Request) {
                 {subtitle}
               </div>
             ) : null}
-            <div style={{ display: "flex", alignItems: "center", marginTop: 22 }}>
+            {/* flexWrap so long localized words ("calificaciones") drop to the
+                next line instead of colliding with the rating number. */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                marginTop: 22,
+                flexWrap: "wrap",
+              }}
+            >
               <StarRow value={rating} size={58} />
               <div
                 style={{
@@ -181,10 +195,9 @@ export async function GET(req: Request) {
                     color: "#A0A0A0",
                     marginLeft: 16,
                     whiteSpace: "nowrap",
-                    flexShrink: 0,
                   }}
                 >
-                  {fmtCount(ratingCount)} ratings
+                  {fmtCount(ratingCount)} {ratingsWord}
                 </div>
               ) : null}
             </div>

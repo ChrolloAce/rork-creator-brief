@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import type { VideoExample } from "@/lib/types";
 import type { VideoAnalysis } from "@/lib/analyses";
+import { thumbSrc } from "@/lib/thumb";
 
 const platformLabel: Record<string, string> = {
   instagram: "Instagram",
@@ -92,7 +93,7 @@ export function VideoModal({
           <div className="w-16 h-20 sm:w-20 sm:h-24 border-2 border-line bg-paper rounded-sm overflow-hidden shrink-0">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={video.thumbnail}
+              src={thumbSrc(video.thumbnail, video.url)}
               alt=""
               className="w-full h-full object-cover"
             />

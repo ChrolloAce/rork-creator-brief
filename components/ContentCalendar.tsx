@@ -5,13 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import type { ContentCalendar as ContentCalendarData } from "@/lib/db";
 import type { Format } from "@/lib/types";
-
-// Monday-first weekday labels. JS getDay() is Sunday=0, so we remap.
-const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const MONTHS = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December",
-];
+import { CAL_MONTHS, CAL_WEEKDAYS, t, type Lang } from "@/lib/i18n";
 
 // Parse "YYYY-MM-DD" into a local Date (no timezone surprises from the
 // Date(string) constructor, which treats bare dates as UTC).
@@ -33,20 +27,22 @@ function mondayIndex(d: Date): number {
   return (d.getDay() + 6) % 7;
 }
 
-function prettyDate(iso: string): string {
+function prettyDate(iso: string, lang: Lang): string {
   const d = parseISODate(iso);
   if (!d) return iso;
-  return `${WEEKDAYS[mondayIndex(d)]} · ${MONTHS[d.getMonth()]} ${d.getDate()}`;
+  return `${CAL_WEEKDAYS[lang][mondayIndex(d)]} · ${CAL_MONTHS[lang][d.getMonth()]} ${d.getDate()}`;
 }
 
 export function ContentCalendarView({
   calendar,
   formats,
   briefSlug,
+  lang = "en",
 }: {
   calendar: ContentCalendarData;
   formats: Format[];
   briefSlug: string;
+  lang?: Lang;
 }) {
   const router = useRouter();
   const formatBySlug = useMemo(() => {
@@ -165,33 +161,30 @@ export function ContentCalendarView({
     <div className="space-y-8">
       <header className="space-y-4">
         <div className="inline-flex items-center gap-2 border-2 border-line bg-accent text-accent-ink px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.2em] rounded-sm">
-          Content Calendar
+          {t(lang, "contentCalendar")}
         </div>
         <h1 className="text-3xl sm:text-4xl font-black tracking-tight leading-tight">
-          {calendar.title?.trim() || "What to film, and when"}
+          {calendar.title?.trim() || t(lang, "whatToFilm")}
         </h1>
         {calendar.intro?.trim() && (
           <p className="text-base sm:text-lg text-ink-soft max-w-2xl leading-relaxed whitespace-pre-line">
             {calendar.intro}
           </p>
         )}
-        <p className="text-sm text-muted">
-          Tap any highlighted day to see the scripts to record. Look ahead and
-          batch-record several at once.
-        </p>
+        <p className="text-sm text-muted">{t(lang, "tapDay")}</p>
       </header>
 
       {/* Month grid */}
       <section className="border-2 border-line bg-background rounded-md nb-shadow p-4 sm:p-5">
         <div className="flex items-center justify-between gap-2 mb-4">
           <h2 className="text-lg sm:text-xl font-black">
-            {MONTHS[view.month]} {view.year}
+            {CAL_MONTHS[lang][view.month]} {view.year}
           </h2>
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => step(-1)}
-              aria-label="Previous month"
+              aria-label={t(lang, "prevMonth")}
               className="w-9 h-9 border-2 border-line bg-background rounded-md font-black nb-press flex items-center justify-center"
             >
               ‹
@@ -201,12 +194,12 @@ export function ContentCalendarView({
               onClick={goToToday}
               className="border-2 border-line bg-background px-2.5 h-9 rounded-md font-black nb-press text-[10px] uppercase tracking-widest"
             >
-              Today
+              {t(lang, "today")}
             </button>
             <button
               type="button"
               onClick={() => step(1)}
-              aria-label="Next month"
+              aria-label={t(lang, "nextMonth")}
               className="w-9 h-9 border-2 border-line bg-background rounded-md font-black nb-press flex items-center justify-center"
             >
               ›
@@ -217,16 +210,16 @@ export function ContentCalendarView({
         <div className="flex items-center gap-4 mb-3 text-[10px] font-bold uppercase tracking-widest text-muted">
           <span className="inline-flex items-center gap-1.5">
             <span className="w-3.5 h-3.5 rounded-sm border-2 border-line bg-accent" />
-            To film
+            {t(lang, "toFilm")}
           </span>
           <span className="inline-flex items-center gap-1.5">
             <span className="w-3.5 h-3.5 rounded-sm border-2 border-line bg-success" />
-            Done
+            {t(lang, "doneWord")}
           </span>
         </div>
 
         <div className="grid grid-cols-7 gap-1.5 mb-1.5">
-          {WEEKDAYS.map((w) => (
+          {CAL_WEEKDAYS[lang].map((w) => (
             <div
               key={w}
               className="text-center text-[10px] uppercase tracking-[0.15em] font-bold text-muted py-1"
@@ -260,11 +253,11 @@ export function ContentCalendarView({
                 disabled={!has}
                 onClick={() => selectDay(iso)}
                 aria-pressed={isSelected}
-                aria-label={`${prettyDate(iso)}${
+                aria-label={`${prettyDate(iso, lang)}${
                   has
                     ? allDone
-                      ? ", all done"
-                      : `, ${count} ${count === 1 ? "video" : "videos"} to film`
+                      ? `, ${t(lang, "allDone")}`
+                      : `, ${count} ${count === 1 ? t(lang, "videoWord") : t(lang, "videosWord")} ${t(lang, "toFilmSuffix")}`
                     : ""
                 }`}
                 className={`min-h-[44px] sm:min-h-[56px] border-2 rounded-md p-2 text-left transition-transform ${statusClass} ${
@@ -282,7 +275,9 @@ export function ContentCalendarView({
       {selectedDay && selectedDay.assignments.length > 0 ? (
         <section className="space-y-4">
           <div className="flex items-baseline justify-between gap-2 flex-wrap">
-            <h2 className="text-xl font-black">{prettyDate(selectedDay.date)}</h2>
+            <h2 className="text-xl font-black">
+              {prettyDate(selectedDay.date, lang)}
+            </h2>
             <div className="flex items-center gap-1.5 flex-wrap">
               {(() => {
                 const total = selectedDay.assignments.length;
@@ -291,13 +286,16 @@ export function ContentCalendarView({
                 ).length;
                 return doneCount > 0 ? (
                   <span className="inline-flex items-center border-2 border-line bg-success text-success-ink px-2 py-0.5 text-[11px] font-bold uppercase tracking-widest rounded-sm">
-                    {doneCount}/{total} done
+                    {doneCount}/{total} {t(lang, "doneSuffix")}
                   </span>
                 ) : null;
               })()}
               <span className="inline-flex items-center border-2 border-line bg-accent text-accent-ink px-2 py-0.5 text-[11px] font-bold uppercase tracking-widest rounded-sm">
                 {selectedDay.assignments.length}{" "}
-                {selectedDay.assignments.length === 1 ? "script" : "scripts"} to film
+                {selectedDay.assignments.length === 1
+                  ? t(lang, "scriptWord")
+                  : t(lang, "scriptsWord")}{" "}
+                {t(lang, "toFilmSuffix")}
               </span>
             </div>
           </div>
@@ -307,7 +305,7 @@ export function ContentCalendarView({
                 ? formatBySlug.get(a.formatSlug)
                 : undefined;
               const heading =
-                a.title?.trim() || linked?.title || "Script";
+                a.title?.trim() || linked?.title || t(lang, "script");
               const thumb =
                 linked?.thumbnail || linked?.examples?.[0]?.thumbnail;
               const isDone = done.has(a.id);
@@ -359,7 +357,7 @@ export function ContentCalendarView({
                       {a.note?.trim() && (
                         <div className="border-l-2 border-accent pl-3">
                           <p className="text-sm text-ink leading-relaxed whitespace-pre-line">
-                            <span className="font-bold">Note: </span>
+                            <span className="font-bold">{t(lang, "noteLabel")}</span>
                             {a.note}
                           </p>
                         </div>
@@ -367,7 +365,7 @@ export function ContentCalendarView({
                       {a.script?.trim() && (
                         <div className="border-2 border-line bg-paper rounded-md p-3 sm:p-4">
                           <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-2">
-                            Script
+                            {t(lang, "script")}
                           </div>
                           <p className="text-ink leading-relaxed whitespace-pre-line text-sm">
                             {a.script}
@@ -381,7 +379,7 @@ export function ContentCalendarView({
                             onClick={(e) => e.stopPropagation()}
                             className="inline-flex border-2 border-line bg-accent text-accent-ink px-2.5 py-1.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
                           >
-                            Open format →
+                            {t(lang, "openFormat")}
                           </Link>
                         )}
                         <button
@@ -397,7 +395,7 @@ export function ContentCalendarView({
                               : "bg-background text-ink"
                           }`}
                         >
-                          {isDone ? "✓ Done" : "Mark as done"}
+                          {isDone ? t(lang, "doneCheck") : t(lang, "markDone")}
                         </button>
                       </div>
                     </div>
@@ -410,9 +408,7 @@ export function ContentCalendarView({
       ) : (
         <section className="border-2 border-dashed border-line rounded-md p-6 text-center">
           <p className="text-sm font-bold text-muted">
-            {scheduledDates.length === 0
-              ? "No days scheduled yet."
-              : "Pick a highlighted day above to see the scripts."}
+            {scheduledDates.length === 0 ? t(lang, "noDays") : t(lang, "pickDay")}
           </p>
         </section>
       )}

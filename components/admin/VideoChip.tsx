@@ -1,6 +1,7 @@
 "use client";
 
 import type { VideoExample } from "@/lib/types";
+import { thumbSrc } from "@/lib/thumb";
 
 function formatViews(n?: number) {
   if (!n) return "";
@@ -51,7 +52,7 @@ export function VideoChip({
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={video.thumbnail}
+          src={thumbSrc(video.thumbnail, video.url)}
           alt={video.caption ?? ""}
           className="w-full h-full object-cover"
           loading="lazy"

@@ -1,4 +1,5 @@
 import type { Platform } from "@/lib/types";
+import { thumbSrc } from "@/lib/thumb";
 
 type Size = "sm" | "md" | "lg";
 
@@ -36,7 +37,7 @@ export function Thumbnail({
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={src}
+          src={thumbSrc(src)}
           alt={alt ?? `${slug} thumbnail`}
           className="w-full h-full object-cover"
           loading="lazy"

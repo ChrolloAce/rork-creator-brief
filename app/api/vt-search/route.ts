@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import type { CachedVideo } from "@/lib/db";
+import { videoIdFromUrl, vtFetch, vtKey } from "@/lib/viewtrack";
 
 export const dynamic = "force-dynamic";
 
 type VtVideo = {
   id: string;
-  videoId: string;
   url: string;
   platform: "instagram" | "tiktok" | "x" | "youtube";
   caption?: string;
@@ -31,13 +31,10 @@ async function fetchProjectVideos(
 ): Promise<VtVideo[]> {
   const out: VtVideo[] = [];
   for (let page = 0; page < MAX_PAGES; page++) {
-    const url = `https://viewtrack.app/api/v1/videos?projectId=${encodeURIComponent(
+    const path = `/videos?projectId=${encodeURIComponent(
       projectId
     )}&sortBy=views&sortOrder=desc&limit=${PAGE_LIMIT}&offset=${page * PAGE_LIMIT}`;
-    const res = await fetch(url, {
-      headers: { "x-api-key": key },
-      cache: "no-store",
-    });
+    const res = await vtFetch(path, key);
     if (!res.ok) break;
     const body = (await res.json()) as {
       data?: { videos?: VtVideo[]; pagination?: { hasMore?: boolean } };
@@ -58,7 +55,7 @@ function platformPrefix(platform: VtVideo["platform"]): string {
 }
 
 export async function GET(req: Request) {
-  const key = process.env.VIEWTRACK_API_KEY;
+  const key = vtKey();
   if (!key) {
     return NextResponse.json(
       { ok: false, error: "VIEWTRACK_API_KEY not set" },
@@ -87,7 +84,7 @@ export async function GET(req: Request) {
         merged.push({
           platform: v.platform,
           url: v.url,
-          id: v.videoId,
+          id: videoIdFromUrl(v.url, v.id),
           dbId: v.id,
           thumbnail: v.thumbnail,
           caption: (v.caption || v.title || "").replace(/\s+/g, " ").trim(),

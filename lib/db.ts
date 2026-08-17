@@ -38,6 +38,14 @@ export type FormatOverrideAsset = {
   verseText?: string;
   verseVersion?: string;
 };
+// A sound creators should use, stored as a link (usually a TikTok music page).
+export type FormatOverrideSong = {
+  url: string;
+  title?: string;
+  artist?: string;
+  note?: string;
+  hidden?: boolean;
+};
 export type FormatOverride = {
   title?: string;
   tagline?: string;
@@ -60,6 +68,8 @@ export type FormatOverride = {
   // Per-format downloadable assets (videos, images, etc.) shown on the
   // public brief page.
   assets?: FormatOverrideAsset[];
+  // Sounds/songs to use on this format, each a link creators can open.
+  songs?: FormatOverrideSong[];
 };
 
 export type CurationData = {
@@ -126,6 +136,17 @@ export type CalendarAssignment = {
   // Short tag shown as a chip (e.g. "B1", "B2"). Set when an assignment comes
   // from a group's ordered item.
   label?: string;
+  // Interchangeable alternatives for this slot. When present, each creator is
+  // handed one of [this assignment, ...pool] deterministically (lib/rotation.ts)
+  // so creators are not all filming the same script on the same day. Empty or
+  // absent means everyone sees this assignment, exactly as before.
+  pool?: {
+    formatSlug?: string;
+    title?: string;
+    script?: string;
+    note?: string;
+    label?: string;
+  }[];
 };
 
 export type CalendarDay = {
@@ -327,6 +348,9 @@ export type BriefCreator = {
   answers: Record<string, unknown>;
   status: CreatorStatus;
   clientId: string | null;
+  // Login account id. Null for code-only briefs, where there is no per-person
+  // identity and rotation therefore cannot vary by creator.
+  userId: string | null;
   createdAt: Date;
 };
 
@@ -434,6 +458,21 @@ async function runSchema() {
     )
   `;
   await sql`ALTER TABLE image_blob ADD COLUMN IF NOT EXISTS filename TEXT`;
+  // Cached video thumbnails. TikTok and Instagram serve signed CDN urls that
+  // expire (TikTok within hours, Instagram in a few days), so the url ViewTrack
+  // stored is usually dead by the time anyone looks at it. We snapshot the
+  // image the first time we see it alive; after that it never breaks again.
+  // Keyed on the post url where possible so the cache survives ViewTrack
+  // re-scraping the video and handing us a different CDN url.
+  await sql`
+    CREATE TABLE IF NOT EXISTS thumb_cache (
+      key TEXT PRIMARY KEY,
+      mime TEXT NOT NULL,
+      bytes BYTEA NOT NULL,
+      source TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `;
   // Creator-access gate (passcode + name). Dormant until access_enabled flips on.
   await sql`ALTER TABLE brief ADD COLUMN IF NOT EXISTS access_code TEXT`;
   await sql`ALTER TABLE brief ADD COLUMN IF NOT EXISTS access_enabled BOOLEAN DEFAULT false`;
@@ -464,6 +503,17 @@ async function runSchema() {
       password_hash TEXT NOT NULL,
       name TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `;
+  // Machine-translation cache for the public brief (lib/translate.ts).
+  // data maps sha1(source-string) → translated string.
+  await sql`
+    CREATE TABLE IF NOT EXISTS translation_cache (
+      brief_slug TEXT NOT NULL,
+      lang TEXT NOT NULL,
+      data JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (brief_slug, lang)
     )
   `;
   // Seed Rork brief if none exists
@@ -642,6 +692,7 @@ function rowToCreator(r: {
   answers: Record<string, unknown> | null;
   status: string | null;
   client_id: string | null;
+  user_id?: string | null;
   created_at: Date;
 }): BriefCreator {
   return {
@@ -650,6 +701,7 @@ function rowToCreator(r: {
     name: r.name,
     email: r.email,
     code: r.code,
+    userId: r.user_id ?? null,
     answers: r.answers ?? {},
     status: r.status === "approved" ? "approved" : "onboarded",
     clientId: r.client_id,
@@ -657,7 +709,10 @@ function rowToCreator(r: {
   };
 }
 
-const CREATOR_COLS = `id, brief_slug, name, email, code, answers, status, client_id, created_at`;
+// user_id is the account the creator logs in with. It is the seed the
+// per-creator rotation uses (lib/rotation.ts), so the admin preview needs it to
+// show the real split rather than an approximation.
+const CREATOR_COLS = `id, brief_slug, name, email, code, answers, status, client_id, user_id, created_at`;
 
 // Does the submitted code match the brief's passcode? (Empty brief code = any.)
 export async function verifyBriefCode(
@@ -1034,6 +1089,36 @@ export async function setCuration(
   `;
 }
 
+// ---------- Translation cache ----------
+
+export async function getTranslationCache(
+  briefSlug: string,
+  lang: string
+): Promise<Record<string, string>> {
+  await ensureSchema();
+  const sql = getSql();
+  const rows = await sql<{ data: Record<string, string> }[]>`
+    SELECT data FROM translation_cache
+    WHERE brief_slug = ${briefSlug} AND lang = ${lang}
+  `;
+  return rows[0]?.data ?? {};
+}
+
+export async function setTranslationCache(
+  briefSlug: string,
+  lang: string,
+  data: Record<string, string>
+): Promise<void> {
+  await ensureSchema();
+  const sql = getSql();
+  await sql`
+    INSERT INTO translation_cache (brief_slug, lang, data, updated_at)
+    VALUES (${briefSlug}, ${lang}, ${sql.json(data as never)}, NOW())
+    ON CONFLICT (brief_slug, lang) DO UPDATE
+    SET data = EXCLUDED.data, updated_at = NOW()
+  `;
+}
+
 // ---------- Form templates ----------
 
 export type FormFieldType =
@@ -1324,6 +1409,32 @@ export async function createImage(
   const id = `img_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
   await sql`INSERT INTO image_blob (id, mime, bytes, filename) VALUES (${id}, ${mime}, ${bytes}, ${filename ?? null})`;
   return { id };
+}
+
+export async function getThumb(
+  key: string
+): Promise<{ mime: string; bytes: Buffer } | null> {
+  await ensureSchema();
+  const sql = getSql();
+  const rows = await sql<
+    { mime: string; bytes: Buffer }[]
+  >`SELECT mime, bytes FROM thumb_cache WHERE key = ${key}`;
+  return rows[0] ?? null;
+}
+
+export async function putThumb(
+  key: string,
+  mime: string,
+  bytes: Buffer,
+  source: string
+): Promise<void> {
+  await ensureSchema();
+  const sql = getSql();
+  await sql`
+    INSERT INTO thumb_cache (key, mime, bytes, source)
+    VALUES (${key}, ${mime}, ${bytes}, ${source})
+    ON CONFLICT (key) DO UPDATE SET mime = EXCLUDED.mime, bytes = EXCLUDED.bytes, source = EXCLUDED.source
+  `;
 }
 
 export async function getImage(

@@ -4,6 +4,7 @@ import type { Format, FormatSectionKey, VideoExample } from "./types";
 import { formats as formatsMeta } from "./formats";
 import { getCuration, type CurationData } from "./db";
 import { normalizeVariants, resolveLiveScript } from "./scripts";
+import { variantSeed } from "./rotation";
 
 // Formats show ONLY manually-pinned videos. No bucket auto-fill.
 
@@ -76,7 +77,13 @@ export async function getAllFormatListings(
 // Merge static metadata with freshly-read pins + admin-set overrides,
 // filtered + ordered by the per-brief formatOrder. Cloned format slugs
 // inherit their base meta (structure/tips/etc.) from the source format.
-export async function getFormatsForRender(briefSlug?: string): Promise<Format[]> {
+// `creatorKey` spreads creators across a format's live script variants so two
+// people opening the same format do not necessarily read the same one. Omit it
+// (the v1 API, admin previews) to keep the old deterministic first-live pick.
+export async function getFormatsForRender(
+  briefSlug?: string,
+  creatorKey?: string | null
+): Promise<Format[]> {
   const curation = await getCuration(briefSlug);
   const listings = await getAllFormatListings(briefSlug);
   const deletedSet = new Set<string>(curation.deletedFormats ?? []);
@@ -111,7 +118,13 @@ export async function getFormatsForRender(briefSlug?: string): Promise<Format[]>
       title: ov.title?.trim() || meta.title,
       tagline: ov.tagline?.trim() || meta.tagline,
       description: ov.description?.trim() || meta.description,
-      script: resolveLiveScript(normalizeVariants(ov)) ?? ov.script?.trim() ?? undefined,
+      script:
+        resolveLiveScript(
+          normalizeVariants(ov),
+          creatorKey ? variantSeed(creatorKey, slug) : undefined
+        ) ??
+        ov.script?.trim() ??
+        undefined,
       structure: ov.structure && ov.structure.length > 0 ? ov.structure : meta.structure,
       tips: ov.tips && ov.tips.length > 0 ? ov.tips : meta.tips,
       bestFor: ov.bestFor && ov.bestFor.length > 0 ? ov.bestFor : meta.bestFor,
@@ -120,6 +133,7 @@ export async function getFormatsForRender(briefSlug?: string): Promise<Format[]>
       hiddenSections: (ov.hiddenSections ?? []) as FormatSectionKey[],
       sectionOrder: ov.sectionOrder as FormatSectionKey[] | undefined,
       assets: ov.assets ?? [],
+      songs: ov.songs ?? [],
     });
   }
   return out;

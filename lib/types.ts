@@ -36,6 +36,7 @@ export type FormatSectionKey =
   | "script"
   | "examples"
   | "hooks"
+  | "songs"
   | "assets";
 
 // Default rendering order on the public format page. Briefs that haven't
@@ -45,8 +46,20 @@ export const DEFAULT_SECTION_ORDER: FormatSectionKey[] = [
   "examples",
   "structure",
   "hooks",
+  "songs",
   "assets",
 ];
+
+// A sound/song creators should use on a video, pointed at by link (usually a
+// TikTok music page, e.g. tiktok.com/music/som-original-7448647634538580741).
+// Title/artist are optional labels; the link is the thing that matters.
+export type FormatSong = {
+  url: string;
+  title?: string;
+  artist?: string;
+  note?: string;
+  hidden?: boolean;
+};
 
 // Downloadable per-format reference asset — videos showing overlay style,
 // reference images, b-roll, etc. Stored out-of-band in image_blob; the
@@ -80,6 +93,7 @@ export type Format = {
   hiddenSections?: FormatSectionKey[];
   sectionOrder?: FormatSectionKey[];
   assets?: FormatAsset[];
+  songs?: FormatSong[];
 };
 
 export type HookCategory = {
