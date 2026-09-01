@@ -16,6 +16,7 @@ export const overviewId = "overview";
 export const calendarId = "calendar";
 export const onboardingId = "onboarding";
 export const studioId = "studio";
+export const hooksId = "hooks";
 export const formatId = (slug: string) => `format:${slug}`;
 
 export function buildNavSections(
@@ -26,6 +27,8 @@ export function buildNavSections(
     includeCalendar?: boolean;
     includeOnboarding?: boolean;
     includeFormats?: boolean;
+    includeHooks?: boolean;
+    hooksCount?: number;
     onboardingComplete?: boolean;
     lang?: Lang;
     // Video Builder (lib/studio.ts). Listed first when on: for the briefs
@@ -39,6 +42,7 @@ export function buildNavSections(
   const includeCalendar = options?.includeCalendar === true;
   const includeOnboarding = options?.includeOnboarding === true;
   const includeFormats = options?.includeFormats !== false;
+  const includeHooks = options?.includeHooks === true;
   const onboardingComplete = options?.onboardingComplete === true;
   const sections: NavSection[] = [];
   if (options?.studio) {
@@ -89,6 +93,20 @@ export function buildNavSections(
   }
   if (startItems.length > 0) {
     sections.push({ label: t(lang, "startHere"), items: startItems });
+  }
+  if (includeHooks) {
+    const n = options?.hooksCount ?? 0;
+    sections.push({
+      label: t(lang, "hooks"),
+      items: [
+        {
+          id: hooksId,
+          href: `${base}/hooks`,
+          title: t(lang, "hooks"),
+          meta: n > 0 ? `${n} ${t(lang, "videosWordLower")}` : t(lang, "hooksMeta"),
+        },
+      ],
+    });
   }
   if (includeFormats) {
     sections.push({

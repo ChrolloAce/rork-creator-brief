@@ -6,6 +6,7 @@ import { overviewId } from "@/lib/nav";
 import { getBrief, getCuration } from "@/lib/db";
 import type { HookCategory } from "@/lib/types";
 import { getFormatsForRender } from "@/lib/format-videos";
+import { getHookVideos } from "@/lib/hook-videos";
 import { briefAccessRequired, currentCreator, creatorHasAccess } from "@/lib/brief-gate";
 import { getLang } from "@/lib/lang";
 import { localizeBriefContent } from "@/lib/translate";
@@ -40,6 +41,7 @@ export default async function BriefOverview({
   if (!brief) notFound();
   // Gated brief: unapproved visitors must complete onboarding + enter the code.
   if (await briefAccessRequired(brief)) redirect(`/b/${brief.slug}/onboarding`);
+  const hookVideos = await getHookVideos(brief.slug);
   const [formats, curation] = await Promise.all([
     getFormatsForRender(brief.slug),
     getCuration(brief.slug),
@@ -96,6 +98,7 @@ export default async function BriefOverview({
       hideFormatsList={curation.hideFormatsList}
       studio={curation.studio?.enabled ? { title: studioTitle(curation.studio) } : null}
       contentCalendar={loc.contentCalendar ?? curation.contentCalendar}
+      hookVideos={hookVideos}
       onboardingEnabled={
         !!(brief.onboarding?.enabled && (brief.onboarding.steps?.length ?? 0) > 0)
       }

@@ -5,8 +5,9 @@ import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import type { Format, HookCategory } from "@/lib/types";
 import type { ContentCalendar } from "@/lib/db";
+import type { HookVideo } from "@/lib/hook-videos";
 import Link from "next/link";
-import { buildNavSections, calendarId, studioId } from "@/lib/nav";
+import { buildNavSections, calendarId, hooksId, studioId } from "@/lib/nav";
 import { t, type Lang } from "@/lib/i18n";
 import { Sidebar } from "./Sidebar";
 import { FormatView, OverviewView } from "./Views";
@@ -16,6 +17,7 @@ import { Studio } from "./Studio";
 // Video Builder props. `title` alone lists it in the nav; `signedIn` is only
 // meaningful on the builder page itself.
 export type ShellStudio = { title: string; signedIn?: boolean } | null;
+import { HooksView } from "./HooksView";
 
 export function Shell({
   formats,
@@ -27,6 +29,7 @@ export function Shell({
   hideOverview = false,
   hideFormatsList = false,
   contentCalendar,
+  hookVideos = [],
   onboardingEnabled = false,
   onboardingComplete = false,
   account = null,
@@ -47,6 +50,7 @@ export function Shell({
   hideOverview?: boolean;
   hideFormatsList?: boolean;
   contentCalendar?: ContentCalendar | null;
+  hookVideos?: HookVideo[];
   onboardingEnabled?: boolean;
   onboardingComplete?: boolean;
   account?: { name: string | null; email: string } | null;
@@ -62,12 +66,15 @@ export function Shell({
         includeCalendar: calendarEnabled,
         includeOnboarding: onboardingEnabled,
         includeFormats: !hideFormatsList,
+        includeHooks: hookVideos.length > 0,
+        hooksCount: hookVideos.length,
         onboardingComplete,
         lang,
         studio,
       }),
     [
       formats,
+      hookVideos.length,
       brief.slug,
       hideOverview,
       hideFormatsList,
@@ -113,6 +120,7 @@ export function Shell({
     }
     if (activeId === "calendar") return t(lang, "contentCalendar");
     if (activeId === studioId && studio) return studio.title;
+    if (activeId === hooksId) return t(lang, "hooks");
     return t(lang, "overview");
   }, [sections, activeId, lang, studio]);
 
@@ -124,6 +132,7 @@ export function Shell({
     useAllHooks,
     publicStats,
     contentCalendar,
+    hookVideos,
     lang,
     studio
   );
@@ -254,9 +263,12 @@ function renderView(
   useAllHooks: boolean,
   publicStats?: { enabled: boolean; visible?: string[] },
   contentCalendar?: ContentCalendar | null,
+  hookVideos: HookVideo[] = [],
   lang: Lang = "en",
   studio: ShellStudio = null
 ) {
+  if (activeId === hooksId)
+    return <HooksView videos={hookVideos} lang={lang} />;
   if (activeId === studioId && studio)
     return (
       <Studio

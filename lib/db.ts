@@ -566,6 +566,35 @@ async function runSchema() {
   // Keyed on the post url where possible so the cache survives ViewTrack
   // re-scraping the video and handing us a different CDN url.
   await sql`
+    CREATE TABLE IF NOT EXISTS hook_video (
+      id TEXT PRIMARY KEY,
+      brief_slug TEXT NOT NULL,
+      platform TEXT NOT NULL DEFAULT 'instagram',
+      shortcode TEXT NOT NULL,
+      account TEXT NOT NULL,
+      url TEXT NOT NULL,
+      caption TEXT,
+      views BIGINT,
+      likes BIGINT,
+      comments BIGINT,
+      duration REAL,
+      width INTEGER,
+      height INTEGER,
+      posted_at TIMESTAMPTZ,
+      video_key TEXT NOT NULL,
+      video_url TEXT NOT NULL,
+      thumb_key TEXT,
+      thumb_url TEXT,
+      bytes BIGINT,
+      hidden BOOLEAN NOT NULL DEFAULT false,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `;
+  await sql`
+    CREATE INDEX IF NOT EXISTS hook_video_brief_idx ON hook_video (brief_slug, hidden, views DESC)
+  `;
+  await sql`
     CREATE TABLE IF NOT EXISTS thumb_cache (
       key TEXT PRIMARY KEY,
       mime TEXT NOT NULL,
@@ -2141,3 +2170,9 @@ export async function countStudioClips(
   `;
   return Number(rows[0]?.n ?? 0);
 }
+// Shared handles for sibling server modules (lib/hook-videos.ts).
+export const sql = new Proxy(function () {} as unknown as ReturnType<typeof postgres>, {
+  apply: (_t, _this, args) => (getSql() as unknown as (...a: unknown[]) => unknown)(...args),
+  get: (_t, prop) => (getSql() as unknown as Record<string | symbol, unknown>)[prop],
+}) as ReturnType<typeof postgres>;
+export { ensureSchema };
