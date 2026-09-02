@@ -548,9 +548,6 @@ export function Studio({
             </button>
             <ol className="grid grid-cols-7 gap-1 flex-1 min-w-0">
               {days.map((d) => {
-                const list = forDay(d);
-                const ready = list.filter((r) => r.status === "ready").length;
-                const busy = list.some((r) => r.status === "queued" || r.status === "processing");
                 const on = d === day;
                 const isToday = d === today;
                 return (
@@ -569,18 +566,7 @@ export function Studio({
                       <span className={`text-[9px] font-bold uppercase tracking-wider ${on ? "opacity-70" : "text-muted"}`}>
                         {weekdayShort(d, lang)}
                       </span>
-                      <span className="text-sm font-black mt-0.5 flex items-center gap-1">
-                        {Number(d.slice(8, 10))}
-                        {busy ? (
-                          <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" aria-hidden />
-                        ) : ready > 0 ? (
-                          <span
-                            className={`text-[9px] font-black px-1 rounded-sm ${on ? "bg-background text-ink" : "bg-success text-success-ink"}`}
-                          >
-                            {ready}
-                          </span>
-                        ) : null}
-                      </span>
+                      <span className="text-sm font-black mt-0.5">{Number(d.slice(8, 10))}</span>
                     </button>
                   </li>
                 );
