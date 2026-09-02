@@ -65,6 +65,22 @@ function weekdayShort(ymd: string, lang: Lang): string {
     .replace(/\.$/, "");
 }
 
+// iOS Safari turns <a download> into "open the video" or a Files save; the
+// share sheet with the file attached is the path that lands in Photos.
+function canShareFiles(): boolean {
+  try {
+    if (typeof navigator === "undefined" || typeof navigator.share !== "function" || !navigator.canShare) return false;
+    return navigator.canShare({ files: [new File([new Uint8Array(1)], "v.mp4", { type: "video/mp4" })] });
+  } catch {
+    return false;
+  }
+}
+
+function fileNameFor(hook: string): string {
+  const base = hook.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
+  return `${base || "video"}.mp4`;
+}
+
 function dayLong(ymd: string, lang: Lang): string {
   const [y, m, d] = ymd.split("-").map(Number);
   return new Date(y, m - 1, d).toLocaleDateString(lang === "es" ? "es" : "en", {
@@ -1003,6 +1019,32 @@ function RenderCard({
     if (open) setExpanded(true);
   }
   const busy = r.status === "queued" || r.status === "processing";
+  // Share-sheet save (phones). Decided after mount so the server and client
+  // render the same thing; the file is fetched on first tap and kept so a
+  // second save is instant.
+  const [shareable, setShareable] = useState(false);
+  useEffect(() => {
+    const ok = canShareFiles();
+    if (ok) setShareable(true);
+  }, []);
+  const fileRef = useRef<File | null>(null);
+  const [saving, setSaving] = useState(false);
+  async function saveToPhotos() {
+    if (!r.url || saving) return;
+    setSaving(true);
+    try {
+      if (!fileRef.current) {
+        const res = await fetch(r.url);
+        const blob = await res.blob();
+        fileRef.current = new File([blob], fileNameFor(r.hookText), { type: "video/mp4" });
+      }
+      await navigator.share({ files: [fileRef.current], title: r.hookText });
+    } catch {
+      /* cancelled or blocked; the download link below still works */
+    } finally {
+      setSaving(false);
+    }
+  }
   return (
     <li className="border-2 border-line bg-background rounded-md nb-shadow-sm overflow-hidden">
       <button
@@ -1057,14 +1099,37 @@ function RenderCard({
                   preload="none"
                   className="w-full max-w-[220px] mx-auto aspect-[9/16] bg-ink border-2 border-line rounded-md"
                 />
-                <a
-                  href={`${r.url}?download=1`}
-                  download
-                  className="block text-center border-2 border-line bg-ink text-background px-3 py-2 rounded-md nb-press text-xs font-black uppercase tracking-widest"
-                >
-                  ⬇ {t(lang, "download")}
-                </a>
-                <p className="text-[11px] text-muted text-center">{t(lang, "videoReadyHint")}</p>
+                {shareable ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => void saveToPhotos()}
+                      disabled={saving}
+                      className="block w-full text-center border-2 border-line bg-accent text-accent-ink px-3 py-2.5 rounded-md nb-shadow-sm nb-press text-xs font-black uppercase tracking-widest disabled:opacity-60"
+                    >
+                      {saving ? `${t(lang, "preparingShare")}…` : `⬇ ${t(lang, "saveToPhotos")}`}
+                    </button>
+                    <p className="text-[11px] text-muted text-center">{t(lang, "saveHint")}</p>
+                    <a
+                      href={`${r.url}?download=1`}
+                      download
+                      className="block text-center text-[10px] font-bold uppercase tracking-widest text-muted hover:text-ink"
+                    >
+                      {t(lang, "download")}
+                    </a>
+                  </>
+                ) : (
+                  <>
+                    <a
+                      href={`${r.url}?download=1`}
+                      download
+                      className="block text-center border-2 border-line bg-ink text-background px-3 py-2 rounded-md nb-press text-xs font-black uppercase tracking-widest"
+                    >
+                      ⬇ {t(lang, "download")}
+                    </a>
+                    <p className="text-[11px] text-muted text-center">{t(lang, "videoReadyHint")}</p>
+                  </>
+                )}
               </div>
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-2">
