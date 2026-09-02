@@ -99,7 +99,9 @@ export const STUDIO_DEFAULTS = {
   title: "Video Builder",
   hookSec: 3,
   explanationSec: 0,
-  minDemos: 3,
+  // One demo unlocks the calendar; the admin raises this per brief if a
+  // campaign wants more variety before anything is generated.
+  minDemos: 1,
   maxDemos: 5,
   textStyle: "pill" as StudioTextStyle,
   opening: "broll" as StudioOpening,

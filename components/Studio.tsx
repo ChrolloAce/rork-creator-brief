@@ -516,7 +516,9 @@ export function Studio({
           sub={
             unlocked
               ? `${readyDemos.length} ${t(lang, "ready").toLowerCase()}`
-              : t(lang, "stepRecordSub").replace("{min}", String(minDemos))
+              : minDemos === 1
+                ? t(lang, "stepRecordSubOne")
+                : t(lang, "stepRecordSub").replace("{min}", String(minDemos))
           }
           lang={lang}
         />
