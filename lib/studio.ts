@@ -65,7 +65,35 @@ export type StudioConfig = {
   autoFill?: boolean;
   perDay?: number;
   daysAhead?: number;
+  // What happens when the hook reel hands over to the demo. "cut" is a hard
+  // cut. "pip" shrinks the reel into a corner over half a second and keeps it
+  // playing there (muted) while the demo takes the frame.
+  transition?: StudioTransition;
+  pipCorner?: PipCorner;
+  // Corner size as a fraction of the frame width (0.2 to 0.5).
+  pipScale?: number;
 };
+
+export type StudioTransition = "cut" | "pip";
+export type PipCorner = "bottom-left" | "top-left" | "bottom-right" | "top-right";
+
+export function pipSettings(c: StudioConfig | undefined | null): {
+  transition: StudioTransition;
+  corner: PipCorner;
+  scale: number;
+  animSec: number;
+  margin: number;
+} {
+  const corners: PipCorner[] = ["bottom-left", "top-left", "bottom-right", "top-right"];
+  const scale = typeof c?.pipScale === "number" ? Math.min(0.5, Math.max(0.2, c.pipScale)) : 0.32;
+  return {
+    transition: c?.transition === "pip" ? "pip" : "cut",
+    corner: corners.includes(c?.pipCorner as PipCorner) ? (c!.pipCorner as PipCorner) : "bottom-left",
+    scale,
+    animSec: 0.5,
+    margin: 40,
+  };
+}
 
 export const STUDIO_DEFAULTS = {
   title: "Video Builder",

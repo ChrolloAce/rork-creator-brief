@@ -447,6 +447,46 @@ export function StudioAdmin({
             </span>
           </label>
           <label className="block">
+            <span className={label}>After the hook</span>
+            <select
+              value={cfg.transition ?? "cut"}
+              onChange={(e) => set({ transition: e.target.value as StudioConfig["transition"] })}
+              className={input}
+            >
+              <option value="cut">Hard cut to the demo</option>
+              <option value="pip">Shrink into a corner, keep playing</option>
+            </select>
+          </label>
+          {(cfg.transition ?? "cut") === "pip" && (
+            <>
+              <label className="block">
+                <span className={label}>Corner</span>
+                <select
+                  value={cfg.pipCorner ?? "bottom-left"}
+                  onChange={(e) => set({ pipCorner: e.target.value as StudioConfig["pipCorner"] })}
+                  className={input}
+                >
+                  <option value="bottom-left">Bottom left</option>
+                  <option value="top-left">Top left</option>
+                  <option value="bottom-right">Bottom right</option>
+                  <option value="top-right">Top right</option>
+                </select>
+              </label>
+              <label className="block">
+                <span className={label}>Corner size</span>
+                <select
+                  value={String(cfg.pipScale ?? 0.32)}
+                  onChange={(e) => set({ pipScale: Number(e.target.value) })}
+                  className={input}
+                >
+                  <option value="0.25">Small (25%)</option>
+                  <option value="0.32">Medium (32%)</option>
+                  <option value="0.4">Large (40%)</option>
+                </select>
+              </label>
+            </>
+          )}
+          <label className="block">
             <span className={label}>Library hook (sec)</span>
             <input
               type="number"

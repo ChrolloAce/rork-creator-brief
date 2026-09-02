@@ -263,3 +263,56 @@ export async function renderConcat(input: {
     input.out,
   ]);
 }
+
+// Hook reel → demo with a picture-in-picture handover instead of a cut. The
+// demo is the base layer, delayed by hookSec behind black. The reel sits on
+// top: full frame until hookSec, then over animSec it scales down (per-frame
+// expressions on scale + overlay) into a corner and keeps playing there,
+// muted, until it ends or the demo ends. Audio: reel for the hook, then the
+// demo.
+export async function renderPip(input: {
+  reel: string;
+  demo: string;
+  hookSec: number;
+  animSec: number;
+  scale: number;
+  corner: "bottom-left" | "top-left" | "bottom-right" | "top-right";
+  margin: number;
+  out: string;
+}): Promise<void> {
+  const h0 = input.hookSec.toFixed(3);
+  const a = Math.max(0.1, input.animSec).toFixed(3);
+  const shrink = (1 - input.scale).toFixed(4);
+  // 0 → 1 over the animation window, eased out so the shrink lands softly.
+  const lin = "clip((t-" + h0 + ")/" + a + ",0,1)";
+  const p = "(1-(1-" + lin + ")*(1-" + lin + "))";
+  const w = "2*trunc(" + OUT_W + "*(1-" + shrink + "*" + p + ")/2)";
+  const hh = "2*trunc(" + OUT_H + "*(1-" + shrink + "*" + p + ")/2)";
+  const m = String(input.margin);
+  // overlay expressions: W/H = main size, w/h = overlay size, t = time.
+  const left = input.corner.endsWith("left");
+  const top = input.corner.startsWith("top");
+  const x = left ? m + "*" + p : "(W-w-" + m + ")*" + p;
+  const y = top ? m + "*" + p : "(H-h-" + m + ")*" + p;
+  const filter = [
+    "[1:v]fps=" + FPS + ",setsar=1,setpts=PTS-STARTPTS,tpad=start_duration=" + h0 + ":color=black[base]",
+    "[0:v]fps=" + FPS + ",setsar=1,setpts=PTS-STARTPTS,scale=eval=frame:w='" + w + "':h='" + hh + "'[reel]",
+    "[base][reel]overlay=eval=frame:x='" + x + "':y='" + y + "':eof_action=pass,format=yuv420p[v]",
+    "[0:a]aresample=44100,atrim=0:" + h0 + ",asetpts=PTS-STARTPTS[a0]",
+    "[1:a]aresample=44100,asetpts=PTS-STARTPTS[a1]",
+    "[a0][a1]concat=n=2:v=0:a=1[a]",
+  ].join(";");
+  await runFfmpeg([
+    "-y",
+    "-i", input.reel,
+    "-i", input.demo,
+    "-filter_complex", filter,
+    "-map", "[v]",
+    "-map", "[a]",
+    ...X264,
+    "-crf", "23",
+    ...AAC,
+    "-max_muxing_queue_size", "1024",
+    input.out,
+  ]);
+}

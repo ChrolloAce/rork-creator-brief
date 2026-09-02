@@ -15,7 +15,7 @@ import {
   updateStudioClip,
   updateStudioRender,
 } from "./db";
-import { normalizeClip, posterFrame, probe, renderConcat, renderStitch } from "./studio-ffmpeg";
+import { normalizeClip, posterFrame, probe, renderConcat, renderStitch, renderPip } from "./studio-ffmpeg";
 import { getHookVideo } from "./hook-videos";
 import { renderTextCard } from "./studio-text";
 import {
@@ -25,6 +25,7 @@ import {
   slugifyForFile,
   type StudioClipKind,
   type StudioRender,
+  pipSettings,
 } from "./studio";
 
 // Background work for the Video Builder: normalizing uploads and stitching
@@ -178,14 +179,38 @@ async function runLibraryRender(job: StudioRender, dir: string): Promise<{ out: 
   const info = await probe(raw);
   if (!info.hasVideo) throw new Error("The hook reel is not a video.");
   const hook = path.join(dir, "reel.mp4");
+  const hookSec = effectiveLibraryHookSec(cur.studio);
+  const pip = pipSettings(cur.studio);
+  const out = path.join(dir, "out.mp4");
+  if (pip.transition === "pip") {
+    // The reel keeps playing in the corner, so keep it as long as the demo.
+    const demoInfo = await probe(demo);
+    await normalizeClip({
+      src: raw,
+      out: hook,
+      maxSec: Math.min(STUDIO_DEFAULTS.maxDemoSec + hookSec, hookSec + demoInfo.durationSec + 1),
+      hasAudio: info.hasAudio,
+      mode: "cover",
+    });
+    await renderPip({
+      reel: hook,
+      demo,
+      hookSec,
+      animSec: pip.animSec,
+      scale: pip.scale,
+      corner: pip.corner,
+      margin: pip.margin,
+      out,
+    });
+    return { out };
+  }
   await normalizeClip({
     src: raw,
     out: hook,
-    maxSec: effectiveLibraryHookSec(cur.studio),
+    maxSec: hookSec,
     hasAudio: info.hasAudio,
     mode: "cover",
   });
-  const out = path.join(dir, "out.mp4");
   await renderConcat({ first: hook, second: demo, out });
   return { out };
 }
