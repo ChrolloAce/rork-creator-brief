@@ -1,21 +1,28 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { t, type Lang } from "@/lib/i18n";
+import type { HookVideo } from "@/lib/hook-videos";
 import type { StudioClip, StudioPublicConfig, StudioRender } from "@/lib/studio";
+import { HookCard, HookModal } from "./HooksView";
 
-// The Video Builder, creator side. Three things on one page, top to bottom:
-// the demos they have uploaded, the build panel (hook + demo + background),
-// and the library of finished videos with their captions. Everything is
-// sized for a phone because that is where creators live.
+// The Video Builder, creator side. Two steps, one at a time:
+//   1. Record your demos: how to record, example demos, reels to study, and
+//      the upload. Stays until they have the minimum number of demos.
+//   2. Generate: one button, today's videos underneath, each with its caption.
+//      Demos are tucked away under "Change demos" for later.
+// Everything is sized for a phone because that is where creators live.
 
 type State = {
   viewer: { id: string; name: string | null; email: string | null; isAdmin: boolean };
   config: StudioPublicConfig;
   demos: StudioClip[];
   broll: StudioClip[];
-  libraryCount?: number;
+  examples: StudioClip[];
+  library: HookVideo[];
+  libraryCount: number;
   renders: StudioRender[];
 };
 
@@ -28,6 +35,10 @@ function fmtSec(s: number | null): string {
   const m = Math.floor(s / 60);
   const r = Math.round(s % 60);
   return m > 0 ? `${m}:${String(r).padStart(2, "0")}` : `${r}s`;
+}
+
+function isToday(iso: string): boolean {
+  return new Date(iso).toDateString() === new Date().toDateString();
 }
 
 function StatusPill({ status, lang }: { status: StudioClip["status"]; lang: Lang }) {
@@ -254,6 +265,8 @@ export function Studio({
   const [building, setBuilding] = useState(false);
   const [buildError, setBuildError] = useState<string | null>(null);
   const [justBuilt, setJustBuilt] = useState<string | null>(null);
+  // Step 2 hides the demos; this opens them back up to add or swap clips.
+  const [manageOpen, setManageOpen] = useState(false);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const resultRef = useRef<HTMLDivElement | null>(null);
 
@@ -396,6 +409,10 @@ export function Studio({
   const { config, demos, broll, renders } = state;
   const readyDemos = demos.filter((d) => d.status === "ready");
   const demoCount = demos.filter((d) => d.status !== "error").length;
+  const minDemos = Math.max(1, config.minDemos);
+  const unlocked = readyDemos.length >= minDemos;
+  const step: 1 | 2 = unlocked ? 2 : 1;
+
   const library = config.opening === "library";
   const libraryCount = state.libraryCount ?? 0;
   const blocker = library
@@ -413,8 +430,28 @@ export function Studio({
           : null;
   const canGenerate = !blocker && !building;
 
+  const todays = renders.filter((r) => isToday(r.createdAt));
+  const earlier = renders.filter((r) => !isToday(r.createdAt));
+
+  const demosPanel = (
+    <DemosPanel
+      state={state}
+      uploads={uploads}
+      lang={lang}
+      briefSlug={briefSlug}
+      fileInput={fileInput}
+      onFiles={onFiles}
+      onDelete={deleteClip}
+      onDismissUpload={(key) => setUploads((x) => x.filter((y) => y.key !== key))}
+      showGuide={step === 1}
+      minDemos={minDemos}
+      demoCount={demoCount}
+      readyCount={readyDemos.length}
+    />
+  );
+
   return (
-    <div className="space-y-8 sm:space-y-10">
+    <div className="space-y-6 sm:space-y-8">
       {/* Header */}
       <header>
         <div className={label}>{t(lang, "makeSection")}</div>
@@ -422,42 +459,307 @@ export function Studio({
         {config.intro && (
           <p className="text-muted mt-2 max-w-prose whitespace-pre-wrap">{config.intro}</p>
         )}
-        <ol className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-2">
-          {(
-            [
-              ["stepUpload", "stepUploadSub"],
-              ["stepPick", "stepPickSub"],
-              ["stepBuild", "stepBuildSub"],
-            ] as const
-          ).map(([k, sub], i) => (
-            <li
-              key={k}
-              className="border-2 border-line bg-paper rounded-md p-3 flex items-start gap-3"
-            >
-              <span className="w-7 h-7 shrink-0 border-2 border-line bg-ink text-background rounded-sm flex items-center justify-center text-xs font-black">
-                {i + 1}
-              </span>
-              <span className="min-w-0">
-                <span className="block font-black text-sm leading-tight">{t(lang, k)}</span>
-                <span className="block text-[11px] text-muted mt-0.5">{t(lang, sub)}</span>
-              </span>
-            </li>
-          ))}
-        </ol>
       </header>
 
-      {/* Demos */}
-      <section className="space-y-3">
-        <div className="flex items-end justify-between gap-3 flex-wrap">
-          <div>
-            <div className={label}>
-              {t(lang, "yourDemos")} · {demoCount} {t(lang, "demosOf")} {config.maxDemos}
+      {/* Step indicator */}
+      <ol className="grid grid-cols-2 gap-2">
+        <StepTile
+          n={1}
+          active={step === 1}
+          done={unlocked}
+          title={t(lang, "stepRecord")}
+          sub={
+            unlocked
+              ? `${readyDemos.length} ${t(lang, "ready").toLowerCase()}`
+              : t(lang, "stepRecordSub").replace("{min}", String(minDemos))
+          }
+          lang={lang}
+        />
+        <StepTile
+          n={2}
+          active={step === 2}
+          done={false}
+          locked={!unlocked}
+          title={t(lang, "stepGenerate")}
+          sub={t(lang, "stepGenerateSub")}
+          lang={lang}
+        />
+      </ol>
+
+      {step === 1 && demosPanel}
+
+      {step === 2 && (
+        <>
+          {/* Generate */}
+          <section className="border-2 border-line bg-background rounded-md nb-shadow p-5 sm:p-8 text-center space-y-4">
+            <div>
+              <h2 className="text-2xl sm:text-3xl font-black tracking-tight">
+                {t(lang, "generateVideo")}
+              </h2>
+              <p className="text-sm text-muted mt-2 max-w-prose mx-auto">
+                {library
+                  ? t(lang, "generateHintLibrary").replace("{sec}", String(config.libraryHookSec))
+                  : t(lang, "generateHint")}
+              </p>
             </div>
-            <p className="text-sm text-muted mt-1">
-              {t(lang, "demosHint")
-                .replace("{min}", String(config.minDemos))
-                .replace("{max}", String(config.maxDemos))}{" "}
-              {t(lang, "varietyHint")}
+            <button
+              type="button"
+              onClick={() => void generate()}
+              disabled={!canGenerate}
+              className="w-full sm:w-auto border-2 border-line bg-accent text-accent-ink px-10 py-5 rounded-md nb-shadow nb-press font-black uppercase tracking-widest text-lg disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {building ? `${t(lang, "building")}…` : `🎬 ${t(lang, "generateVideo")}`}
+            </button>
+            {blocker && !building ? (
+              <p className="text-sm font-bold text-muted border-2 border-dashed border-line bg-paper rounded-md px-3 py-2 max-w-prose mx-auto">
+                {blocker}
+              </p>
+            ) : (
+              <p className="text-[11px] text-muted">{t(lang, "allSet")}</p>
+            )}
+            {buildError && (
+              <p className="text-sm font-bold text-[#b91c1c] border-2 border-line bg-[#fee2e2] px-3 py-2 rounded-sm max-w-prose mx-auto">
+                {buildError}
+              </p>
+            )}
+          </section>
+
+          {/* Today */}
+          <section className="space-y-3" ref={resultRef}>
+            <div className={label}>
+              {t(lang, "todaysVideos")} · {todays.length}
+            </div>
+            {todays.length === 0 ? (
+              <p className="text-sm text-muted border-2 border-dashed border-line bg-paper rounded-md p-6 text-center">
+                {t(lang, "nothingToday")}
+              </p>
+            ) : (
+              <ul className="space-y-3">
+                {todays.map((r) => (
+                  <RenderCard
+                    key={r.id}
+                    render={r}
+                    lang={lang}
+                    open={r.id === justBuilt || r.id === todays[0].id}
+                    onDelete={() => void deleteRender(r.id)}
+                  />
+                ))}
+              </ul>
+            )}
+          </section>
+
+          {/* Earlier */}
+          {earlier.length > 0 && (
+            <details className="group">
+              <summary className={`${label} cursor-pointer list-none flex items-center gap-2`}>
+                <span className="group-open:rotate-90 transition-transform" aria-hidden>
+                  ▶
+                </span>
+                {t(lang, "earlierVideos")} · {earlier.length}
+              </summary>
+              <ul className="space-y-3 mt-3">
+                {earlier.map((r) => (
+                  <RenderCard
+                    key={r.id}
+                    render={r}
+                    lang={lang}
+                    open={false}
+                    onDelete={() => void deleteRender(r.id)}
+                  />
+                ))}
+              </ul>
+            </details>
+          )}
+
+          {/* Demos, tucked away */}
+          <section className="border-t-2 border-line pt-4 space-y-3">
+            <button
+              type="button"
+              onClick={() => setManageOpen((x) => !x)}
+              className="w-full flex items-center justify-between gap-3 text-left"
+            >
+              <span className={label}>
+                {t(lang, "yourDemos")} · {demoCount}
+              </span>
+              <span className="border-2 border-line bg-background px-3 py-1.5 rounded-md nb-press text-[10px] font-black uppercase tracking-widest">
+                {manageOpen ? t(lang, "hideDemos") : t(lang, "changeDemos")}
+              </span>
+            </button>
+            {manageOpen && demosPanel}
+          </section>
+        </>
+      )}
+    </div>
+  );
+}
+
+function StepTile({
+  n,
+  active,
+  done,
+  locked = false,
+  title,
+  sub,
+  lang,
+}: {
+  n: number;
+  active: boolean;
+  done: boolean;
+  locked?: boolean;
+  title: string;
+  sub: string;
+  lang: Lang;
+}) {
+  return (
+    <li
+      className={`border-2 border-line rounded-md p-3 flex items-start gap-3 ${
+        active ? "bg-ink text-background nb-shadow-sm" : done ? "bg-success text-success-ink" : "bg-paper"
+      } ${locked && !active ? "opacity-60" : ""}`}
+    >
+      <span
+        className={`w-7 h-7 shrink-0 border-2 rounded-sm flex items-center justify-center text-xs font-black ${
+          active ? "border-background bg-background text-ink" : "border-line bg-background text-ink"
+        }`}
+      >
+        {done ? "✓" : n}
+      </span>
+      <span className="min-w-0">
+        <span
+          className={`block text-[9px] uppercase tracking-[0.2em] font-bold ${active || done ? "opacity-70" : "text-muted"}`}
+        >
+          {t(lang, "stepWord")} {n}
+          {locked && !active ? ` · ${t(lang, "lockedWord")}` : ""}
+        </span>
+        <span className="block font-black text-sm leading-tight">{title}</span>
+        <span className={`block text-[11px] mt-0.5 ${active || done ? "opacity-80" : "text-muted"}`}>
+          {sub}
+        </span>
+      </span>
+    </li>
+  );
+}
+
+/* --------------------------- step 1: demos ------------------------------ */
+
+function DemosPanel({
+  state,
+  uploads,
+  lang,
+  briefSlug,
+  fileInput,
+  onFiles,
+  onDelete,
+  onDismissUpload,
+  showGuide,
+  minDemos,
+  demoCount,
+  readyCount,
+}: {
+  state: State;
+  uploads: Upload[];
+  lang: Lang;
+  briefSlug: string;
+  fileInput: React.RefObject<HTMLInputElement | null>;
+  onFiles: (files: FileList | null) => void;
+  onDelete: (id: string) => void;
+  onDismissUpload: (key: string) => void;
+  showGuide: boolean;
+  minDemos: number;
+  demoCount: number;
+  readyCount: number;
+}) {
+  const { config, demos, examples, library, libraryCount } = state;
+  const [openReel, setOpenReel] = useState<HookVideo | null>(null);
+  const remaining = Math.max(0, minDemos - readyCount);
+  const pct = Math.min(100, Math.round((readyCount / minDemos) * 100));
+
+  return (
+    <div className="space-y-5">
+      {showGuide && (config.recordGuide.length > 0 || examples.length > 0) && (
+        <section className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 space-y-4">
+          {config.recordGuide.length > 0 && (
+            <div>
+              <div className={label}>{t(lang, "howToRecord")}</div>
+              <ol className="mt-2 space-y-1.5">
+                {config.recordGuide.map((line, i) => (
+                  <li key={i} className="flex items-start gap-2.5 text-sm leading-snug">
+                    <span className="w-5 h-5 shrink-0 border-2 border-line bg-paper rounded-sm flex items-center justify-center text-[10px] font-black mt-0.5">
+                      {i + 1}
+                    </span>
+                    <span>{line}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+          {examples.length > 0 && (
+            <div>
+              <div className={label}>{t(lang, "exampleDemos")}</div>
+              <ul className="mt-2 flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+                {examples.map((e) => (
+                  <li key={e.id} className="shrink-0 w-32 sm:w-36">
+                    <video
+                      src={e.url ?? undefined}
+                      poster={e.posterUrl ?? undefined}
+                      controls
+                      playsInline
+                      preload="none"
+                      className="w-full aspect-[9/16] bg-ink border-2 border-line rounded-md object-cover"
+                    />
+                    {(e.label || e.filename) && (
+                      <div className="text-[10px] font-bold truncate mt-1">{e.label || e.filename}</div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
+      )}
+
+      {showGuide && library.length > 0 && (
+        <section className="space-y-2">
+          <div className="flex items-end justify-between gap-3">
+            <div>
+              <div className={label}>{t(lang, "reelsToStudy")}</div>
+              <p className="text-xs text-muted mt-0.5">{t(lang, "hooksIntro")}</p>
+            </div>
+            {libraryCount > library.length && (
+              <Link
+                href={`/b/${briefSlug}/hooks`}
+                className="shrink-0 text-[10px] font-black uppercase tracking-widest text-muted hover:text-accent"
+              >
+                {t(lang, "seeAllReels")} ({libraryCount}) →
+              </Link>
+            )}
+          </div>
+          <ul className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+            {library.map((v) => (
+              <li key={v.id} className="shrink-0 w-32 sm:w-36">
+                <HookCard video={v} onOpen={setOpenReel} />
+              </li>
+            ))}
+          </ul>
+          {openReel && (
+            <HookModal video={openReel} lang={lang} onClose={() => setOpenReel(null)} />
+          )}
+        </section>
+      )}
+
+      {/* Upload + progress */}
+      <section className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 space-y-3">
+        <div className="flex items-end justify-between gap-3 flex-wrap">
+          <div className="min-w-0">
+            <div className={label}>{t(lang, "yourDemos")}</div>
+            <div className="font-black text-lg leading-tight mt-0.5">
+              {t(lang, "uploadedOf")
+                .replace("{n}", String(readyCount))
+                .replace("{min}", String(minDemos))}
+            </div>
+            <p className="text-xs text-muted mt-0.5">
+              {remaining > 0
+                ? t(lang, "uploadMore").replace("{n}", String(remaining))
+                : t(lang, "varietyHint")}
             </p>
           </div>
           <div>
@@ -467,17 +769,20 @@ export function Studio({
               accept="video/*,.mov,.mp4,.m4v,.webm"
               multiple
               className="sr-only"
-              onChange={(e) => void onFiles(e.target.files)}
+              onChange={(e) => onFiles(e.target.files)}
             />
             <button
               type="button"
               onClick={() => fileInput.current?.click()}
               disabled={demoCount >= config.demoCap}
-              className="border-2 border-line bg-ink text-background px-4 py-2 rounded-md nb-shadow-sm nb-press text-xs font-black uppercase tracking-widest disabled:opacity-50"
+              className="border-2 border-line bg-accent text-accent-ink px-4 py-2.5 rounded-md nb-shadow-sm nb-press text-xs font-black uppercase tracking-widest disabled:opacity-50"
             >
               + {t(lang, "uploadDemos")}
             </button>
           </div>
+        </div>
+        <div className="h-2.5 border-2 border-line rounded-sm overflow-hidden bg-paper">
+          <div className="h-full bg-success transition-[width]" style={{ width: `${pct}%` }} />
         </div>
 
         {uploads.length > 0 && (
@@ -508,7 +813,7 @@ export function Studio({
                 {u.error && (
                   <button
                     type="button"
-                    onClick={() => setUploads((x) => x.filter((y) => y.key !== u.key))}
+                    onClick={() => onDismissUpload(u.key)}
                     className="mt-1 text-[10px] font-bold uppercase tracking-widest text-muted"
                   >
                     ✕
@@ -564,7 +869,7 @@ export function Studio({
                   )}
                   <button
                     type="button"
-                    onClick={() => void deleteClip(d.id)}
+                    onClick={() => onDelete(d.id)}
                     aria-label={t(lang, "deleteWord")}
                     title={t(lang, "deleteWord")}
                     className="absolute top-1 right-1 w-6 h-6 border-2 border-line bg-background rounded-sm text-xs font-black nb-press"
@@ -587,71 +892,11 @@ export function Studio({
           </ul>
         )}
       </section>
-
-      {/* Generate */}
-      <section className="border-2 border-line bg-background rounded-md nb-shadow p-4 sm:p-6 space-y-3">
-        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-          <div className="min-w-0 flex-1">
-            <h2 className="text-xl sm:text-2xl font-black tracking-tight">
-              {t(lang, "generateVideo")}
-            </h2>
-            <p className="text-sm text-muted mt-1 max-w-prose">
-              {library
-                ? t(lang, "generateHintLibrary").replace("{sec}", String(config.libraryHookSec))
-                : t(lang, "generateHint")}
-            </p>
-            <p className="text-[11px] text-muted mt-1">
-              {readyDemos.length} {readyDemos.length === 1 ? t(lang, "untitledDemo").toLowerCase() : "demos"}{" "}
-              {t(lang, "readyWord")} · {library ? libraryCount : config.hooks.length} {t(lang, "hooksWord")}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => void generate()}
-            disabled={!canGenerate}
-            className="shrink-0 border-2 border-line bg-accent text-accent-ink px-8 py-4 rounded-md nb-shadow nb-press font-black uppercase tracking-widest text-base disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {building ? `${t(lang, "building")}…` : `🎬 ${t(lang, "generateVideo")}`}
-          </button>
-        </div>
-        {blocker && !building && (
-          <p className="text-sm font-bold text-muted border-2 border-dashed border-line bg-paper rounded-md px-3 py-2">
-            {blocker}
-          </p>
-        )}
-        {buildError && (
-          <p className="text-sm font-bold text-[#b91c1c] border-2 border-line bg-[#fee2e2] px-3 py-2 rounded-sm">
-            {buildError}
-          </p>
-        )}
-      </section>
-
-      {/* Library */}
-      <section className="space-y-3" ref={resultRef}>
-        <div className={label}>
-          {t(lang, "yourVideos")} · {renders.length}
-        </div>
-        {renders.length === 0 ? (
-          <p className="text-sm text-muted border-2 border-dashed border-line bg-paper rounded-md p-6 text-center">
-            {t(lang, "noVideosYet")}
-          </p>
-        ) : (
-          <ul className="space-y-3">
-            {renders.map((r) => (
-              <RenderCard
-                key={r.id}
-                render={r}
-                lang={lang}
-                open={r.id === justBuilt || r.id === renders[0].id}
-                onDelete={() => void deleteRender(r.id)}
-              />
-            ))}
-          </ul>
-        )}
-      </section>
     </div>
   );
 }
+
+/* ------------------------------ render card ----------------------------- */
 
 function RenderCard({
   render: r,
@@ -692,7 +937,7 @@ function RenderCard({
         <span className="min-w-0 flex-1">
           <span className="block font-black leading-snug truncate">{r.hookText}</span>
           <span className="block text-[11px] text-muted mt-0.5">
-            {new Date(r.createdAt).toLocaleString()}
+            {new Date(r.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
             {r.durationSec != null ? ` · ${fmtSec(r.durationSec)}` : ""}
           </span>
         </span>

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { listStudioClips, listStudioRenders } from "@/lib/db";
-import { publicStudioConfig, studioOpening } from "@/lib/studio";
+import { publicStudioConfig } from "@/lib/studio";
 import { getHookVideos } from "@/lib/hook-videos";
 import { kickStudioQueue } from "@/lib/studio-worker";
 import { studioContext } from "../_shared";
@@ -19,11 +19,12 @@ export async function GET(
   if (!ctx.ok) return ctx.res;
   // Polling this endpoint is also what wakes the queue after a restart.
   kickStudioQueue();
-  const [demos, broll, renders, library] = await Promise.all([
+  const [demos, broll, examples, renders, library] = await Promise.all([
     listStudioClips(slug, { kind: "demo", userId: ctx.viewer.id }),
     listStudioClips(slug, { kind: "broll" }),
+    listStudioClips(slug, { kind: "example" }),
     listStudioRenders(slug, ctx.viewer.id),
-    studioOpening(ctx.config) === "library" ? getHookVideos(slug) : Promise.resolve([]),
+    getHookVideos(slug),
   ]);
   return NextResponse.json({
     ok: true,
@@ -31,8 +32,12 @@ export async function GET(
     config: publicStudioConfig(ctx.config),
     demos,
     broll: broll.filter((b) => b.status === "ready"),
+    // Admin "what a good demo looks like" clips, shown in step 1.
+    examples: examples.filter((e) => e.status === "ready"),
     renders,
-    // Size of the hook library when the opening is "library" (0 otherwise).
+    // The hook library: size (gates the "library" opening) plus the top reels
+    // by views for the "reels to study" strip in step 1.
     libraryCount: library.length,
+    library: library.slice(0, 12),
   });
 }

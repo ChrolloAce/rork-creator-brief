@@ -66,7 +66,9 @@ export function Shell({
         includeCalendar: calendarEnabled,
         includeOnboarding: onboardingEnabled,
         includeFormats: !hideFormatsList,
-        includeHooks: hookVideos.length > 0,
+        // With a Video Builder on, the reels live inside it (step 1), so the
+        // separate tab only shows for briefs without one.
+        includeHooks: hookVideos.length > 0 && !studio,
         hooksCount: hookVideos.length,
         onboardingComplete,
         lang,

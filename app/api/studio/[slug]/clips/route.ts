@@ -8,7 +8,7 @@ import { studioContext } from "../_shared";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// POST /api/studio/{slug}/clips?filename=demo.mov[&label=..][&kind=broll]
+// POST /api/studio/{slug}/clips?filename=demo.mov[&label=..][&kind=broll|example]
 // Body is the raw video bytes (not multipart) so it streams to disk instead
 // of being buffered in memory. Responds as soon as the bytes are on disk;
 // normalizing runs in the background and the client polls /state.
@@ -20,8 +20,9 @@ export async function POST(
   const ctx = await studioContext(slug);
   if (!ctx.ok) return ctx.res;
   const url = new URL(req.url);
-  const kind = url.searchParams.get("kind") === "broll" ? "broll" : "demo";
-  if (kind === "broll" && !ctx.viewer.isAdmin) {
+  const kindParam = url.searchParams.get("kind");
+  const kind = kindParam === "broll" ? "broll" : kindParam === "example" ? "example" : "demo";
+  if (kind !== "demo" && !ctx.viewer.isAdmin) {
     return NextResponse.json({ error: "admin only" }, { status: 403 });
   }
   const filename = (url.searchParams.get("filename") ?? "").slice(0, 120) || null;
@@ -60,7 +61,7 @@ export async function POST(
   const clip = await createStudioClip({
     briefSlug: slug,
     kind,
-    userId: kind === "broll" ? ADMIN_VIEWER_ID : ctx.viewer.id,
+    userId: kind === "demo" ? ctx.viewer.id : ADMIN_VIEWER_ID,
     label,
     filename,
   });

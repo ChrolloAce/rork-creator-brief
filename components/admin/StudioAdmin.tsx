@@ -30,11 +30,12 @@ type Activity = {
 function uploadClip(
   slug: string,
   file: File,
+  kind: "broll" | "example",
   onProgress: (p: number) => void
 ): Promise<{ ok: boolean; error?: string }> {
   return new Promise((resolve) => {
     const xhr = new XMLHttpRequest();
-    const q = new URLSearchParams({ filename: file.name, kind: "broll" });
+    const q = new URLSearchParams({ filename: file.name, kind });
     xhr.open("POST", `/api/studio/${encodeURIComponent(slug)}/clips?${q}`);
     xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
     xhr.upload.onprogress = (e) => {
@@ -69,8 +70,9 @@ export function StudioAdmin({
   const setHooks = (next: StudioHook[]) => set({ hooks: next });
 
   const [activity, setActivity] = useState<Activity | null>(null);
-  const [uploads, setUploads] = useState<{ key: string; name: string; progress: number; error?: string }[]>([]);
+  const [uploads, setUploads] = useState<{ key: string; name: string; kind: "broll" | "example"; progress: number; error?: string }[]>([]);
   const fileInput = useRef<HTMLInputElement | null>(null);
+  const exampleInput = useRef<HTMLInputElement | null>(null);
 
   const loadActivity = useCallback(async () => {
     try {
@@ -94,14 +96,15 @@ export function StudioAdmin({
     return () => clearInterval(id);
   }, [anyPending, loadActivity]);
 
-  async function onFiles(files: FileList | null) {
+  async function onFiles(files: FileList | null, kind: "broll" | "example") {
     if (!files) return;
     const list = Array.from(files);
     if (fileInput.current) fileInput.current.value = "";
+    if (exampleInput.current) exampleInput.current.value = "";
     for (const file of list) {
       const key = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-      setUploads((u) => [...u, { key, name: file.name, progress: 0 }]);
-      const r = await uploadClip(briefSlug, file, (p) =>
+      setUploads((u) => [...u, { key, name: file.name, kind, progress: 0 }]);
+      const r = await uploadClip(briefSlug, file, kind, (p) =>
         setUploads((u) => u.map((x) => (x.key === key ? { ...x, progress: p } : x)))
       );
       if (r.ok) {
@@ -125,6 +128,7 @@ export function StudioAdmin({
   }
 
   const broll = (activity?.clips ?? []).filter((c) => c.kind === "broll");
+  const examples = (activity?.clips ?? []).filter((c) => c.kind === "example");
   const demos = (activity?.clips ?? []).filter((c) => c.kind === "demo");
   const renders = activity?.renders ?? [];
   const byUser = new Map<string, { demos: StudioClip[]; renders: StudioRender[] }>();
@@ -468,6 +472,104 @@ export function StudioAdmin({
         </div>
       </div>
 
+      {/* Step 1 for creators: how to record + example demos */}
+      <div className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 space-y-3">
+        <div>
+          <div className="font-black">Step 1 for creators: recording their demos</div>
+          <p className="text-xs text-muted">
+            Creators see this before they can generate anything. Tell them how to record, show
+            them a good example, and the reels from the hook library appear underneath
+            automatically.
+          </p>
+        </div>
+        <label className="block">
+          <span className={label}>How to record (one line per bullet)</span>
+          <textarea
+            value={cfg.recordGuide ?? ""}
+            rows={5}
+            placeholder={"Screen-record yourself using the product from the first click to the result.\nVertical if you can. 20 to 60 seconds.\nShow the result at the end."}
+            onChange={(e) => set({ recordGuide: e.target.value })}
+            className={input}
+          />
+        </label>
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div className="font-bold text-sm">Example demos · {examples.length}</div>
+            <p className="text-xs text-muted">
+              Real demos that got it right. Creators can play them inline.
+            </p>
+          </div>
+          <div>
+            <input
+              ref={exampleInput}
+              type="file"
+              accept="video/*,.mov,.mp4,.m4v,.webm"
+              multiple
+              className="sr-only"
+              onChange={(e) => void onFiles(e.target.files, "example")}
+            />
+            <button
+              type="button"
+              onClick={() => exampleInput.current?.click()}
+              className="border-2 border-line bg-ink text-background px-3 py-1.5 rounded-md nb-press text-xs font-black uppercase tracking-widest"
+            >
+              + Upload examples
+            </button>
+          </div>
+        </div>
+        {uploads.some((u) => u.kind === "example") && (
+          <ul className="space-y-1">
+            {uploads.filter((u) => u.kind === "example").map((u) => (
+              <li key={u.key} className="text-xs flex items-center gap-2">
+                <span className="font-bold truncate">{u.name}</span>
+                {u.error ? (
+                  <span className="text-[#b91c1c] font-bold">{u.error}</span>
+                ) : (
+                  <span className="text-muted">{Math.round(u.progress * 100)}%</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        {examples.length > 0 && (
+          <ul className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-7 gap-2">
+            {examples.map((b) => (
+              <li key={b.id} className="border-2 border-line rounded-md overflow-hidden bg-background">
+                <div className="relative aspect-[9/16] bg-paper">
+                  {b.posterUrl ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img src={b.posterUrl} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-[10px] font-bold text-muted">
+                      {b.status === "error" ? "failed" : "processing…"}
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void deleteClip(b.id)}
+                    className="absolute top-1 right-1 w-6 h-6 border-2 border-line bg-background rounded-sm text-xs font-black"
+                    aria-label="Delete"
+                  >
+                    ✕
+                  </button>
+                  {b.durationSec != null && (
+                    <span className="absolute bottom-1 right-1 border-2 border-line bg-background px-1 text-[9px] font-black rounded-sm">
+                      {Math.round(b.durationSec)}s
+                    </span>
+                  )}
+                </div>
+                <div className="px-1.5 py-1 text-[10px] font-bold truncate">
+                  {b.label || b.filename || "example"}
+                </div>
+                {b.status === "error" && (
+                  <div className="px-1.5 pb-1 text-[10px] text-[#b91c1c]">{b.error}</div>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
       {/* Background clips */}
       <div className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 space-y-3">
         <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -486,7 +588,7 @@ export function StudioAdmin({
               accept="video/*,.mov,.mp4,.m4v,.webm"
               multiple
               className="sr-only"
-              onChange={(e) => void onFiles(e.target.files)}
+              onChange={(e) => void onFiles(e.target.files, "broll")}
             />
             <button
               type="button"
@@ -497,9 +599,9 @@ export function StudioAdmin({
             </button>
           </div>
         </div>
-        {uploads.length > 0 && (
+        {uploads.some((u) => u.kind === "broll") && (
           <ul className="space-y-1">
-            {uploads.map((u) => (
+            {uploads.filter((u) => u.kind === "broll").map((u) => (
               <li key={u.key} className="text-xs flex items-center gap-2">
                 <span className="font-bold truncate">{u.name}</span>
                 {u.error ? (

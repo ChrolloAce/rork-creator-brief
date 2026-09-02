@@ -51,6 +51,9 @@ export type StudioConfig = {
   opening?: StudioOpening;
   // Seconds of the library reel to keep when opening === "library".
   libraryHookSec?: number;
+  // "How to record your demo": plain text, one bullet per line. Shown in
+  // step 1 of the creator flow next to the example clips.
+  recordGuide?: string;
 };
 
 export const STUDIO_DEFAULTS = {
@@ -152,6 +155,7 @@ export type StudioPublicConfig = {
   maxDemoSec: number;
   opening: StudioOpening;
   libraryHookSec: number;
+  recordGuide: string[];
 };
 
 export function publicStudioConfig(c: StudioConfig): StudioPublicConfig {
@@ -166,11 +170,17 @@ export function publicStudioConfig(c: StudioConfig): StudioPublicConfig {
     maxDemoSec: STUDIO_DEFAULTS.maxDemoSec,
     opening: studioOpening(c),
     libraryHookSec: effectiveLibraryHookSec(c),
+    recordGuide: (c.recordGuide ?? "")
+      .split(/\r?\n/)
+      .map((l) => l.replace(/^\s*[-*•]\s*/, "").trim())
+      .filter(Boolean),
   };
 }
 
 // Row shapes shared by the API and the client.
-export type StudioClipKind = "demo" | "broll";
+// demo: a creator's own clip. broll: admin background clip. example: admin
+// "here is what a good demo looks like" clip, shown in step 1.
+export type StudioClipKind = "demo" | "broll" | "example";
 export type StudioJobStatus = "queued" | "processing" | "ready" | "error";
 
 export type StudioClip = {

@@ -143,7 +143,7 @@ function FilterButton({
   );
 }
 
-function HookCard({
+export function HookCard({
   video,
   onOpen,
 }: {
@@ -204,7 +204,7 @@ function HookCard({
   );
 }
 
-function HookModal({
+export function HookModal({
   video,
   lang,
   onClose,
