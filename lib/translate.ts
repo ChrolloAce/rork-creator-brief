@@ -64,6 +64,18 @@ function localizeFormat(tr: Tr, f: Format): Format {
     assets: f.assets?.map((a) => ({ ...a, label: tr(a.label) ?? a.label })),
     // Song titles/artists are proper names; only the guidance note translates.
     songs: f.songs?.map((s) => ({ ...s, note: tr(s.note) ?? s.note })),
+    // Shot cues are directions to the creator, so both the label and the note
+    // translate. The cue's asset is a file, not text.
+    scriptCues: f.scriptCues?.map((c) => ({
+      ...c,
+      label: tr(c.label) ?? c.label,
+      note: tr(c.note) ?? c.note,
+    })),
+    // The caption is copy the creator posts verbatim, so like f.script it stays
+    // in the language it was written in. Only the guidance note translates.
+    caption: f.caption
+      ? { ...f.caption, note: tr(f.caption.note) ?? f.caption.note }
+      : undefined,
   };
 }
 
@@ -94,6 +106,14 @@ function localizeOverview(tr: Tr, o: BriefOverview): BriefOverview {
     tagline: tr(o.tagline) ?? o.tagline,
     taglineSub: tr(o.taglineSub) ?? o.taglineSub,
     howToUse: tr(o.howToUse) ?? o.howToUse,
+    // Rules are instructions to the creator, so they translate in full. The
+    // hashtag inside one is a literal and comes back untouched by the
+    // translator's own "keep handles/tags verbatim" instruction.
+    rulesIntro: tr(o.rulesIntro) ?? o.rulesIntro,
+    rules: o.rules?.map((r) => ({
+      text: tr(r.text) ?? r.text,
+      sub: r.sub?.map((x) => tr(x) ?? x),
+    })),
     ctaLabel: tr(o.ctaLabel) ?? o.ctaLabel,
     accountSetup: o.accountSetup
       ? {
@@ -231,6 +251,7 @@ Rules:
 - Marketing headlines, slogans, and taglines MUST be translated too; adapt any wordplay naturally instead of keeping the English line.
 - "hook", "brief" and "overlay" are industry terms; keep them in English.
 - Preserve line breaks and any HTML tags/attributes exactly; translate only the human-readable text.
+- Preserve inline markers exactly: ==highlighted text== and **bold text** keep their == and ** wrappers, with only the words between them translated.
 - Never use em dashes.
 - Return ONLY a JSON array of strings, same length and order as the input. No commentary, no code fences.
 

@@ -11,6 +11,7 @@ import type {
   ContentCalendar,
 } from "@/lib/db";
 import { distribution, optionsOf, type RotationCreator } from "@/lib/rotation";
+import { AutoRotationPanel } from "@/components/admin/AutoRotationPanel";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const MONTHS = [
@@ -792,6 +793,15 @@ export function CalendarEditor({
           </div>
         )}
       </div>
+
+      <AutoRotationPanel
+        value={cal.autoRotation}
+        formats={formats}
+        scriptGroups={scriptGroups}
+        creators={creators}
+        requireLogin={requireLogin}
+        onChange={(next) => update({ autoRotation: next })}
+      />
 
       {/* Auto-fill scheduler */}
       <div className="border-2 border-line bg-background rounded-md">

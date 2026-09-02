@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { RichTextArea } from "@/components/admin/RichTextArea";
 import type {
+  BriefRule,
   BriefAccountSetup,
   BriefAccountSetupPlatform,
   BriefOverview,
@@ -212,6 +214,32 @@ function AccountSetupSubEditor({
   );
 }
 
+// Rules are edited as plain text because typing a numbered list is faster than
+// clicking "+ rule" fifteen times. Two leading spaces demote a line to a
+// sub-point of the rule above it; numbering is applied at render time so
+// inserting a rule never means renumbering by hand.
+function rulesToText(rules: BriefRule[] | undefined): string {
+  return (rules ?? [])
+    .map((r) => [r.text, ...(r.sub ?? []).map((x) => `  ${x}`)].join("\n"))
+    .join("\n");
+}
+
+function textToRules(text: string): BriefRule[] {
+  const out: BriefRule[] = [];
+  for (const raw of text.split("\n")) {
+    if (!raw.trim()) continue;
+    const isSub = /^\s{2,}/.test(raw) || /^\t/.test(raw);
+    const body = raw.trim();
+    if (isSub && out.length > 0) {
+      const last = out[out.length - 1];
+      last.sub = [...(last.sub ?? []), body];
+    } else {
+      out.push({ text: body });
+    }
+  }
+  return out;
+}
+
 export function OverviewEditor({
   value,
   onSave,
@@ -344,20 +372,20 @@ export function OverviewEditor({
             className="mt-1 w-full border-2 border-line rounded-md px-2 py-1.5 text-sm focus:outline-none focus:border-accent bg-background"
           />
         </label>
-        <label className="block sm:col-span-2">
+        <div className="block sm:col-span-2">
           <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
             Product description
           </span>
-          <textarea
-            value={form.productDescription ?? ""}
-            onChange={(e) => update("productDescription", e.target.value)}
-            rows={4}
-            className="mt-1 w-full border-2 border-line rounded-md px-2 py-2 text-sm focus:outline-none focus:border-accent bg-background leading-relaxed"
-          />
-        </label>
+          <div className="mt-1">
+            <RichTextArea
+              value={form.productDescription ?? ""}
+              onChange={(v) => update("productDescription", v)}
+            />
+          </div>
+        </div>
         <label className="block">
           <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
-            Value props (one per line)
+            Value props (one per line) — ==highlight== · **bold**
           </span>
           <textarea
             value={(form.valueProps ?? []).join("\n")}
@@ -381,12 +409,43 @@ export function OverviewEditor({
           <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
             How to use (accent block)
           </span>
-          <textarea
-            value={form.howToUse ?? ""}
-            onChange={(e) => update("howToUse", e.target.value)}
-            rows={3}
-            className="mt-1 w-full border-2 border-line rounded-md px-2 py-2 text-sm focus:outline-none focus:border-accent bg-background leading-relaxed"
+          <div className="mt-1">
+            <RichTextArea
+              value={form.howToUse ?? ""}
+              onChange={(v) => update("howToUse", v)}
+            />
+          </div>
+        </label>
+
+        <label className="block sm:col-span-2">
+          <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+            Rules intro
+          </span>
+          <input
+            type="text"
+            value={form.rulesIntro ?? ""}
+            onChange={(e) => update("rulesIntro", e.target.value)}
+            placeholder="Every video has to follow these"
+            className="mt-1 w-full border-2 border-line rounded-md px-2 py-1.5 text-sm focus:outline-none focus:border-accent bg-background"
           />
+        </label>
+
+        <label className="block sm:col-span-2">
+          <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+            Rules (one per line, indent with two spaces for a sub-point)
+          </span>
+          <textarea
+            value={rulesToText(form.rules)}
+            onChange={(e) => update("rules", textToRules(e.target.value))}
+            rows={14}
+            placeholder={"Mention ElevenCreative or ElevenLabs\nCaption must include this hashtag\n  #ElevenLabsPartner"}
+            className="mt-1 w-full border-2 border-line rounded-md px-2 py-2 text-sm focus:outline-none focus:border-accent bg-background leading-relaxed font-mono"
+          />
+          <span className="text-[10px] text-muted">
+            Numbering is automatic. A line starting with two spaces becomes a
+            bullet under the rule above it. Wrap text in ==double equals== to
+            highlight it, or **double asterisks** to bold it.
+          </span>
         </label>
         <label className="block">
           <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">

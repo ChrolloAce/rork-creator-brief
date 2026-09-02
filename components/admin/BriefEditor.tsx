@@ -3,11 +3,24 @@
 import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type {
+  CueHow,
   Format,
+  FormatCaption,
   FormatSectionKey,
   HookCategory,
+  ScriptCue,
   VideoExample,
 } from "@/lib/types";
+import { CUE_HOW_LABELS } from "@/lib/types";
+import {
+  beatKey,
+  newCue,
+  parseScriptLines,
+  repinCue,
+  resolveCues,
+  totalCueSeconds,
+  type ScriptLine,
+} from "@/lib/script-lines";
 import { FormatView } from "@/components/Views";
 import {
   type ScriptVariant,
@@ -45,8 +58,26 @@ import { LogoUpload } from "@/components/admin/LogoUpload";
 import { OnboardingEditor } from "@/components/admin/OnboardingEditor";
 import { OverviewEditor } from "@/components/admin/OverviewEditor";
 import { ProjectSources } from "@/components/admin/ProjectSources";
+import { ResearchTab } from "@/components/admin/ResearchTab";
+import { StudioAdmin } from "@/components/admin/StudioAdmin";
+import type { StudioConfig } from "@/lib/studio";
 import { VideoChip } from "@/components/admin/VideoChip";
 import { VideoPicker } from "@/components/admin/VideoPicker";
+
+// "12 minutes ago" / "3 days ago" for the recycle bin, so it is obvious
+// whether something went in this session or weeks back.
+function relativeTime(iso: string): string {
+  const then = Date.parse(iso);
+  if (!Number.isFinite(then)) return "deleted";
+  const secs = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (secs < 60) return "just now";
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs} ${hrs === 1 ? "hour" : "hours"} ago`;
+  const days = Math.round(hrs / 24);
+  return `${days} ${days === 1 ? "day" : "days"} ago`;
+}
 
 type FormatOverride = {
   title?: string;
@@ -61,6 +92,8 @@ type FormatOverride = {
   sectionOrder?: string[];
   assets?: FormatAssetRow[];
   songs?: FormatSongRow[];
+  scriptCues?: ScriptCue[];
+  caption?: FormatCaption;
 };
 
 type FormatAssetRow = {
@@ -76,6 +109,9 @@ type FormatAssetRow = {
 
 type FormatSongRow = {
   url: string;
+  altUrls?: string[];
+  fileUrl?: string;
+  fileMime?: string;
   title?: string;
   artist?: string;
   note?: string;
@@ -99,6 +135,23 @@ type Curation = {
   sectionGroups?: { id: string; name: string }[];
   sectionGroupOf?: Record<string, string>;
   contentCalendar?: ContentCalendar;
+  trashedFormats?: TrashedFormatRow[];
+  // Video Builder (lib/studio.ts). Off unless studio.enabled.
+  studio?: StudioConfig;
+};
+
+// A deleted script, parked whole so Restore puts back exactly what was there.
+type TrashedFormatRow = {
+  slug: string;
+  deletedAt: string;
+  title: string;
+  isClone: boolean;
+  cloneOf?: string;
+  override?: FormatOverride;
+  pins?: string[];
+  bucket?: string | null;
+  groupId?: string;
+  orderIndex?: number;
 };
 
 type Preview = Record<
@@ -211,11 +264,13 @@ function SectionStats({
   );
 }
 
-type AdminTab = "scripts" | "calendar" | "creators" | "brief";
+type AdminTab = "scripts" | "research" | "calendar" | "studio" | "creators" | "brief";
 
 const ADMIN_TABS: { id: AdminTab; label: string; hint: string }[] = [
   { id: "scripts", label: "Scripts", hint: "Write and assemble" },
+  { id: "research", label: "Research", hint: "What is working out there" },
   { id: "calendar", label: "Calendar", hint: "Who films what, when" },
+  { id: "studio", label: "Video Builder", hint: "Hook + demo stitcher" },
   { id: "creators", label: "Creators", hint: "Access and roster" },
   { id: "brief", label: "Brief setup", hint: "Settings you rarely touch" },
 ];
@@ -242,6 +297,19 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
     new Set()
   );
+  // Scripts ticked for a bulk action. Deliberately not in the URL: a stale
+  // selection restored from a shared link is a dangerous thing to hand a
+  // Delete button.
+  const [selectedScripts, setSelectedScripts] = useState<Set<string>>(
+    new Set()
+  );
+  // Anchor for shift-click range selection across the grid.
+  const lastTickedRef = useRef<string | null>(null);
+  // Slugs from the most recent delete, so Undo is right where the action was
+  // instead of requiring you to go find the bin.
+  const [justDeleted, setJustDeleted] = useState<string[] | null>(null);
+  // Is the recycle bin panel open in the Scripts tab?
+  const [trashOpen, setTrashOpen] = useState(false);
   const [allBriefs, setAllBriefs] = useState<
     Array<{ slug: string; name: string }>
   >([]);
@@ -494,6 +562,18 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
     });
   }
 
+  // Video Builder config: same debounced autosave as format overrides.
+  const studioSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function setAndSaveStudio(next: StudioConfig) {
+    setCur((c) => {
+      if (!c) return c;
+      const nextCur: Curation = { ...c, studio: next };
+      if (studioSaveTimer.current) clearTimeout(studioSaveTimer.current);
+      studioSaveTimer.current = setTimeout(() => void persist(nextCur), 800);
+      return nextCur;
+    });
+  }
+
   const hookSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   function setAndSaveHooks(next: BriefHookCategory[] | null) {
     setBrief((b) => (b ? { ...b, hookCategories: next } : b));
@@ -685,6 +765,28 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
         nextOv.scriptVariants = srcOv.scriptVariants
           ? srcOv.scriptVariants.map((v) => ({ ...v, id: makeVariantId() }))
           : undefined;
+        // Cues anchor to this script's beats, so they travel with it. Copying
+        // the script without them would leave the new format's shot list empty
+        // while looking complete.
+        nextOv.scriptCues = srcOv.scriptCues
+          ? srcOv.scriptCues.map((c) => ({ ...c, id: makeVariantId() }))
+          : undefined;
+        overrideTouched = true;
+      } else if (part === "caption") {
+        nextOv.caption = srcOv.caption
+          ? {
+              ...srcOv.caption,
+              hashtags: srcOv.caption.hashtags
+                ? [...srcOv.caption.hashtags]
+                : undefined,
+              options: srcOv.caption.options
+                ? srcOv.caption.options.map((o) => ({
+                    ...o,
+                    id: makeVariantId(),
+                  }))
+                : undefined,
+            }
+          : undefined;
         overrideTouched = true;
       } else if (part === "structure") {
         nextOv.structure = srcOv.structure
@@ -755,40 +857,211 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
     void persist(nextCur);
   }
 
-  // Completely remove a section. Clones are deleted outright (clone mapping +
-  // its overrides/pins/buckets); base/static formats are recorded in
-  // deletedFormats so they stop appearing here and on the public brief.
+  // Remove a section. Delegates to the bulk path so a single delete and a
+  // multi-select delete cannot drift apart in what they park in the bin.
   function deleteFormat(slug: string) {
-    if (!cur) return;
-    const isClone = !!cur.formatClones?.[slug];
+    deleteFormats([slug]);
+  }
+
+  // Delete scripts by moving them to the recycle bin.
+  //
+  // Nothing is destroyed here: the override (title, script, cues, caption,
+  // assets, sounds), the pinned video ids, the group and the position in the
+  // order are all parked in `trashedFormats` so Restore can put back exactly
+  // what was there. Emptying the bin is the only step that actually discards.
+  //
+  // Deliberately NOT a loop over a single-delete: each call would read the
+  // same stale `cur` from this render, so the last write would win and every
+  // earlier delete would silently come back. One pass, one persist.
+  function deleteFormats(slugs: string[]) {
+    if (!cur || slugs.length === 0) return;
+    const doomed = new Set(slugs);
+    const order = cur.formatOrder ?? effectiveOrder;
     const nextClones = { ...(cur.formatClones ?? {}) };
     const nextOverrides = { ...(cur.formatOverrides ?? {}) };
     const nextPins = { ...cur.formatPins };
     const nextBuckets = { ...cur.formatBuckets };
-    delete nextClones[slug];
-    delete nextOverrides[slug];
-    delete nextPins[slug];
-    delete nextBuckets[slug];
+    const nextGroupOf = { ...(cur.sectionGroupOf ?? {}) };
+    const tombstones = new Set(cur.deletedFormats ?? []);
+    const deletedAt = new Date().toISOString();
+    const parked: TrashedFormatRow[] = [];
+
+    for (const slug of doomed) {
+      const isClone = !!cur.formatClones?.[slug];
+      const meta = metaFor(slug);
+      parked.push({
+        slug,
+        deletedAt,
+        title: cur.formatOverrides?.[slug]?.title ?? meta?.title ?? slug,
+        isClone,
+        cloneOf: cur.formatClones?.[slug],
+        override: cur.formatOverrides?.[slug],
+        pins: cur.formatPins?.[slug],
+        bucket: cur.formatBuckets?.[slug],
+        groupId: cur.sectionGroupOf?.[slug],
+        orderIndex: order.indexOf(slug),
+      });
+      delete nextClones[slug];
+      delete nextOverrides[slug];
+      delete nextPins[slug];
+      delete nextBuckets[slug];
+      delete nextGroupOf[slug];
+      // Clones vanish from formatClones; base formats live in code and can
+      // only be suppressed with a tombstone.
+      if (isClone) tombstones.delete(slug);
+      else tombstones.add(slug);
+    }
+
     const nextCur: Curation = {
       ...cur,
       formatClones: nextClones,
       formatOverrides: nextOverrides,
       formatPins: nextPins,
       formatBuckets: nextBuckets,
-      formatOrder: (cur.formatOrder ?? effectiveOrder).filter((s) => s !== slug),
-      hiddenFormats: (cur.hiddenFormats ?? []).filter((s) => s !== slug),
-      deletedFormats: isClone
-        ? (cur.deletedFormats ?? []).filter((s) => s !== slug)
-        : [...new Set([...(cur.deletedFormats ?? []), slug])],
+      sectionGroupOf: nextGroupOf,
+      formatOrder: order.filter((s2) => !doomed.has(s2)),
+      hiddenFormats: (cur.hiddenFormats ?? []).filter((s2) => !doomed.has(s2)),
+      deletedFormats: [...tombstones],
+      // Re-deleting a slug that is already in the bin replaces its entry
+      // rather than stacking a second one.
+      trashedFormats: [
+        ...parked,
+        ...(cur.trashedFormats ?? []).filter((t) => !doomed.has(t.slug)),
+      ],
     };
     setCur(nextCur);
     setPreview((p) => {
       const rest = { ...p };
-      delete rest[slug];
+      for (const slug of doomed) delete rest[slug];
       return rest;
     });
-    if (openSection === slug) openStudio(null);
+    setSelectedScripts(new Set());
+    lastTickedRef.current = null;
+    if (openSection && doomed.has(openSection)) openStudio(null);
+    // Offer an immediate undo, so getting it back does not depend on finding
+    // the bin.
+    setJustDeleted(parked.map((t) => t.slug));
     void persist(nextCur);
+  }
+
+  // Put trashed scripts back exactly where they were.
+  function restoreFormats(slugs: string[]) {
+    if (!cur || slugs.length === 0) return;
+    const wanted = new Set(slugs);
+    const rows = (cur.trashedFormats ?? []).filter((t) => wanted.has(t.slug));
+    if (rows.length === 0) return;
+    const nextClones = { ...(cur.formatClones ?? {}) };
+    const nextOverrides = { ...(cur.formatOverrides ?? {}) };
+    const nextPins = { ...cur.formatPins };
+    const nextBuckets = { ...cur.formatBuckets };
+    const nextGroupOf = { ...(cur.sectionGroupOf ?? {}) };
+    const tombstones = new Set(cur.deletedFormats ?? []);
+    let order = [...(cur.formatOrder ?? effectiveOrder)];
+
+    // Low index first, so each insert lands before the ones that follow it and
+    // a restored run comes back in its original relative order.
+    for (const t of [...rows].sort(
+      (a, b) => (a.orderIndex ?? 1e9) - (b.orderIndex ?? 1e9)
+    )) {
+      if (t.isClone && t.cloneOf) nextClones[t.slug] = t.cloneOf;
+      if (t.override) nextOverrides[t.slug] = t.override;
+      nextPins[t.slug] = t.pins ?? [];
+      if (t.bucket !== undefined) nextBuckets[t.slug] = t.bucket;
+      // Only re-attach the group if it still exists; otherwise it lands in
+      // Ungrouped rather than pointing at a group id that was since deleted.
+      if (t.groupId && (cur.sectionGroups ?? []).some((g) => g.id === t.groupId))
+        nextGroupOf[t.slug] = t.groupId;
+      tombstones.delete(t.slug);
+      const at = t.orderIndex;
+      if (at != null && at >= 0 && at <= order.length) order.splice(at, 0, t.slug);
+      else order = [...order, t.slug];
+    }
+
+    const nextCur: Curation = {
+      ...cur,
+      formatClones: nextClones,
+      formatOverrides: nextOverrides,
+      formatPins: nextPins,
+      formatBuckets: nextBuckets,
+      sectionGroupOf: nextGroupOf,
+      formatOrder: order,
+      deletedFormats: [...tombstones],
+      trashedFormats: (cur.trashedFormats ?? []).filter(
+        (t) => !wanted.has(t.slug)
+      ),
+    };
+    setCur(nextCur);
+    setJustDeleted(null);
+    // Preview holds resolved video objects, which this component cannot
+    // rebuild from ids alone. Save first, then re-read so the restored tile
+    // shows its real video count instead of zero.
+    void (async () => {
+      await persist(nextCur);
+      await load();
+    })();
+  }
+
+  // Empty scripts out of the bin for good. This is the destructive step, and
+  // the only one.
+  function purgeFormats(slugs: string[]) {
+    if (!cur || slugs.length === 0) return;
+    const gone = new Set(slugs);
+    const nextCur: Curation = {
+      ...cur,
+      trashedFormats: (cur.trashedFormats ?? []).filter(
+        (t) => !gone.has(t.slug)
+      ),
+    };
+    setCur(nextCur);
+    setJustDeleted(null);
+    void persist(nextCur);
+  }
+
+  // Tick one tile. Shift-click extends from the last tile you ticked, walking
+  // the order the grid is actually rendered in.
+  //
+  // The anchor is read and moved HERE, not inside the state updater. React
+  // double-invokes updaters in dev StrictMode; with the ref written inside,
+  // the second pass read back the slug the first pass had just stored, saw
+  // `anchor === slug`, and fell through to a plain toggle. Ranges silently did
+  // nothing. Updaters have to stay pure.
+  function toggleScriptSelected(slug: string, extend: boolean) {
+    const anchor = lastTickedRef.current;
+    lastTickedRef.current = slug;
+    setSelectedScripts((prev) => {
+      const next = new Set(prev);
+      if (extend && anchor && anchor !== slug) {
+        // Ranges walk the VISIBLE order. Spanning a collapsed group would arm
+        // the Delete button with scripts that are not on screen.
+        const a = visibleScriptOrder.indexOf(anchor);
+        const b = visibleScriptOrder.indexOf(slug);
+        if (a >= 0 && b >= 0) {
+          const [lo, hi] = a < b ? [a, b] : [b, a];
+          // The anchor's own state decides whether the run is added or cleared,
+          // so shift-click can undo a range as well as make one.
+          const adding = prev.has(anchor);
+          for (let i = lo; i <= hi; i++) {
+            if (adding) next.add(visibleScriptOrder[i]);
+            else next.delete(visibleScriptOrder[i]);
+          }
+          return next;
+        }
+      }
+      if (next.has(slug)) next.delete(slug);
+      else next.add(slug);
+      return next;
+    });
+  }
+
+  function setGroupSelected(slugs: string[], on: boolean) {
+    setSelectedScripts((prev) => {
+      const next = new Set(prev);
+      for (const s of slugs) {
+        if (on) next.add(s);
+        else next.delete(s);
+      }
+      return next;
+    });
   }
 
   function createGroup() {
@@ -940,6 +1213,52 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
     openStudio(newSlug);
   }
 
+  // Same one-shot creation as createScriptFromStructure, but the body comes
+  // from the research composer instead of a preset. Lands as variant A in
+  // draft so a machine-written script cannot go live without being read.
+  async function createScriptFromResearch(name: string, body: string) {
+    if (!cur) return;
+    const source = effectiveOrder[0];
+    if (!source) {
+      window.alert(
+        "This brief has no sections yet to base a script on. Add one first."
+      );
+      return;
+    }
+    const res = await cloneSectionInBrief(source); // calls load()
+    if (!res.ok || !res.newSlug) {
+      window.alert(res.error ?? "Could not create the script");
+      return;
+    }
+    const newSlug = res.newSlug;
+    setAndSaveOverride(newSlug, {
+      title: name.trim() || "Script from research",
+      tagline: "",
+      structure: [],
+      scriptVariants: [
+        {
+          id: makeVariantId(),
+          label: "A",
+          body,
+          status: "draft" as const,
+        },
+      ],
+      script: undefined,
+      assets: [],
+      songs: [],
+    });
+    setCur((c) => {
+      if (!c) return c;
+      const nextCur: Curation = {
+        ...c,
+        formatPins: { ...c.formatPins, [newSlug]: [] },
+      };
+      void persist(nextCur);
+      return nextCur;
+    });
+    openStudio(newSlug);
+  }
+
   function toggleGroupCollapsed(id: string) {
     setCollapsedGroups((s) => {
       const next = new Set(s);
@@ -950,6 +1269,40 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
   }
 
   const sectionGroups = cur.sectionGroups ?? [];
+
+  // The order tiles actually appear on screen: each group in turn, then the
+  // ungrouped remainder. Shift-click ranges walk this, not formatOrder, so a
+  // dragged range matches what the eye sees.
+  const scriptDisplayOrder: string[] = (() => {
+    const out: string[] = [];
+    for (const g of sectionGroups) {
+      for (const s2 of effectiveOrder) {
+        if ((cur.sectionGroupOf?.[s2] ?? "") === g.id) out.push(s2);
+      }
+    }
+    for (const s2 of effectiveOrder) {
+      const gid = cur.sectionGroupOf?.[s2] ?? "";
+      if (!gid || !sectionGroups.some((g) => g.id === gid)) out.push(s2);
+    }
+    return out;
+  })();
+
+  // Tiles actually on screen right now: a collapsed group renders none of its
+  // scripts, so neither shift-ranges nor "Select all" may reach into one.
+  const visibleScriptOrder = scriptDisplayOrder.filter((s2) => {
+    const gid = cur.sectionGroupOf?.[s2] ?? "";
+    const g = sectionGroups.find((x) => x.id === gid);
+    return !g || !collapsedGroups.has(g.id);
+  });
+
+  // A selection can outlive what it points at (a script deleted from the
+  // studio, a clone removed elsewhere). Resolve against what exists now so the
+  // count on the toolbar and the slugs the Delete button acts on agree.
+  const selectedList = scriptDisplayOrder.filter((s2) =>
+    selectedScripts.has(s2)
+  );
+  const selectedCount = selectedList.length;
+
   // One compact section tile (used inside every group + the ungrouped grid).
   const renderTile = (slug: string) => {
     const meta = metaFor(slug);
@@ -961,27 +1314,74 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
     const isHidden = hiddenSet.has(slug);
     const isOpen = openSection === slug;
     const groupId = cur.sectionGroupOf?.[slug] ?? "";
+    const isTicked = selectedScripts.has(slug);
     return (
       <div
         key={slug}
-        className={`border-2 rounded-md bg-background p-2.5 flex flex-col gap-2 ${
-          isOpen ? "border-accent nb-shadow-sm" : "border-line"
+        // select-none: shift-clicking tiles otherwise drags a native text
+        // selection across the whole grid, which smears highlight over every
+        // tile in the run and looks like a rendering bug.
+        className={`select-none border-2 rounded-md p-2.5 flex flex-col gap-2 ${
+          isTicked
+            ? "border-accent bg-paper nb-shadow-sm"
+            : isOpen
+              ? "border-accent bg-background nb-shadow-sm"
+              : "border-line bg-background"
         } ${isHidden ? "opacity-60" : ""}`}
+        onMouseDown={(e) => {
+          // Chrome starts the text selection on mousedown, before any click
+          // handler runs, so it has to be stopped here rather than on click.
+          if (e.shiftKey) e.preventDefault();
+        }}
       >
-        <button
-          type="button"
-          onClick={() => openStudio(isOpen ? null : slug)}
-          className="text-left flex-1"
-        >
-          <div className="text-xs font-black uppercase tracking-wide leading-snug line-clamp-2">
-            {effectiveTitle}
-          </div>
-          <div className="text-[9px] uppercase tracking-[0.15em] font-bold text-muted mt-1">
-            {isHidden ? "HIDDEN · " : ""}
-            {isClone ? "COPY · " : ""}
-            {pinCount} {pinCount === 1 ? "video" : "videos"}
-          </div>
-        </button>
+        <div className="flex items-start gap-2">
+          {/* Tick to select. Shift-click extends from the last tile ticked.
+              Kept separate from the title button so a normal click still opens
+              the script rather than silently arming a bulk action. */}
+          <label
+            title="Select for bulk actions (shift-click for a range)"
+            className="shrink-0 mt-0.5 cursor-pointer p-0.5 -m-0.5"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              toggleScriptSelected(slug, e.shiftKey);
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={isTicked}
+              readOnly
+              tabIndex={-1}
+              className="pointer-events-none align-middle"
+            />
+            <span className="sr-only">Select {effectiveTitle}</span>
+          </label>
+          <button
+            type="button"
+            onClick={(e) => {
+              // Shift-click anywhere on the tile extends the selection, so a
+              // range is two clicks. A plain click always opens the script:
+              // switching the tile's meaning once something is selected would
+              // make peeking at a script impossible without clearing first.
+              if (e.shiftKey) {
+                e.preventDefault();
+                toggleScriptSelected(slug, true);
+                return;
+              }
+              openStudio(isOpen ? null : slug);
+            }}
+            className="text-left flex-1 min-w-0"
+          >
+            <div className="text-xs font-black uppercase tracking-wide leading-snug line-clamp-2">
+              {effectiveTitle}
+            </div>
+            <div className="text-[9px] uppercase tracking-[0.15em] font-bold text-muted mt-1">
+              {isHidden ? "HIDDEN · " : ""}
+              {isClone ? "COPY · " : ""}
+              {pinCount} {pinCount === 1 ? "video" : "videos"}
+            </div>
+          </button>
+        </div>
         <select
           value={groupId}
           onChange={(e) => setSectionGroup(slug, e.target.value)}
@@ -1035,7 +1435,7 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
             onClick={() => {
               if (
                 window.confirm(
-                  `Delete "${effectiveTitle}" completely? This can't be undone.`
+                  `Delete "${effectiveTitle}"? It moves to the bin at the bottom of the Scripts tab and can be restored.`
                 )
               )
                 deleteFormat(slug);
@@ -1140,7 +1540,9 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
                 ? effectiveOrder.length
                 : tb.id === "calendar"
                   ? (cur.contentCalendar?.days?.length ?? 0)
-                  : null;
+                  : tb.id === "studio" && cur.studio?.enabled
+                    ? (cur.studio.hooks?.length ?? 0)
+                    : null;
             return (
               <button
                 key={tb.id}
@@ -1279,6 +1681,14 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
           </>
         )}
 
+        {tab === "studio" && (
+          <StudioAdmin
+            briefSlug={briefSlug}
+            config={cur.studio}
+            onChange={setAndSaveStudio}
+          />
+        )}
+
         {tab === "creators" && (
           <CollapsibleCard
             storageKey={`brief-editor:${briefSlug}:access`}
@@ -1291,6 +1701,18 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
               onSave={saveBrief}
             />
           </CollapsibleCard>
+        )}
+
+        {tab === "research" && (
+          <ResearchTab
+            scopedProjectIds={cur.scopedProjectIds ?? []}
+            onChangeScoped={(next) => {
+              const nextCur: Curation = { ...cur, scopedProjectIds: next };
+              setCur(nextCur);
+              void persist(nextCur);
+            }}
+            onSaveScript={createScriptFromResearch}
+          />
         )}
 
         {tab === "calendar" && (
@@ -1354,6 +1776,99 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
           </span>
         </div>
 
+        {/* Undo, offered immediately after a delete. The bin below is the
+            durable safety net; this is the one-click version for the case you
+            actually care about, which is realising straight away. */}
+        {justDeleted && justDeleted.length > 0 && (
+          <div className="flex items-center gap-2 flex-wrap border-2 border-line bg-paper rounded-md nb-shadow-sm px-3 py-2">
+            <span className="text-xs font-black uppercase tracking-widest">
+              Deleted {justDeleted.length}{" "}
+              {justDeleted.length === 1 ? "script" : "scripts"}
+            </span>
+            <span className="text-[10px] text-muted">
+              Moved to the bin. Nothing is gone until you empty it.
+            </span>
+            <button
+              type="button"
+              onClick={() => restoreFormats(justDeleted)}
+              className="ml-auto border-2 border-line bg-accent text-accent-ink px-3 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+            >
+              ↩ Undo
+            </button>
+            <button
+              type="button"
+              onClick={() => setJustDeleted(null)}
+              aria-label="Dismiss"
+              className="w-7 h-7 border-2 border-line bg-background rounded-sm font-black nb-press text-xs"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
+        {/* Bulk bar. Only exists while something is ticked, so the Delete
+            button is never sitting on screen with nothing to act on. Sticky so
+            it stays reachable after shift-selecting a long run. */}
+        {selectedCount > 0 && (
+          <div className="sticky top-[68px] z-10 flex items-center gap-2 flex-wrap border-2 border-accent bg-paper rounded-md nb-shadow-sm px-3 py-2">
+            <span className="text-xs font-black uppercase tracking-widest">
+              {selectedCount} selected
+            </span>
+            <button
+              type="button"
+              onClick={() =>
+                setSelectedScripts(new Set(visibleScriptOrder))
+              }
+              disabled={
+                visibleScriptOrder.length > 0 &&
+                visibleScriptOrder.every((s2) => selectedScripts.has(s2))
+              }
+              className="border-2 border-line bg-background px-2 py-0.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest disabled:opacity-40"
+            >
+              Select all {visibleScriptOrder.length}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedScripts(new Set());
+                lastTickedRef.current = null;
+              }}
+              className="border-2 border-line bg-background px-2 py-0.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+            >
+              Clear
+            </button>
+            <span className="text-[10px] text-muted hidden sm:inline">
+              Shift-click a tile to select a range.
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                const names = selectedList
+                  .slice(0, 8)
+                  .map((s2) => {
+                    const m = metaFor(s2);
+                    return (
+                      cur.formatOverrides?.[s2]?.title ?? m?.title ?? s2
+                    );
+                  });
+                const more = selectedCount - names.length;
+                if (
+                  window.confirm(
+                    `Delete ${selectedCount} ${selectedCount === 1 ? "script" : "scripts"}? They move to the bin and can be restored.\n\n` +
+                      names.map((n) => `• ${n}`).join("\n") +
+                      (more > 0 ? `\n…and ${more} more` : "")
+                  )
+                ) {
+                  deleteFormats(selectedList);
+                }
+              }}
+              className="ml-auto border-2 border-line bg-ink text-background px-3 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+            >
+              🗑 Delete {selectedCount}
+            </button>
+          </div>
+        )}
+
         {/* Grouped sections — each group is a collapsible grid. */}
         {sectionGroups.map((g) => {
           const slugs = effectiveOrder.filter(
@@ -1366,6 +1881,28 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
               className="border-2 border-line bg-background rounded-md nb-shadow-sm overflow-hidden"
             >
               <div className="flex items-center justify-between gap-2 px-3 py-2 bg-paper border-b-2 border-line">
+                {/* Tick the whole group. Indeterminate when only some of its
+                    scripts are selected, so a partial state is never mistaken
+                    for "all of them are about to be deleted". */}
+                <input
+                  type="checkbox"
+                  aria-label={`Select all scripts in ${g.name}`}
+                  title={`Select all ${slugs.length} in this group`}
+                  disabled={slugs.length === 0}
+                  checked={
+                    slugs.length > 0 &&
+                    slugs.every((s2) => selectedScripts.has(s2))
+                  }
+                  ref={(el) => {
+                    if (!el) return;
+                    const n = slugs.filter((s2) =>
+                      selectedScripts.has(s2)
+                    ).length;
+                    el.indeterminate = n > 0 && n < slugs.length;
+                  }}
+                  onChange={(e) => setGroupSelected(slugs, e.target.checked)}
+                  className="shrink-0 disabled:opacity-30"
+                />
                 <button
                   type="button"
                   onClick={() => toggleGroupCollapsed(g.id)}
@@ -1444,14 +1981,137 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
           return (
             <div>
               {sectionGroups.length > 0 && (
-                <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-2 mt-1">
-                  Ungrouped
+                <div className="flex items-center gap-2 mb-2 mt-1">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all ungrouped scripts"
+                    title={`Select all ${slugs.length} ungrouped`}
+                    checked={slugs.every((s2) => selectedScripts.has(s2))}
+                    ref={(el) => {
+                      if (!el) return;
+                      const n = slugs.filter((s2) =>
+                        selectedScripts.has(s2)
+                      ).length;
+                      el.indeterminate = n > 0 && n < slugs.length;
+                    }}
+                    onChange={(e) => setGroupSelected(slugs, e.target.checked)}
+                    className="shrink-0"
+                  />
+                  <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+                    Ungrouped
+                  </span>
                 </div>
               )}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                 {slugs.map((slug) => renderTile(slug))}
               </div>
             </div>
+          );
+        })()}
+
+        {/* Recycle bin. Collapsed by default so it never competes with the
+            live scripts, but the count is always visible. */}
+        {(() => {
+          const trash = [...(cur.trashedFormats ?? [])].sort((a, b) =>
+            b.deletedAt.localeCompare(a.deletedAt)
+          );
+          if (trash.length === 0) return null;
+          return (
+            <section className="border-2 border-line bg-background rounded-md nb-shadow-sm overflow-hidden mt-4">
+              <div className="flex items-center justify-between gap-2 px-3 py-2 bg-paper border-b-2 border-line">
+                <button
+                  type="button"
+                  onClick={() => setTrashOpen((o) => !o)}
+                  className="flex items-center gap-2 flex-1 min-w-0 text-left"
+                >
+                  <span
+                    className={`font-black text-base leading-none transition-transform ${trashOpen ? "rotate-180" : ""}`}
+                  >
+                    ▾
+                  </span>
+                  <span className="text-xs font-black uppercase tracking-widest">
+                    🗑 Recently deleted
+                  </span>
+                  <span className="text-[9px] uppercase tracking-widest font-bold text-muted">
+                    {trash.length}
+                  </span>
+                </button>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => restoreFormats(trash.map((t) => t.slug))}
+                    className="border-2 border-line bg-background px-2 py-0.5 rounded-sm nb-press text-[9px] font-black uppercase tracking-widest"
+                  >
+                    ↩ Restore all
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          `Permanently delete all ${trash.length} ${trash.length === 1 ? "script" : "scripts"} in the bin? THIS cannot be undone.`
+                        )
+                      )
+                        purgeFormats(trash.map((t) => t.slug));
+                    }}
+                    className="border-2 border-line bg-background px-2 py-0.5 rounded-sm nb-press text-[9px] font-black uppercase tracking-widest"
+                  >
+                    Empty bin
+                  </button>
+                </div>
+              </div>
+              {trashOpen && (
+                <div className="p-2.5 space-y-1.5">
+                  <p className="text-[11px] text-muted">
+                    Deleted scripts keep everything: script, shot list, caption,
+                    sounds, pinned videos, and their place in the group. Restore
+                    puts them back where they were. Only “Delete forever”
+                    actually discards.
+                  </p>
+                  {trash.map((t) => (
+                    <div
+                      key={t.slug}
+                      className="border-2 border-line bg-paper rounded-md p-2 flex items-center gap-2 flex-wrap"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-black uppercase tracking-wide truncate">
+                          {t.title}
+                        </div>
+                        <div className="text-[9px] uppercase tracking-[0.15em] font-bold text-muted mt-0.5">
+                          {relativeTime(t.deletedAt)}
+                          {t.isClone ? " · COPY" : ""}
+                          {(t.pins?.length ?? 0) > 0
+                            ? ` · ${t.pins!.length} ${t.pins!.length === 1 ? "video" : "videos"}`
+                            : ""}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => restoreFormats([t.slug])}
+                        className="shrink-0 border-2 border-line bg-accent text-accent-ink px-2 py-0.5 rounded-sm nb-press text-[9px] font-black uppercase tracking-widest"
+                      >
+                        ↩ Restore
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (
+                            window.confirm(
+                              `Permanently delete "${t.title}"? THIS cannot be undone.`
+                            )
+                          )
+                            purgeFormats([t.slug]);
+                        }}
+                        title="Delete forever"
+                        className="shrink-0 w-7 h-7 border-2 border-line bg-background rounded-sm font-black nb-press flex items-center justify-center text-xs"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
           );
         })()}
         </>
@@ -1631,7 +2291,7 @@ export function BriefEditor({ briefSlug }: { briefSlug: string }) {
                           onClick={() => {
                             if (
                               window.confirm(
-                                `Delete "${effectiveTitle}" completely? This can't be undone.`
+                                `Delete "${effectiveTitle}"? It moves to the bin at the bottom of the Scripts tab and can be restored.`
                               )
                             ) {
                               // Step to a sibling first so the studio stays
@@ -2456,6 +3116,7 @@ function ListEditor({
 // Editable section order with HTML5 drag-and-drop + up/down buttons.
 const SECTION_LABELS: Record<string, string> = {
   script: "Script",
+  caption: "Caption for the post",
   examples: "Example videos",
   structure: "Shot-by-shot structure",
   hooks: "Hooks",
@@ -2464,6 +3125,7 @@ const SECTION_LABELS: Record<string, string> = {
 };
 const ALL_SECTION_KEYS = [
   "script",
+  "caption",
   "examples",
   "structure",
   "hooks",
@@ -2614,9 +3276,31 @@ function SongManager({
   headerAction?: ReactNode;
 }) {
   const [pasted, setPasted] = useState("");
+  const [altDraft, setAltDraft] = useState<Record<number, string>>({});
+  const [audioBusy, setAudioBusy] = useState<number | null>(null);
+  const [audioErr, setAudioErr] = useState<string | null>(null);
 
   function update(next: FormatSongRow[]) {
     onChange(next.length === 0 ? undefined : next);
+  }
+
+  // Optional audio file so a creator can download the track and import it,
+  // instead of only being able to reach it through the platform's own library.
+  async function uploadAudio(i: number, file: File) {
+    setAudioErr(null);
+    setAudioBusy(i);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/uploads", { method: "POST", body: form });
+      const j = await res.json();
+      if (!res.ok || !j.url) throw new Error(j.error ?? "upload failed");
+      patch(i, { fileUrl: j.url as string, fileMime: (j.mime as string) ?? file.type });
+    } catch (e) {
+      setAudioErr((e as Error).message);
+    } finally {
+      setAudioBusy(null);
+    }
   }
 
   function addSong(rawUrl: string) {
@@ -2751,6 +3435,98 @@ function SongManager({
                   className="flex-1 min-w-[140px] border-2 border-line rounded-sm px-2 py-1 text-xs focus:outline-none focus:border-accent bg-background"
                 />
               </div>
+              {/* The same sound on other platforms. An Instagram creator
+                  cannot open a TikTok sound link, so each place it lives gets
+                  its own link and its own button on the public page. */}
+              <div className="flex gap-1.5 flex-wrap items-center">
+                <span className="text-[9px] uppercase tracking-[0.2em] font-bold text-muted w-16 shrink-0">
+                  Also on
+                </span>
+                {(s.altUrls ?? []).map((u, k) => (
+                  <span
+                    key={k}
+                    className="border-2 border-line bg-paper px-1.5 py-0.5 rounded-sm text-[10px] font-bold flex items-center gap-1"
+                  >
+                    {SONG_PLATFORM_LABELS[detectSongPlatform(u)]}
+                    <a
+                      href={u}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-muted hover:text-ink"
+                      title={u}
+                    >
+                      ↗
+                    </a>
+                    <button
+                      type="button"
+                      aria-label="Remove link"
+                      onClick={() =>
+                        patch(i, {
+                          altUrls: (s.altUrls ?? []).filter((_, j2) => j2 !== k),
+                        })
+                      }
+                      className="font-black text-muted hover:text-ink"
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+                <input
+                  type="url"
+                  value={altDraft[i] ?? ""}
+                  onChange={(e) =>
+                    setAltDraft((d) => ({ ...d, [i]: e.target.value }))
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter") return;
+                    e.preventDefault();
+                    const url = normalizeSongUrl(altDraft[i] ?? "");
+                    if (!url) return;
+                    patch(i, { altUrls: [...(s.altUrls ?? []), url] });
+                    setAltDraft((d) => ({ ...d, [i]: "" }));
+                  }}
+                  placeholder="Same sound on Instagram / YouTube, paste + enter"
+                  className="flex-1 min-w-[180px] border-2 border-dashed border-line rounded-sm px-2 py-1 text-[11px] font-mono focus:outline-none focus:border-accent bg-background"
+                />
+              </div>
+
+              <div className="flex gap-1.5 flex-wrap items-center">
+                <span className="text-[9px] uppercase tracking-[0.2em] font-bold text-muted w-16 shrink-0">
+                  Audio
+                </span>
+                {s.fileUrl ? (
+                  <>
+                    <audio src={s.fileUrl} controls preload="none" className="h-8" />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        patch(i, { fileUrl: undefined, fileMime: undefined })
+                      }
+                      className="border-2 border-line bg-background px-2 py-0.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+                    >
+                      Remove
+                    </button>
+                  </>
+                ) : (
+                  <label className="border-2 border-dashed border-line bg-background px-2 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest cursor-pointer">
+                    {audioBusy === i ? "Uploading…" : "+ Upload file"}
+                    <input
+                      type="file"
+                      accept="audio/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        e.target.value = "";
+                        if (f) void uploadAudio(i, f);
+                      }}
+                    />
+                  </label>
+                )}
+                <span className="text-[10px] text-muted">
+                  Optional. Lets them download and import it directly.
+                </span>
+              </div>
+
               <input
                 type="text"
                 value={s.note ?? ""}
@@ -2762,6 +3538,12 @@ function SongManager({
           );
         })}
       </div>
+
+      {audioErr && (
+        <p className="text-[11px] font-bold border-2 border-line bg-paper px-2 py-1 rounded-sm mt-2">
+          Audio upload failed: {audioErr}
+        </p>
+      )}
 
       <div className="flex gap-1.5 mt-2">
         <input
@@ -3461,6 +4243,495 @@ const STATUS_STYLE: Record<ScriptStatus, string> = {
   archived: "bg-background text-muted border-line",
 };
 
+// ---------------------------------------------------------------------------
+// Shot list — pins assets / overlays / on-screen text to a beat of the live
+// script. Sits directly under the writing pad so timing is set while the line
+// is still on screen, instead of in a separate assets tab with no context.
+//
+// Cues store an anchor (the beat's timestamp, or its position when untimed)
+// rather than an index into the text, so rewriting a line does not silently
+// move a shot to the wrong moment. Anything that comes unpinned is shown in a
+// dedicated group instead of disappearing.
+// ---------------------------------------------------------------------------
+
+const CUE_HOW_KEYS: CueHow[] = [
+  "broll",
+  "overlay",
+  "fullscreen",
+  "pip",
+  "text",
+  "sfx",
+];
+
+// Durations that actually get typed. "Until the next line" stays the default
+// because most beats simply run to the end of the line.
+const CUE_DURATIONS = [1, 1.5, 2, 3, 4, 5, 8];
+
+// ---------------------------------------------------------------------------
+// Caption editor — the copy that goes in the post, separate from the script
+// that goes in the video. Alternates exist so twenty creators posting the same
+// day are not all pushing a byte-identical caption.
+// ---------------------------------------------------------------------------
+
+function CaptionEditor({
+  caption,
+  onChange,
+  hidden,
+  onToggleHidden,
+  headerAction,
+}: {
+  caption: FormatCaption | undefined;
+  onChange: (next: FormatCaption | undefined) => void;
+  hidden: boolean;
+  onToggleHidden: () => void;
+  headerAction?: ReactNode;
+}) {
+  const c: FormatCaption = caption ?? {};
+  const options = c.options ?? [];
+  const [tagDraft, setTagDraft] = useState("");
+
+  // An all-empty caption is stored as undefined so the public page's
+  // hasCaption() check keeps the section off rather than rendering a shell.
+  function update(next: FormatCaption) {
+    const empty =
+      !next.text?.trim() &&
+      !next.cta?.trim() &&
+      !next.note?.trim() &&
+      (next.hashtags ?? []).length === 0 &&
+      (next.options ?? []).length === 0;
+    onChange(empty ? undefined : next);
+  }
+
+  function addTags(raw: string) {
+    const parts = raw
+      .split(/[\s,]+/)
+      .map((x) => x.trim().replace(/^#+/, ""))
+      .filter(Boolean);
+    if (parts.length === 0) return;
+    const merged = [...new Set([...(c.hashtags ?? []), ...parts])];
+    update({ ...c, hashtags: merged });
+    setTagDraft("");
+  }
+
+  return (
+    <div className={hidden ? "opacity-60" : undefined}>
+      <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+        <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+          Caption for the post
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {headerAction}
+          {hidden && (
+            <span className="px-1.5 py-0.5 bg-paper border-2 border-line rounded-sm text-[9px] font-bold uppercase tracking-widest">
+              HIDDEN
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={onToggleHidden}
+            className="border-2 border-line bg-background px-2 py-0.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+          >
+            {hidden ? "Show caption" : "Hide caption"}
+          </button>
+        </div>
+      </div>
+
+      <label className="block text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-1">
+        Main caption
+      </label>
+      <textarea
+        value={c.text ?? ""}
+        onChange={(e) => update({ ...c, text: e.target.value })}
+        rows={3}
+        placeholder="What they paste into the caption box when they upload."
+        className="w-full border-2 border-line rounded-md px-2 py-1.5 text-sm focus:outline-none focus:border-accent bg-background mb-3"
+      />
+
+      <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">
+        <label className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+          Alternates ({options.length})
+        </label>
+        <button
+          type="button"
+          onClick={() =>
+            update({
+              ...c,
+              options: [
+                ...options,
+                { id: makeVariantId(), text: "" },
+              ],
+            })
+          }
+          className="border-2 border-line bg-background px-2 py-0.5 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+        >
+          + Alternate
+        </button>
+      </div>
+      <p className="text-[11px] text-muted mb-2">
+        Creators pick one. Stops every account posting the identical string.
+      </p>
+      <div className="space-y-2 mb-3">
+        {options.map((o, i) => (
+          <div
+            key={o.id || i}
+            className="border-2 border-line bg-background rounded-md p-2 space-y-1.5"
+          >
+            <div className="flex items-center gap-1.5">
+              <span className="shrink-0 w-6 h-6 border-2 border-line bg-paper rounded-sm flex items-center justify-center text-[10px] font-black">
+                {String.fromCharCode(65 + i)}
+              </span>
+              <input
+                type="text"
+                value={o.label ?? ""}
+                onChange={(e) =>
+                  update({
+                    ...c,
+                    options: options.map((x, j) =>
+                      j === i ? { ...x, label: e.target.value || undefined } : x
+                    ),
+                  })
+                }
+                placeholder="Label (optional, e.g. 'Shorter')"
+                className="flex-1 min-w-0 border-2 border-line rounded-sm px-2 py-1 text-[11px] font-bold focus:outline-none focus:border-accent bg-background"
+              />
+              <button
+                type="button"
+                aria-label="Remove alternate"
+                onClick={() =>
+                  update({
+                    ...c,
+                    options: options.filter((_, j) => j !== i),
+                  })
+                }
+                className="shrink-0 w-6 h-6 border-2 border-line bg-background rounded-sm font-black nb-press text-xs"
+              >
+                ×
+              </button>
+            </div>
+            <textarea
+              value={o.text}
+              onChange={(e) =>
+                update({
+                  ...c,
+                  options: options.map((x, j) =>
+                    j === i ? { ...x, text: e.target.value } : x
+                  ),
+                })
+              }
+              rows={2}
+              placeholder="Alternate caption"
+              className="w-full border-2 border-line rounded-sm px-2 py-1 text-sm focus:outline-none focus:border-accent bg-background"
+            />
+          </div>
+        ))}
+      </div>
+
+      <label className="block text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-1">
+        Hashtags
+      </label>
+      <div className="flex flex-wrap gap-1.5 mb-1.5">
+        {(c.hashtags ?? []).map((h, i) => (
+          <span
+            key={i}
+            className="border-2 border-line bg-paper px-1.5 py-0.5 rounded-sm text-[11px] font-bold flex items-center gap-1"
+          >
+            #{h}
+            <button
+              type="button"
+              aria-label={`Remove #${h}`}
+              onClick={() =>
+                update({
+                  ...c,
+                  hashtags: (c.hashtags ?? []).filter((_, j) => j !== i),
+                })
+              }
+              className="font-black text-muted hover:text-ink"
+            >
+              ×
+            </button>
+          </span>
+        ))}
+      </div>
+      <input
+        type="text"
+        value={tagDraft}
+        onChange={(e) => setTagDraft(e.target.value)}
+        onBlur={() => addTags(tagDraft)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === "," || e.key === " ") {
+            e.preventDefault();
+            addTags(tagDraft);
+          }
+        }}
+        placeholder="Type a tag and hit enter. #fyp #prayer"
+        className="w-full border-2 border-line rounded-md px-2 py-1.5 text-xs focus:outline-none focus:border-accent bg-background mb-3"
+      />
+
+      <label className="block text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-1">
+        Call to action
+      </label>
+      <input
+        type="text"
+        value={c.cta ?? ""}
+        onChange={(e) => update({ ...c, cta: e.target.value })}
+        placeholder="Link in bio, comment a word, follow for part 2…"
+        className="w-full border-2 border-line rounded-md px-2 py-1.5 text-sm focus:outline-none focus:border-accent bg-background mb-3"
+      />
+
+      <label className="block text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-1">
+        Note for creators
+      </label>
+      <input
+        type="text"
+        value={c.note ?? ""}
+        onChange={(e) => update({ ...c, note: e.target.value })}
+        placeholder="Guidance shown under the caption (this line does translate)"
+        className="w-full border-2 border-line rounded-md px-2 py-1.5 text-xs focus:outline-none focus:border-accent bg-background"
+      />
+    </div>
+  );
+}
+
+function CueEditor({
+  cue,
+  assets,
+  onPatch,
+  onRemove,
+}: {
+  cue: ScriptCue;
+  assets: FormatAssetRow[];
+  onPatch: (p: Partial<ScriptCue>) => void;
+  onRemove: () => void;
+}) {
+  const asset = cue.assetUrl
+    ? assets.find((a) => a.url === cue.assetUrl)
+    : undefined;
+  return (
+    <div className="border-2 border-line bg-background rounded-sm p-2 space-y-1.5">
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <select
+          value={cue.how}
+          onChange={(e) => onPatch({ how: e.target.value as CueHow })}
+          className="border-2 border-line bg-background rounded-sm px-1.5 py-1 text-[11px] font-bold focus:outline-none focus:border-accent"
+        >
+          {CUE_HOW_KEYS.map((k) => (
+            <option key={k} value={k}>
+              {CUE_HOW_LABELS[k]}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={cue.assetUrl ?? ""}
+          onChange={(e) =>
+            onPatch({ assetUrl: e.target.value || undefined })
+          }
+          className="flex-1 min-w-[140px] border-2 border-line bg-background rounded-sm px-1.5 py-1 text-[11px] focus:outline-none focus:border-accent"
+        >
+          <option value="">No file (direction only)</option>
+          {assets.map((a, i) => (
+            <option key={a.url || i} value={a.url}>
+              {a.label?.trim() || a.filename || `Asset ${i + 1}`}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={cue.durationSec ?? ""}
+          onChange={(e) =>
+            onPatch({
+              durationSec: e.target.value ? Number(e.target.value) : undefined,
+            })
+          }
+          title="How long it stays on screen"
+          className="border-2 border-line bg-background rounded-sm px-1.5 py-1 text-[11px] font-bold focus:outline-none focus:border-accent"
+        >
+          <option value="">Until next line</option>
+          {CUE_DURATIONS.map((d) => (
+            <option key={d} value={d}>
+              {d}s
+            </option>
+          ))}
+        </select>
+
+        <button
+          type="button"
+          aria-label="Remove shot"
+          onClick={onRemove}
+          className="shrink-0 w-6 h-6 border-2 border-line bg-background rounded-sm font-black nb-press text-xs"
+        >
+          ×
+        </button>
+      </div>
+
+      <div className="flex gap-1.5 flex-wrap">
+        <input
+          type="text"
+          value={cue.label ?? ""}
+          onChange={(e) => onPatch({ label: e.target.value || undefined })}
+          placeholder={
+            asset?.label?.trim() || asset?.filename || "What they see (label)"
+          }
+          className="flex-1 min-w-[140px] border-2 border-line rounded-sm px-2 py-1 text-[11px] font-bold focus:outline-none focus:border-accent bg-background"
+        />
+        <input
+          type="text"
+          value={cue.note ?? ""}
+          onChange={(e) => onPatch({ note: e.target.value || undefined })}
+          placeholder="Direction (mute it, zoom slowly, hard cut back)"
+          className="flex-1 min-w-[180px] border-2 border-line rounded-sm px-2 py-1 text-[11px] focus:outline-none focus:border-accent bg-background"
+        />
+      </div>
+    </div>
+  );
+}
+
+function ShotList({
+  script,
+  cues,
+  assets,
+  onChange,
+}: {
+  script: string;
+  cues: ScriptCue[];
+  assets: FormatAssetRow[];
+  onChange: (next: ScriptCue[] | undefined) => void;
+}) {
+  const lines = parseScriptLines(script);
+  const { byIndex, orphans: stranded } = resolveCues(cues, lines);
+  const total = totalCueSeconds(cues);
+
+  function update(next: ScriptCue[]) {
+    onChange(next.length === 0 ? undefined : next);
+  }
+  function patch(id: string, p: Partial<ScriptCue>) {
+    update(cues.map((c) => (c.id === id ? { ...c, ...p } : c)));
+  }
+  function remove(id: string) {
+    update(cues.filter((c) => c.id !== id));
+  }
+  function add(line: ScriptLine, index: number) {
+    update([...cues, newCue(line, index)]);
+  }
+
+  if (lines.length === 0) {
+    return (
+      <div className="border-2 border-dashed border-line rounded-md p-4 text-center">
+        <p className="text-xs text-muted">
+          Write the script first. Shots pin to its lines.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+          Shot list ({cues.length})
+        </div>
+        {total > 0 && (
+          <span className="text-[10px] font-bold text-muted">
+            {total}s of on-screen assets
+          </span>
+        )}
+      </div>
+      <p className="text-[11px] text-muted">
+        Pin a file, overlay or on-screen line to the moment it appears. Creators
+        see it right under that line of the script.
+      </p>
+
+      <ol className="space-y-1.5">
+        {lines.map((l, i) => {
+          const key = beatKey(l, i);
+          const mine = byIndex.get(i) ?? [];
+          return (
+            <li
+              key={key}
+              className="border-2 border-line bg-paper rounded-md p-2 space-y-1.5"
+            >
+              <div className="flex items-start gap-2">
+                <span className="shrink-0 font-mono text-[10px] font-bold border-2 border-line bg-background px-1 py-0.5 rounded-sm">
+                  {l.timestamp ?? `L${i + 1}`}
+                </span>
+                <span className="min-w-0 flex-1 text-xs text-ink leading-snug">
+                  {l.body || <em className="text-muted">(empty line)</em>}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => add(l, i)}
+                  className="shrink-0 border-2 border-line bg-background px-1.5 py-0.5 rounded-sm nb-press text-[9px] font-black uppercase tracking-widest"
+                >
+                  + Shot
+                </button>
+              </div>
+              {mine.map((c) => (
+                <CueEditor
+                  key={c.id}
+                  cue={c}
+                  assets={assets}
+                  onPatch={(p) => patch(c.id, p)}
+                  onRemove={() => remove(c.id)}
+                />
+              ))}
+            </li>
+          );
+        })}
+      </ol>
+
+      {stranded.length > 0 && (
+        <div className="border-2 border-line bg-background rounded-md p-2 space-y-1.5">
+          <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted">
+            Unpinned ({stranded.length})
+          </div>
+          <p className="text-[11px] text-muted">
+            The line these were pinned to changed. Re-pin them to a beat above,
+            or delete them. Creators currently see these at the end of the
+            script.
+          </p>
+          {stranded.map((c) => (
+            <div key={c.id} className="space-y-1">
+              <select
+                value=""
+                onChange={(e) => {
+                  const i = Number(e.target.value);
+                  if (!Number.isInteger(i) || !lines[i]) return;
+                  update(
+                    cues.map((x) =>
+                      x.id === c.id ? repinCue(x, lines[i], i) : x
+                    )
+                  );
+                }}
+                className="w-full border-2 border-line bg-background rounded-sm px-1.5 py-1 text-[11px] font-bold focus:outline-none focus:border-accent"
+              >
+                <option value="">Re-pin to a line…</option>
+                {lines.map((l, i) => (
+                  <option key={beatKey(l, i)} value={i}>
+                    {(l.timestamp ?? `L${i + 1}`) + ": " + l.body.slice(0, 40)}
+                  </option>
+                ))}
+              </select>
+              <CueEditor
+                cue={c}
+                assets={assets}
+                onPatch={(p) => patch(c.id, p)}
+                onRemove={() => remove(c.id)}
+              />
+            </div>
+          ))}
+        </div>
+      )}
+
+      {assets.length === 0 && (
+        <p className="text-[11px] text-muted border-2 border-dashed border-line rounded-md p-2">
+          No files uploaded yet. Add them in the <strong>Assets</strong> tab and
+          they become pickable here.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function ScriptManager({
   variants,
   onChange,
@@ -3742,7 +5013,8 @@ const COPY_PARTS: { key: string; label: string }[] = [
   { key: "pins", label: "Videos" },
   { key: "assets", label: "Assets" },
   { key: "songs", label: "Sounds" },
-  { key: "script", label: "Script" },
+  { key: "script", label: "Script + shots" },
+  { key: "caption", label: "Caption" },
   { key: "structure", label: "Structure" },
   { key: "sectionOrder", label: "Section order" },
   { key: "hiddenSections", label: "Visibility" },
@@ -3920,6 +5192,7 @@ function CopyFromFormat({
 
 type StudioTab =
   | "script"
+  | "caption"
   | "structure"
   | "examples"
   | "assets"
@@ -3930,6 +5203,7 @@ type StudioTab =
 
 const STUDIO_TABS: { id: StudioTab; label: string; icon: string }[] = [
   { id: "script", label: "Script", icon: "✎" },
+  { id: "caption", label: "Caption", icon: "#" },
   { id: "structure", label: "Structure", icon: "◫" },
   { id: "examples", label: "Examples", icon: "▶" },
   { id: "assets", label: "Assets", icon: "⬇" },
@@ -4152,6 +5426,11 @@ function FormatSection({
     sounds: (override.songs ?? []).length,
     script: normalizeVariants(override).length,
     structure: (override.structure ?? defaultStructure).length,
+    // Shots pinned into the script, so a script with no on-screen direction
+    // reads as a gap on the rail rather than looking finished.
+    caption:
+      (override.caption?.options ?? []).length +
+      (override.caption?.text?.trim() ? 1 : 0),
   };
 
   // The Preview tab renders the real creator component, not a mock-up, so what
@@ -4175,6 +5454,8 @@ function FormatSection({
     sectionOrder: override.sectionOrder as FormatSectionKey[] | undefined,
     assets: override.assets ?? [],
     songs: override.songs ?? [],
+    scriptCues: override.scriptCues ?? [],
+    caption: override.caption,
     hookCategorySlugs: linkedHookSlugs,
   };
   const previewHooks: HookCategory[] = (hookCategories ?? defaultHookCategories).map(
@@ -4366,7 +5647,34 @@ function FormatSection({
               })()}
             />
   </div>
+          <div className="mt-4 pt-4 border-t-2 border-line">
+            <ShotList
+              script={resolveLiveScript(normalizeVariants(override)) ?? ""}
+              cues={override.scriptCues ?? []}
+              assets={override.assets ?? []}
+              onChange={(next) =>
+                onChangeOverride({ ...override, scriptCues: next })
+              }
+            />
+          </div>
         </>
+      )}
+
+      {tab === "caption" && (
+        <CaptionEditor
+          caption={override.caption}
+          onChange={(next) => onChangeOverride({ ...override, caption: next })}
+          hidden={isSectionHidden("caption")}
+          onToggleHidden={() => toggleSectionHidden("caption")}
+          headerAction={
+            <SectionCopyButton
+              part="caption"
+              label="caption"
+              otherFormats={otherFormats}
+              onApply={onCopyPartsFrom}
+            />
+          }
+        />
       )}
 
       {tab === "examples" && (

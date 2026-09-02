@@ -15,6 +15,7 @@ export type NavSection = {
 export const overviewId = "overview";
 export const calendarId = "calendar";
 export const onboardingId = "onboarding";
+export const studioId = "studio";
 export const formatId = (slug: string) => `format:${slug}`;
 
 export function buildNavSections(
@@ -27,6 +28,9 @@ export function buildNavSections(
     includeFormats?: boolean;
     onboardingComplete?: boolean;
     lang?: Lang;
+    // Video Builder (lib/studio.ts). Listed first when on: for the briefs
+    // that have it, making the video is the whole job.
+    studio?: { title: string } | null;
   }
 ): NavSection[] {
   const base = `/b/${briefSlug}`;
@@ -37,6 +41,19 @@ export function buildNavSections(
   const includeFormats = options?.includeFormats !== false;
   const onboardingComplete = options?.onboardingComplete === true;
   const sections: NavSection[] = [];
+  if (options?.studio) {
+    sections.push({
+      label: t(lang, "makeSection"),
+      items: [
+        {
+          id: studioId,
+          href: `${base}/studio`,
+          title: options.studio.title,
+          meta: t(lang, "studioMeta"),
+        },
+      ],
+    });
+  }
   // The content calendar is the main thing — list it first.
   if (includeCalendar) {
     sections.push({

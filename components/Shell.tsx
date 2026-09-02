@@ -6,11 +6,16 @@ import { useEffect, useMemo, useState } from "react";
 import type { Format, HookCategory } from "@/lib/types";
 import type { ContentCalendar } from "@/lib/db";
 import Link from "next/link";
-import { buildNavSections, calendarId } from "@/lib/nav";
+import { buildNavSections, calendarId, studioId } from "@/lib/nav";
 import { t, type Lang } from "@/lib/i18n";
 import { Sidebar } from "./Sidebar";
 import { FormatView, OverviewView } from "./Views";
 import { ContentCalendarView } from "./ContentCalendar";
+import { Studio } from "./Studio";
+
+// Video Builder props. `title` alone lists it in the nav; `signedIn` is only
+// meaningful on the builder page itself.
+export type ShellStudio = { title: string; signedIn?: boolean } | null;
 
 export function Shell({
   formats,
@@ -26,6 +31,7 @@ export function Shell({
   onboardingComplete = false,
   account = null,
   lang = "en",
+  studio = null,
 }: {
   formats: Format[];
   hookCategories: HookCategory[];
@@ -45,6 +51,7 @@ export function Shell({
   onboardingComplete?: boolean;
   account?: { name: string | null; email: string } | null;
   lang?: Lang;
+  studio?: ShellStudio;
 }) {
   const calendarEnabled =
     !!contentCalendar?.enabled && (contentCalendar.days?.length ?? 0) > 0;
@@ -57,6 +64,7 @@ export function Shell({
         includeFormats: !hideFormatsList,
         onboardingComplete,
         lang,
+        studio,
       }),
     [
       formats,
@@ -67,6 +75,7 @@ export function Shell({
       onboardingEnabled,
       onboardingComplete,
       lang,
+      studio,
     ]
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -103,8 +112,9 @@ export function Shell({
       if (it) return it.title;
     }
     if (activeId === "calendar") return t(lang, "contentCalendar");
+    if (activeId === studioId && studio) return studio.title;
     return t(lang, "overview");
-  }, [sections, activeId, lang]);
+  }, [sections, activeId, lang, studio]);
 
   const view = renderView(
     activeId,
@@ -114,7 +124,8 @@ export function Shell({
     useAllHooks,
     publicStats,
     contentCalendar,
-    lang
+    lang,
+    studio
   );
 
   return (
@@ -210,6 +221,15 @@ export function Shell({
         </footer>
       </main>
 
+      {studio && !calendarEnabled && activeId !== studioId && (
+        <Link
+          href={`/b/${brief.slug}/studio`}
+          className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 inline-flex items-center gap-2 border-2 border-line bg-accent text-accent-ink px-4 py-2.5 rounded-full nb-shadow font-black text-xs sm:text-sm uppercase tracking-widest"
+        >
+          <span aria-hidden>🎬</span> {t(lang, "makeVideo")}
+        </Link>
+      )}
+
       {calendarEnabled && activeId !== calendarId && (
         <Link
           href={`/b/${brief.slug}/calendar`}
@@ -234,8 +254,18 @@ function renderView(
   useAllHooks: boolean,
   publicStats?: { enabled: boolean; visible?: string[] },
   contentCalendar?: ContentCalendar | null,
-  lang: Lang = "en"
+  lang: Lang = "en",
+  studio: ShellStudio = null
 ) {
+  if (activeId === studioId && studio)
+    return (
+      <Studio
+        briefSlug={brief.slug}
+        title={studio.title}
+        signedIn={!!studio.signedIn}
+        lang={lang}
+      />
+    );
   if (activeId === "overview")
     return (
       <OverviewView

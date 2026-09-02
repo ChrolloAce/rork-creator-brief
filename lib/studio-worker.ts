@@ -1,0 +1,243 @@
+import "server-only";
+import { createWriteStream } from "node:fs";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { pipeline } from "node:stream/promises";
+import { Readable, Transform } from "node:stream";
+import {
+  claimNextStudioRender,
+  createImage,
+  getCuration,
+  getImage,
+  getStudioClipBlobId,
+  reclaimStaleStudioJobs,
+  updateStudioClip,
+  updateStudioRender,
+} from "./db";
+import { normalizeClip, posterFrame, probe, renderStitch } from "./studio-ffmpeg";
+import { renderTextCard } from "./studio-text";
+import {
+  STUDIO_DEFAULTS,
+  effectiveTimings,
+  slugifyForFile,
+  type StudioClipKind,
+  type StudioRender,
+} from "./studio";
+
+// Background work for the Video Builder: normalizing uploads and stitching
+// renders. Runs inside the Next.js process (no separate worker), the same way
+// the transcript queue does. ffmpeg is CPU-bound, so a small slot count keeps
+// five simultaneous uploads from starving the web server.
+
+declare global {
+  var __studioSlots: { active: number; waiters: (() => void)[] } | undefined;
+  var __studioDraining: boolean | undefined;
+  var __studioReclaimed: boolean | undefined;
+}
+
+const MAX_FFMPEG = 2;
+
+function slots() {
+  if (!globalThis.__studioSlots) globalThis.__studioSlots = { active: 0, waiters: [] };
+  return globalThis.__studioSlots;
+}
+
+async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
+  const s = slots();
+  if (s.active >= MAX_FFMPEG) {
+    await new Promise<void>((resolve) => s.waiters.push(resolve));
+  }
+  s.active++;
+  try {
+    return await fn();
+  } finally {
+    s.active--;
+    s.waiters.shift()?.();
+  }
+}
+
+function log(tag: string, msg: string) {
+  console.log(`[studio ${tag}] ${msg}`);
+}
+
+/* ------------------------------- uploads -------------------------------- */
+
+// Stream a request body to disk, counting bytes so an oversize upload is cut
+// off instead of buffered. Returns the path.
+export async function spoolUpload(
+  body: ReadableStream<Uint8Array>,
+  ext: string,
+  maxBytes: number
+): Promise<{ dir: string; file: string; bytes: number }> {
+  const dir = await mkdtemp(path.join(tmpdir(), "studio-up-"));
+  const file = path.join(dir, `raw${ext}`);
+  let bytes = 0;
+  const counter = new Transform({
+    transform(chunk: Buffer, _enc, cb) {
+      bytes += chunk.length;
+      if (bytes > maxBytes) cb(new Error("too large"));
+      else cb(null, chunk);
+    },
+  });
+  try {
+    await pipeline(
+      Readable.fromWeb(body as Parameters<typeof Readable.fromWeb>[0]),
+      counter,
+      createWriteStream(file)
+    );
+  } catch (e) {
+    await rm(dir, { recursive: true, force: true });
+    throw e;
+  }
+  return { dir, file, bytes };
+}
+
+// Normalize a spooled upload into the house mp4 + poster and store both.
+// Owns the temp dir: it is removed whatever happens.
+export async function ingestClip(input: {
+  clipId: string;
+  kind: StudioClipKind;
+  dir: string;
+  file: string;
+  filename: string | null;
+}): Promise<void> {
+  const { clipId, dir, file } = input;
+  try {
+    await withSlot(async () => {
+      const info = await probe(file);
+      if (!info.hasVideo) throw new Error("That file does not look like a video.");
+      if (info.durationSec < 0.5) throw new Error("That clip is too short.");
+      const out = path.join(dir, "norm.mp4");
+      const poster = path.join(dir, "poster.jpg");
+      await normalizeClip({
+        src: file,
+        out,
+        maxSec: input.kind === "broll" ? STUDIO_DEFAULTS.maxBrollSec : STUDIO_DEFAULTS.maxDemoSec,
+        hasAudio: info.hasAudio,
+        mode: input.kind === "broll" ? "cover" : "fit",
+      });
+      await posterFrame(out, poster);
+      const normalized = await probe(out);
+      const [mp4, jpg] = await Promise.all([readFile(out), readFile(poster)]);
+      const base = slugifyForFile(
+        (input.filename ?? "").replace(/\.[a-z0-9]+$/i, "") || input.kind
+      );
+      const { id: blobId } = await createImage("video/mp4", mp4, `${base}.mp4`);
+      const { id: posterId } = await createImage("image/jpeg", jpg, `${base}.jpg`);
+      await updateStudioClip(clipId, {
+        status: "ready",
+        error: null,
+        blobId,
+        posterId,
+        durationSec: Math.round(normalized.durationSec * 10) / 10,
+        width: normalized.width,
+        height: normalized.height,
+        sizeBytes: mp4.length,
+      });
+      log(clipId, `ready ${(mp4.length / 1e6).toFixed(1)}MB ${normalized.durationSec.toFixed(1)}s`);
+    });
+  } catch (e) {
+    const msg = (e as Error).message || "Could not process the video.";
+    log(clipId, `error: ${msg}`);
+    await updateStudioClip(clipId, { status: "error", error: msg.slice(0, 300) }).catch(() => {});
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+/* ------------------------------- renders -------------------------------- */
+
+async function blobToFile(blobId: string, file: string): Promise<void> {
+  const img = await getImage(blobId);
+  if (!img) throw new Error("A source clip is missing. Upload it again.");
+  await writeFile(file, img.bytes);
+}
+
+async function runRender(job: StudioRender): Promise<void> {
+  const dir = await mkdtemp(path.join(tmpdir(), "studio-rn-"));
+  try {
+    await withSlot(async () => {
+      if (!job.demoId || !job.brollId) throw new Error("Pick a demo and a background clip.");
+      const [demoBlob, brollBlob, cur] = await Promise.all([
+        getStudioClipBlobId(job.demoId),
+        getStudioClipBlobId(job.brollId),
+        getCuration(job.briefSlug),
+      ]);
+      if (!demoBlob) throw new Error("That demo is gone. Upload it again.");
+      if (!brollBlob) throw new Error("That background clip is gone. Pick another.");
+      const demo = path.join(dir, "demo.mp4");
+      const broll = path.join(dir, "broll.mp4");
+      await Promise.all([blobToFile(demoBlob, demo), blobToFile(brollBlob, broll)]);
+      const brollInfo = await probe(broll);
+      const cfg = cur.studio;
+      const { hookSec, explanationSec } = effectiveTimings(cfg, job.explanationText);
+      const style = cfg?.textStyle ?? STUDIO_DEFAULTS.textStyle;
+      const hookPng = path.join(dir, "hook.png");
+      const explPng = path.join(dir, "expl.png");
+      await writeFile(hookPng, await renderTextCard(job.hookText, { tone: "hook", style }));
+      await writeFile(
+        explPng,
+        await renderTextCard(job.explanationText, { tone: "explanation", style })
+      );
+      const out = path.join(dir, "out.mp4");
+      const poster = path.join(dir, "poster.jpg");
+      await renderStitch({
+        broll,
+        brollHasAudio: brollInfo.hasAudio,
+        demo,
+        hookPng,
+        explanationPng: explPng,
+        hookSec,
+        explanationSec,
+        out,
+      });
+      await posterFrame(out, poster, 0.5);
+      const info = await probe(out);
+      const [mp4, jpg] = await Promise.all([readFile(out), readFile(poster)]);
+      const base = `${slugifyForFile(job.briefSlug, 20)}-${slugifyForFile(job.hookText, 36)}`;
+      const { id: blobId } = await createImage("video/mp4", mp4, `${base}.mp4`);
+      const { id: posterId } = await createImage("image/jpeg", jpg, `${base}.jpg`);
+      await updateStudioRender(job.id, {
+        status: "ready",
+        error: null,
+        blobId,
+        posterId,
+        durationSec: Math.round(info.durationSec * 10) / 10,
+        sizeBytes: mp4.length,
+      });
+      const s = await stat(out);
+      log(job.id, `ready ${(s.size / 1e6).toFixed(1)}MB ${info.durationSec.toFixed(1)}s`);
+    });
+  } catch (e) {
+    const msg = (e as Error).message || "Render failed.";
+    log(job.id, `error: ${msg}`);
+    await updateStudioRender(job.id, { status: "error", error: msg.slice(0, 300) }).catch(() => {});
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+// Drain the queue. Safe to call from anywhere, any number of times: only one
+// drain loop runs per process, and it exits when nothing is queued.
+export function kickStudioQueue(): void {
+  if (globalThis.__studioDraining) return;
+  globalThis.__studioDraining = true;
+  void (async () => {
+    try {
+      if (!globalThis.__studioReclaimed) {
+        globalThis.__studioReclaimed = true;
+        await reclaimStaleStudioJobs().catch(() => {});
+      }
+      for (;;) {
+        const job = await claimNextStudioRender();
+        if (!job) break;
+        await runRender(job);
+      }
+    } catch (e) {
+      console.error("[studio] queue loop failed:", (e as Error).message);
+    } finally {
+      globalThis.__studioDraining = false;
+    }
+  })();
+}

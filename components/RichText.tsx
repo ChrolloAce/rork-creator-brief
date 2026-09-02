@@ -55,3 +55,41 @@ export function RichText({
     />
   );
 }
+
+// Inline-only styling, for places that render a single line rather than a
+// document: list items, rule text. Same look as PROSE_CLASS for the tags that
+// can appear inline.
+export const INLINE_PROSE_CLASS =
+  "[&_strong]:font-black [&_b]:font-black [&_em]:italic " +
+  "[&_mark]:bg-accent [&_mark]:text-accent-ink [&_mark]:px-1 [&_mark]:py-0.5 [&_mark]:rounded-[3px] [&_mark]:font-bold [&_mark]:box-decoration-clone";
+
+// Lightweight inline markup for line-based fields (rules, value props) where a
+// WYSIWYG box per line would be unusable to type into:
+//   ==text==  highlight     **text**  bold
+// The input is escaped BEFORE the markers are expanded, so brief content can
+// never inject its own HTML.
+export function inlineMarkupToHtml(v: string): string {
+  const esc = (v ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  return esc
+    .replace(/==([^=]+)==/g, "<mark>$1</mark>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+}
+
+// Renders one line of text with the inline markers above applied.
+export function InlineRich({
+  text,
+  className,
+}: {
+  text: string;
+  className?: string;
+}) {
+  return (
+    <span
+      className={`${INLINE_PROSE_CLASS} ${className ?? ""}`}
+      dangerouslySetInnerHTML={{ __html: inlineMarkupToHtml(text) }}
+    />
+  );
+}

@@ -24,6 +24,9 @@ export async function middleware(req: NextRequest) {
       pathname.startsWith("/api/briefs/") ||
       pathname === "/api/vt-projects" ||
       pathname === "/api/vt-search" ||
+      // /api/vt/* proxies the ViewTrack key: it can create projects, start
+      // paid scrapes and run paid AI analyses, so it is admin-only.
+      pathname.startsWith("/api/vt/") ||
       pathname.startsWith("/api/ai/") ||
       pathname === "/api/uploads" ||
       (isFormTemplatesApi && !isPublicSubmit));
@@ -57,6 +60,7 @@ export const config = {
     "/api/briefs/:path*",
     "/api/vt-projects",
     "/api/vt-search",
+    "/api/vt/:path*",
     "/api/ai/:path*",
     "/api/uploads",
     "/api/form-templates",

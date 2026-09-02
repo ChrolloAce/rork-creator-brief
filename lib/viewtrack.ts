@@ -37,3 +37,37 @@ export function videoIdFromUrl(url: string, fallback: string): string {
     return fallback;
   }
 }
+
+// Write-side counterpart to vtFetch. ViewTrack answers with a
+// { success, data } | { success, error } envelope; callers unwrap via vtJson.
+export function vtPost(path: string, key: string, body: unknown) {
+  return fetch(`${VT_BASE}${path}`, {
+    method: "POST",
+    headers: { "x-api-key": key, "content-type": "application/json" },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+}
+
+export type VtEnvelope<T> =
+  | { success: true; data: T }
+  | { success: false; error?: { message?: string; code?: string } };
+
+// Unwrap a ViewTrack envelope into { ok, data } | { ok:false, error, status }.
+// ViewTrack puts real, user-facing reasons in error.message (quota reached,
+// budget exhausted, duplicate name) — surface those verbatim rather than a
+// generic "ViewTrack 4xx", since they tell the admin what to do next.
+export async function vtJson<T>(
+  res: Response
+): Promise<{ ok: true; data: T } | { ok: false; error: string; status: number }> {
+  let body: VtEnvelope<T> | null = null;
+  try {
+    body = (await res.json()) as VtEnvelope<T>;
+  } catch {
+    // fall through to the status-only message
+  }
+  if (res.ok && body && body.success) return { ok: true, data: body.data };
+  const msg =
+    (body && !body.success && body.error?.message) || `ViewTrack ${res.status}`;
+  return { ok: false, error: msg, status: res.status };
+}

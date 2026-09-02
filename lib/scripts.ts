@@ -16,6 +16,13 @@ export type ScriptVariant = {
   status: ScriptStatus;
 };
 
+// The variant a creator actually reads, plus which one it was. The public page
+// needs the identity (not just the text) so it can pull that variant's cues.
+export type ResolvedScript = {
+  variant: ScriptVariant;
+  body: string;
+};
+
 // Source shape we normalize from — just the script-related bits of a
 // FormatOverride. Kept loose so both the db type and the editor type satisfy it.
 type ScriptSource = {
@@ -73,6 +80,18 @@ export function resolveLiveScript(
 }
 
 // Body to mirror back into the legacy `script` field on every edit.
+// Same pick as resolveLiveScript, but returns the whole variant so callers can
+// reach its shot list. resolveLiveScript is kept as the string-only shortcut.
+export function resolveLiveVariant(
+  variants: ScriptVariant[],
+  seed?: number
+): ScriptVariant | undefined {
+  const live = liveVariants(variants);
+  if (live.length === 0) return undefined;
+  if (live.length === 1 || seed == null) return live[0];
+  return live[Math.abs(Math.floor(seed)) % live.length];
+}
+
 export function firstLiveBody(variants: ScriptVariant[]): string | undefined {
   const live = liveVariants(variants);
   if (live.length === 0) return undefined;

@@ -35,6 +35,10 @@ export async function GET(
       briefSlug: brief.slug,
       formatSlug: f.slug,
       script: f.script ?? null,
+      // Shot list pinned to the script's beats — each cue's `at` matches a
+      // line's timestamp ("00:03") or its position ("#2").
+      cues: f.scriptCues ?? [],
+      caption: f.caption ?? null,
     });
   } catch (e) {
     return NextResponse.json(

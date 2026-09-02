@@ -133,7 +133,9 @@ export async function getFormatsForRender(
       hiddenSections: (ov.hiddenSections ?? []) as FormatSectionKey[],
       sectionOrder: ov.sectionOrder as FormatSectionKey[] | undefined,
       assets: ov.assets ?? [],
-      songs: ov.songs ?? [],
+      songs: (ov.songs ?? []) as Format["songs"],
+      scriptCues: (ov.scriptCues ?? []) as Format["scriptCues"],
+      caption: ov.caption as Format["caption"],
     });
   }
   return out;

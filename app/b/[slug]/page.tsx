@@ -9,6 +9,7 @@ import { getFormatsForRender } from "@/lib/format-videos";
 import { briefAccessRequired, currentCreator, creatorHasAccess } from "@/lib/brief-gate";
 import { getLang } from "@/lib/lang";
 import { localizeBriefContent } from "@/lib/translate";
+import { studioTitle } from "@/lib/studio";
 
 export const dynamic = "force-dynamic";
 
@@ -55,7 +56,11 @@ export default async function BriefOverview({
     redirect(`/b/${brief.slug}/formats/${formats[0].slug}`);
   }
   const hooks: HookCategory[] =
-    brief.hookCategories && brief.hookCategories.length > 0
+    // `null` means the brief never set hooks, so it inherits the built-in
+    // library. An explicitly EMPTY array means this brief deliberately has
+    // none: a new client's brief must not fall back to the previous client's
+    // hook copy, which used to leak into the page payload.
+    brief.hookCategories != null
       ? brief.hookCategories.map((c) => ({
           slug: c.slug,
           title: c.title,
@@ -89,6 +94,7 @@ export default async function BriefOverview({
       publicStats={curation.publicStats}
       hideOverview={curation.hideOverview}
       hideFormatsList={curation.hideFormatsList}
+      studio={curation.studio?.enabled ? { title: studioTitle(curation.studio) } : null}
       contentCalendar={loc.contentCalendar ?? curation.contentCalendar}
       onboardingEnabled={
         !!(brief.onboarding?.enabled && (brief.onboarding.steps?.length ?? 0) > 0)

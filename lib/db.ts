@@ -3,6 +3,13 @@ import postgres from "postgres";
 import { formats as formatsMeta } from "./formats";
 import type { VideoExample } from "./types";
 import type { ScriptVariant } from "./scripts";
+import type {
+  StudioClip,
+  StudioClipKind,
+  StudioConfig,
+  StudioJobStatus,
+  StudioRender,
+} from "./studio";
 import { hashPassword, verifyPassword } from "./passwords";
 
 declare global {
@@ -41,10 +48,35 @@ export type FormatOverrideAsset = {
 // A sound creators should use, stored as a link (usually a TikTok music page).
 export type FormatOverrideSong = {
   url: string;
+  // Same sound on other platforms (an IG creator cannot open a TikTok sound).
+  altUrls?: string[];
+  // Optional uploaded audio so creators can download and import it directly.
+  fileUrl?: string;
+  fileMime?: string;
   title?: string;
   artist?: string;
   note?: string;
   hidden?: boolean;
+};
+
+// Shot list pinned to script beats — see lib/types.ts ScriptCue.
+export type FormatOverrideCue = {
+  id: string;
+  at: string;
+  how: string;
+  assetUrl?: string;
+  label?: string;
+  durationSec?: number;
+  note?: string;
+};
+
+// Post copy — see lib/types.ts FormatCaption.
+export type FormatOverrideCaption = {
+  text?: string;
+  options?: { id: string; label?: string; text: string }[];
+  hashtags?: string[];
+  note?: string;
+  cta?: string;
 };
 export type FormatOverride = {
   title?: string;
@@ -70,6 +102,10 @@ export type FormatOverride = {
   assets?: FormatOverrideAsset[];
   // Sounds/songs to use on this format, each a link creators can open.
   songs?: FormatOverrideSong[];
+  // Assets/overlays/on-screen text pinned to moments in the script.
+  scriptCues?: FormatOverrideCue[];
+  // Caption + hashtags for the post itself.
+  caption?: FormatOverrideCaption;
 };
 
 export type CurationData = {
@@ -121,6 +157,36 @@ export type CurationData = {
   sectionGroups?: { id: string; name: string }[];
   // Maps a format/clone slug → group id. Slugs with no entry are "Ungrouped".
   sectionGroupOf?: Record<string, string>;
+  // Recycle bin. Deleting a script parks everything it owned here instead of
+  // dropping it, so it can be restored intact. Emptying the bin is the only
+  // irreversible step. See TrashedFormat.
+  trashedFormats?: TrashedFormat[];
+  // Video Builder config (lib/studio.ts). Off unless `studio.enabled`.
+  studio?: StudioConfig;
+};
+
+// A deleted script, kept whole so Restore puts back exactly what was there:
+// its authored content, its pinned videos, its group and its position.
+export type TrashedFormat = {
+  slug: string;
+  // ISO timestamp, so the bin can show how long ago it went.
+  deletedAt: string;
+  // Display name captured at delete time. The override that holds the real
+  // title is nested below, but reading it for a list row shouldn't require
+  // digging through the blob.
+  title: string;
+  // Clones live only in formatClones, so restoring one means putting that
+  // mapping back. Base formats live in code and are tombstoned in
+  // deletedFormats instead.
+  isClone: boolean;
+  cloneOf?: string;
+  override?: FormatOverride;
+  pins?: string[];
+  bucket?: string | null;
+  groupId?: string;
+  // Index in formatOrder at delete time, so Restore drops it back where it
+  // was rather than at the end of the list.
+  orderIndex?: number;
 };
 
 // A single script/task assigned to a calendar day. It either links to one of
@@ -174,6 +240,25 @@ export type CalendarGroup = {
   items: CalendarGroupItem[];
 };
 
+// Auto-rotation: instead of hand-building days, you hand the calendar a pool
+// of scripts and a date range, and every creator is dealt their own order.
+// Nothing is stored per creator — the order is derived from their id, so it is
+// stable on refresh and different from the next person's.
+export type AutoRotation = {
+  enabled?: boolean;
+  // The script slugs in the pool, usually every script in one section group.
+  slugs: string[];
+  // Where the rotation starts, "YYYY-MM-DD".
+  start: string;
+  // How many days to lay out from the start date.
+  days: number;
+  // Scripts handed to each creator per day.
+  perDay: number;
+  cadence?: "daily" | "weekdays";
+  // Kept so the editor can show which group the pool came from.
+  groupId?: string;
+};
+
 export type ContentCalendar = {
   // When true (and at least one day exists) the calendar shows on the public
   // brief and in the sidebar nav.
@@ -183,6 +268,9 @@ export type ContentCalendar = {
   days: CalendarDay[];
   // Reusable groups used by the auto-fill scheduler.
   groups?: CalendarGroup[];
+  // When set and enabled, days are generated per creator at render time.
+  // Any hand-built day for the same date still wins.
+  autoRotation?: AutoRotation;
 };
 
 export type CachedVideo = {
@@ -229,6 +317,14 @@ export type BriefAccountSetup = {
   platforms?: BriefAccountSetupPlatform[];
 };
 
+// A campaign rule. Sub-points are the clarifications brands attach to a rule
+// ("no get-rich-quick language", "no obviously false claims"), which read as a
+// nested list rather than ten more top-level rules.
+export type BriefRule = {
+  text: string;
+  sub?: string[];
+};
+
 export type BriefOverview = {
   heroHeadline?: string;
   heroAccentWord?: string;
@@ -240,6 +336,11 @@ export type BriefOverview = {
   tagline?: string;
   taglineSub?: string;
   howToUse?: string;
+  // Hard campaign rules. Rendered as their own section on the public overview,
+  // deliberately loud, because breaking one usually costs the creator the
+  // payout and the brand the campaign.
+  rules?: BriefRule[];
+  rulesIntro?: string;
   accountSetup?: BriefAccountSetup;
   // Optional CTA shown at the bottom of the sidebar. Hidden when either is empty.
   ctaLabel?: string;
@@ -516,6 +617,78 @@ async function runSchema() {
       PRIMARY KEY (brief_slug, lang)
     )
   `;
+  // Transcripts of ViewTrack videos, produced by the research tab. Keyed by
+  // the ViewTrack video uuid so a transcript is fetched once and then belongs
+  // to every brief that looks at that video. Rows are created up-front in
+  // 'queued' and advanced by the worker, so a page reload (or a closed tab)
+  // never loses a batch in flight.
+  await sql`
+    CREATE TABLE IF NOT EXISTS video_transcript (
+      video_id TEXT PRIMARY KEY,
+      url TEXT,
+      platform TEXT,
+      creator TEXT,
+      caption TEXT,
+      views BIGINT,
+      transcript TEXT,
+      status TEXT NOT NULL DEFAULT 'queued',
+      error TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS video_transcript_status_idx ON video_transcript (status)`;
+
+
+  // Video Builder (lib/studio.ts). Clips are creator demos or admin-uploaded
+  // background clips, normalized to 1080x1920 mp4 at ingest; renders are the
+  // stitched outputs. Bytes live in image_blob, these rows hold the metadata
+  // and the job status so a page reload never loses work in flight.
+  await sql`
+    CREATE TABLE IF NOT EXISTS studio_clip (
+      id TEXT PRIMARY KEY,
+      brief_slug TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'demo',
+      user_id TEXT,
+      label TEXT,
+      filename TEXT,
+      status TEXT NOT NULL DEFAULT 'queued',
+      error TEXT,
+      blob_id TEXT,
+      poster_id TEXT,
+      duration_sec REAL,
+      width INT,
+      height INT,
+      size_bytes BIGINT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS studio_clip_brief_idx ON studio_clip (brief_slug, kind, user_id, created_at DESC)`;
+  await sql`
+    CREATE TABLE IF NOT EXISTS studio_render (
+      id TEXT PRIMARY KEY,
+      brief_slug TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      hook_id TEXT,
+      hook_text TEXT NOT NULL DEFAULT '',
+      explanation_text TEXT NOT NULL DEFAULT '',
+      demo_id TEXT,
+      broll_id TEXT,
+      caption TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'queued',
+      error TEXT,
+      blob_id TEXT,
+      poster_id TEXT,
+      duration_sec REAL,
+      size_bytes BIGINT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `;
+  await sql`CREATE INDEX IF NOT EXISTS studio_render_brief_idx ON studio_render (brief_slug, user_id, created_at DESC)`;
+  await sql`CREATE INDEX IF NOT EXISTS studio_render_status_idx ON studio_render (status)`;
+
   // Seed Rork brief if none exists
   const existing = await sql`SELECT slug FROM brief`;
   if (existing.length === 0) {
@@ -747,18 +920,46 @@ export async function upsertCreator(input: {
   const userId = input.userId ?? null;
   const answers = input.answers ?? {};
 
-  if (input.clientId) {
-    const existing = await sql<{ id: string }[]>`
-      SELECT id FROM brief_creator
-      WHERE brief_slug = ${input.briefSlug} AND client_id = ${input.clientId}
-      LIMIT 1
-    `;
+  // Identity, most reliable first. client_id is per-browser, so matching only
+  // on it meant the same person re-onboarding from a second device (or after
+  // clearing storage) got a brand new roster row. user_id and email are the
+  // person; client_id is just the browser they happened to use.
+  const existing = await (async () => {
+    if (input.userId) {
+      const byUser = await sql<{ id: string }[]>`
+        SELECT id FROM brief_creator
+        WHERE brief_slug = ${input.briefSlug} AND user_id = ${input.userId}
+        ORDER BY created_at ASC LIMIT 1
+      `;
+      if (byUser.length > 0) return byUser;
+    }
+    if (email) {
+      const byEmail = await sql<{ id: string }[]>`
+        SELECT id FROM brief_creator
+        WHERE brief_slug = ${input.briefSlug} AND lower(email) = ${email}
+        ORDER BY created_at ASC LIMIT 1
+      `;
+      if (byEmail.length > 0) return byEmail;
+    }
+    if (input.clientId) {
+      return await sql<{ id: string }[]>`
+        SELECT id FROM brief_creator
+        WHERE brief_slug = ${input.briefSlug} AND client_id = ${input.clientId}
+        LIMIT 1
+      `;
+    }
+    return [] as { id: string }[];
+  })();
+
+  {
     if (existing.length > 0) {
       await sql`
         UPDATE brief_creator SET
           name = ${name},
           email = COALESCE(${email}, email),
           user_id = COALESCE(${userId}, user_id),
+          -- Latest browser wins so the cheap client_id lookup keeps hitting.
+          client_id = COALESCE(${input.clientId ?? null}, client_id),
           code = COALESCE(${code}, code),
           answers = ${sql.json(answers as never)},
           status = CASE WHEN status = 'approved' THEN 'approved' ELSE ${input.status} END,
@@ -1464,4 +1665,479 @@ async function readSeedFromFile(): Promise<CurationData> {
   } catch {
     return DEFAULT_CURATION;
   }
+}
+
+
+// ---------- Video transcripts (research tab) ----------
+
+export type VideoTranscript = {
+  videoId: string;
+  url: string | null;
+  platform: string | null;
+  creator: string | null;
+  caption: string | null;
+  views: number | null;
+  transcript: string | null;
+  status: "queued" | "running" | "done" | "failed";
+  error: string | null;
+  updatedAt: string | null;
+};
+
+type TranscriptRow = {
+  video_id: string;
+  url: string | null;
+  platform: string | null;
+  creator: string | null;
+  caption: string | null;
+  views: string | number | null;
+  transcript: string | null;
+  status: string;
+  error: string | null;
+  updated_at: Date | null;
+};
+
+function toTranscript(r: TranscriptRow): VideoTranscript {
+  return {
+    videoId: r.video_id,
+    url: r.url,
+    platform: r.platform,
+    creator: r.creator,
+    caption: r.caption,
+    views: r.views == null ? null : Number(r.views),
+    transcript: r.transcript,
+    status: r.status as VideoTranscript["status"],
+    error: r.error,
+    updatedAt: r.updated_at ? r.updated_at.toISOString() : null,
+  };
+}
+
+export async function getTranscripts(ids: string[]): Promise<VideoTranscript[]> {
+  if (ids.length === 0) return [];
+  await ensureSchema();
+  const sql = getSql();
+  const rows = (await sql`
+    SELECT * FROM video_transcript WHERE video_id = ANY(${ids})
+  `) as unknown as TranscriptRow[];
+  return rows.map(toTranscript);
+}
+
+// Claim videos for transcription. Rows already 'done' are left alone unless
+// force is set, so re-running a batch is cheap and never re-bills a video that
+// already has a transcript.
+export async function queueTranscripts(
+  videos: {
+    videoId: string;
+    url: string;
+    platform?: string;
+    creator?: string;
+    caption?: string;
+    views?: number;
+  }[],
+  force = false
+): Promise<string[]> {
+  await ensureSchema();
+  const sql = getSql();
+  const claimed: string[] = [];
+  for (const v of videos) {
+    const rows = (await sql`
+      INSERT INTO video_transcript (video_id, url, platform, creator, caption, views, status)
+      VALUES (${v.videoId}, ${v.url}, ${v.platform ?? null}, ${v.creator ?? null},
+              ${v.caption ?? null}, ${v.views ?? null}, 'queued')
+      ON CONFLICT (video_id) DO UPDATE SET
+        status = CASE
+          WHEN ${force} THEN 'queued'
+          WHEN video_transcript.status IN ('done', 'running') THEN video_transcript.status
+          ELSE 'queued'
+        END,
+        url = EXCLUDED.url,
+        error = NULL,
+        updated_at = NOW()
+      RETURNING video_id, status
+    `) as unknown as { video_id: string; status: string }[];
+    if (rows[0]?.status === "queued") claimed.push(rows[0].video_id);
+  }
+  return claimed;
+}
+
+export async function markTranscriptRunning(videoId: string): Promise<boolean> {
+  await ensureSchema();
+  const sql = getSql();
+  // Conditional update doubles as the single-flight lock: only one worker can
+  // move a row out of 'queued'.
+  const rows = (await sql`
+    UPDATE video_transcript SET status = 'running', updated_at = NOW()
+    WHERE video_id = ${videoId} AND status = 'queued'
+    RETURNING video_id
+  `) as unknown as { video_id: string }[];
+  return rows.length > 0;
+}
+
+export async function saveTranscript(
+  videoId: string,
+  transcript: string
+): Promise<void> {
+  const sql = getSql();
+  await sql`
+    UPDATE video_transcript
+    SET transcript = ${transcript}, status = 'done', error = NULL, updated_at = NOW()
+    WHERE video_id = ${videoId}
+  `;
+}
+
+export async function failTranscript(videoId: string, error: string): Promise<void> {
+  const sql = getSql();
+  await sql`
+    UPDATE video_transcript
+    SET status = 'failed', error = ${error.slice(0, 500)}, updated_at = NOW()
+    WHERE video_id = ${videoId}
+  `;
+}
+
+// Rows left 'running' by a process that died would block forever; anything
+// older than 20 minutes is fair game again.
+export async function reclaimStaleTranscripts(): Promise<void> {
+  await ensureSchema();
+  const sql = getSql();
+  await sql`
+    UPDATE video_transcript SET status = 'queued'
+    WHERE status = 'running' AND updated_at < NOW() - INTERVAL '20 minutes'
+  `;
+}
+
+// ---------- Video Builder (lib/studio.ts) ----------
+
+type ClipRow = {
+  id: string;
+  brief_slug: string;
+  kind: string;
+  user_id: string | null;
+  label: string | null;
+  filename: string | null;
+  status: string;
+  error: string | null;
+  blob_id: string | null;
+  poster_id: string | null;
+  duration_sec: number | null;
+  width: number | null;
+  height: number | null;
+  size_bytes: string | number | null;
+  created_at: Date;
+};
+
+const CLIP_COLS = `id, brief_slug, kind, user_id, label, filename, status, error, blob_id, poster_id, duration_sec, width, height, size_bytes, created_at`;
+
+function asStatus(s: string): StudioJobStatus {
+  return s === "processing" || s === "ready" || s === "error" ? s : "queued";
+}
+
+function rowToClip(r: ClipRow): StudioClip {
+  return {
+    id: r.id,
+    briefSlug: r.brief_slug,
+    kind: r.kind === "broll" ? "broll" : "demo",
+    userId: r.user_id,
+    label: r.label,
+    filename: r.filename,
+    status: asStatus(r.status),
+    error: r.error,
+    url: r.blob_id ? `/api/uploads/${r.blob_id}` : null,
+    posterUrl: r.poster_id ? `/api/uploads/${r.poster_id}` : null,
+    durationSec: r.duration_sec,
+    width: r.width,
+    height: r.height,
+    sizeBytes: r.size_bytes == null ? null : Number(r.size_bytes),
+    createdAt: r.created_at.toISOString(),
+  };
+}
+
+export async function createStudioClip(input: {
+  briefSlug: string;
+  kind: StudioClipKind;
+  userId: string | null;
+  label?: string | null;
+  filename?: string | null;
+}): Promise<StudioClip> {
+  await ensureSchema();
+  const sql = getSql();
+  const id = `${input.kind === "broll" ? "bg" : "dm"}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  await sql`
+    INSERT INTO studio_clip (id, brief_slug, kind, user_id, label, filename, status)
+    VALUES (${id}, ${input.briefSlug}, ${input.kind}, ${input.userId}, ${input.label ?? null}, ${input.filename ?? null}, 'processing')
+  `;
+  const rows = await sql<ClipRow[]>`SELECT ${sql.unsafe(CLIP_COLS)} FROM studio_clip WHERE id = ${id}`;
+  return rowToClip(rows[0]);
+}
+
+export async function getStudioClip(id: string): Promise<StudioClip | null> {
+  await ensureSchema();
+  const sql = getSql();
+  const rows = await sql<ClipRow[]>`SELECT ${sql.unsafe(CLIP_COLS)} FROM studio_clip WHERE id = ${id}`;
+  return rows.length ? rowToClip(rows[0]) : null;
+}
+
+// Raw blob id, for the render worker (it needs bytes, not a url).
+export async function getStudioClipBlobId(id: string): Promise<string | null> {
+  await ensureSchema();
+  const sql = getSql();
+  const rows = await sql<{ blob_id: string | null }[]>`SELECT blob_id FROM studio_clip WHERE id = ${id}`;
+  return rows[0]?.blob_id ?? null;
+}
+
+export async function listStudioClips(
+  briefSlug: string,
+  opts: { kind?: StudioClipKind; userId?: string | null } = {}
+): Promise<StudioClip[]> {
+  await ensureSchema();
+  const sql = getSql();
+  const rows = await sql<ClipRow[]>`
+    SELECT ${sql.unsafe(CLIP_COLS)} FROM studio_clip
+    WHERE brief_slug = ${briefSlug}
+      ${opts.kind ? sql`AND kind = ${opts.kind}` : sql``}
+      ${opts.userId !== undefined ? sql`AND user_id IS NOT DISTINCT FROM ${opts.userId}` : sql``}
+    ORDER BY created_at DESC
+  `;
+  return rows.map(rowToClip);
+}
+
+export async function updateStudioClip(
+  id: string,
+  patch: {
+    status?: StudioJobStatus;
+    error?: string | null;
+    blobId?: string | null;
+    posterId?: string | null;
+    durationSec?: number | null;
+    width?: number | null;
+    height?: number | null;
+    sizeBytes?: number | null;
+    label?: string | null;
+  }
+): Promise<void> {
+  await ensureSchema();
+  const sql = getSql();
+  await sql`
+    UPDATE studio_clip SET
+      status = COALESCE(${patch.status ?? null}, status),
+      error = ${patch.error === undefined ? sql`error` : patch.error},
+      blob_id = ${patch.blobId === undefined ? sql`blob_id` : patch.blobId},
+      poster_id = ${patch.posterId === undefined ? sql`poster_id` : patch.posterId},
+      duration_sec = ${patch.durationSec === undefined ? sql`duration_sec` : patch.durationSec},
+      width = ${patch.width === undefined ? sql`width` : patch.width},
+      height = ${patch.height === undefined ? sql`height` : patch.height},
+      size_bytes = ${patch.sizeBytes === undefined ? sql`size_bytes` : patch.sizeBytes},
+      label = ${patch.label === undefined ? sql`label` : patch.label},
+      updated_at = NOW()
+    WHERE id = ${id}
+  `;
+}
+
+// Removes the row and its bytes. Renders that used the clip keep their own
+// output; only the demo/broll source goes away.
+export async function deleteStudioClip(id: string): Promise<void> {
+  await ensureSchema();
+  const sql = getSql();
+  const rows = await sql<{ blob_id: string | null; poster_id: string | null }[]>`
+    DELETE FROM studio_clip WHERE id = ${id} RETURNING blob_id, poster_id
+  `;
+  const ids = rows.flatMap((r) => [r.blob_id, r.poster_id]).filter((x): x is string => !!x);
+  if (ids.length) await sql`DELETE FROM image_blob WHERE id = ANY(${ids})`;
+}
+
+type RenderRow = {
+  id: string;
+  brief_slug: string;
+  user_id: string;
+  hook_id: string | null;
+  hook_text: string;
+  explanation_text: string;
+  demo_id: string | null;
+  broll_id: string | null;
+  caption: string;
+  status: string;
+  error: string | null;
+  blob_id: string | null;
+  poster_id: string | null;
+  duration_sec: number | null;
+  size_bytes: string | number | null;
+  created_at: Date;
+};
+
+const RENDER_COLS = `id, brief_slug, user_id, hook_id, hook_text, explanation_text, demo_id, broll_id, caption, status, error, blob_id, poster_id, duration_sec, size_bytes, created_at`;
+
+function rowToRender(r: RenderRow): StudioRender {
+  return {
+    id: r.id,
+    briefSlug: r.brief_slug,
+    userId: r.user_id,
+    hookId: r.hook_id,
+    hookText: r.hook_text,
+    explanationText: r.explanation_text,
+    demoId: r.demo_id,
+    brollId: r.broll_id,
+    caption: r.caption,
+    status: asStatus(r.status),
+    error: r.error,
+    url: r.blob_id ? `/api/uploads/${r.blob_id}` : null,
+    posterUrl: r.poster_id ? `/api/uploads/${r.poster_id}` : null,
+    durationSec: r.duration_sec,
+    sizeBytes: r.size_bytes == null ? null : Number(r.size_bytes),
+    createdAt: r.created_at.toISOString(),
+  };
+}
+
+export async function createStudioRender(input: {
+  briefSlug: string;
+  userId: string;
+  hookId: string | null;
+  hookText: string;
+  explanationText: string;
+  demoId: string;
+  brollId: string;
+  caption: string;
+}): Promise<StudioRender> {
+  await ensureSchema();
+  const sql = getSql();
+  const id = `rn_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  await sql`
+    INSERT INTO studio_render (id, brief_slug, user_id, hook_id, hook_text, explanation_text, demo_id, broll_id, caption, status)
+    VALUES (${id}, ${input.briefSlug}, ${input.userId}, ${input.hookId}, ${input.hookText}, ${input.explanationText}, ${input.demoId}, ${input.brollId}, ${input.caption}, 'queued')
+  `;
+  const rows = await sql<RenderRow[]>`SELECT ${sql.unsafe(RENDER_COLS)} FROM studio_render WHERE id = ${id}`;
+  return rowToRender(rows[0]);
+}
+
+export async function getStudioRender(id: string): Promise<StudioRender | null> {
+  await ensureSchema();
+  const sql = getSql();
+  const rows = await sql<RenderRow[]>`SELECT ${sql.unsafe(RENDER_COLS)} FROM studio_render WHERE id = ${id}`;
+  return rows.length ? rowToRender(rows[0]) : null;
+}
+
+export async function listStudioRenders(
+  briefSlug: string,
+  userId?: string
+): Promise<StudioRender[]> {
+  await ensureSchema();
+  const sql = getSql();
+  const rows = await sql<RenderRow[]>`
+    SELECT ${sql.unsafe(RENDER_COLS)} FROM studio_render
+    WHERE brief_slug = ${briefSlug}
+      ${userId ? sql`AND user_id = ${userId}` : sql``}
+    ORDER BY created_at DESC
+  `;
+  return rows.map(rowToRender);
+}
+
+export async function updateStudioRender(
+  id: string,
+  patch: {
+    status?: StudioJobStatus;
+    error?: string | null;
+    blobId?: string | null;
+    posterId?: string | null;
+    durationSec?: number | null;
+    sizeBytes?: number | null;
+  }
+): Promise<void> {
+  await ensureSchema();
+  const sql = getSql();
+  await sql`
+    UPDATE studio_render SET
+      status = COALESCE(${patch.status ?? null}, status),
+      error = ${patch.error === undefined ? sql`error` : patch.error},
+      blob_id = ${patch.blobId === undefined ? sql`blob_id` : patch.blobId},
+      poster_id = ${patch.posterId === undefined ? sql`poster_id` : patch.posterId},
+      duration_sec = ${patch.durationSec === undefined ? sql`duration_sec` : patch.durationSec},
+      size_bytes = ${patch.sizeBytes === undefined ? sql`size_bytes` : patch.sizeBytes},
+      updated_at = NOW()
+    WHERE id = ${id}
+  `;
+}
+
+export async function deleteStudioRender(id: string): Promise<void> {
+  await ensureSchema();
+  const sql = getSql();
+  const rows = await sql<{ blob_id: string | null; poster_id: string | null }[]>`
+    DELETE FROM studio_render WHERE id = ${id} RETURNING blob_id, poster_id
+  `;
+  const ids = rows.flatMap((r) => [r.blob_id, r.poster_id]).filter((x): x is string => !!x);
+  if (ids.length) await sql`DELETE FROM image_blob WHERE id = ANY(${ids})`;
+}
+
+// Atomically take the oldest queued render so two workers (or one worker
+// kicked twice) never encode the same job.
+export async function claimNextStudioRender(): Promise<StudioRender | null> {
+  await ensureSchema();
+  const sql = getSql();
+  const rows = await sql<RenderRow[]>`
+    UPDATE studio_render SET status = 'processing', updated_at = NOW()
+    WHERE id = (
+      SELECT id FROM studio_render WHERE status = 'queued'
+      ORDER BY created_at ASC LIMIT 1
+      FOR UPDATE SKIP LOCKED
+    )
+    RETURNING ${sql.unsafe(RENDER_COLS)}
+  `;
+  return rows.length ? rowToRender(rows[0]) : null;
+}
+
+// A render stuck in 'processing' for this long belonged to a process that
+// died mid-encode (deploy, crash). Its temp files are gone, so requeue it.
+// Clips are different: their raw upload only ever lived on that process's
+// disk, so a stuck clip can only be failed with a "try again".
+export async function reclaimStaleStudioJobs(): Promise<void> {
+  await ensureSchema();
+  const sql = getSql();
+  await sql`
+    UPDATE studio_render SET status = 'queued', updated_at = NOW()
+    WHERE status = 'processing' AND updated_at < NOW() - INTERVAL '20 minutes'
+  `;
+  await sql`
+    UPDATE studio_clip SET status = 'error', error = 'Upload was interrupted. Please upload it again.', updated_at = NOW()
+    WHERE status IN ('queued', 'processing') AND updated_at < NOW() - INTERVAL '20 minutes'
+  `;
+}
+
+// Everything the admin sees: every creator's demos and renders for a brief,
+// with the account name so the roster reads as people rather than ids.
+export async function listStudioForAdmin(briefSlug: string): Promise<{
+  clips: StudioClip[];
+  renders: StudioRender[];
+  users: Record<string, { name: string | null; email: string }>;
+}> {
+  await ensureSchema();
+  const sql = getSql();
+  const [clips, renders] = await Promise.all([
+    listStudioClips(briefSlug),
+    listStudioRenders(briefSlug),
+  ]);
+  const ids = Array.from(
+    new Set(
+      [...clips.map((c) => c.userId), ...renders.map((r) => r.userId)].filter(
+        (x): x is string => !!x && x !== "_admin"
+      )
+    )
+  );
+  const users: Record<string, { name: string | null; email: string }> = {};
+  if (ids.length) {
+    const rows = await sql<{ id: string; name: string | null; email: string }[]>`
+      SELECT id, name, email FROM creator_user WHERE id = ANY(${ids})
+    `;
+    for (const r of rows) users[r.id] = { name: r.name, email: r.email };
+  }
+  return { clips, renders, users };
+}
+
+export async function countStudioClips(
+  briefSlug: string,
+  userId: string,
+  kind: StudioClipKind
+): Promise<number> {
+  await ensureSchema();
+  const sql = getSql();
+  const rows = await sql<{ n: string }[]>`
+    SELECT count(*)::text AS n FROM studio_clip
+    WHERE brief_slug = ${briefSlug} AND user_id = ${userId} AND kind = ${kind} AND status <> 'error'
+  `;
+  return Number(rows[0]?.n ?? 0);
 }

@@ -17,6 +17,21 @@ type Body = {
   // strongest lever on quality — structure alone tells the model what to say
   // but not how it should sound.
   example?: string;
+  // Real videos that are working right now, pulled from ViewTrack in the
+  // Research tab. These are evidence, not templates: they tell the model what
+  // angle and pacing the audience is currently rewarding.
+  research?: ResearchVideo[];
+};
+
+type ResearchVideo = {
+  creator?: string;
+  platform?: string;
+  views?: number;
+  url?: string;
+  caption?: string;
+  hook?: string;
+  transcript?: string;
+  whatWorked?: string[];
 };
 
 const SYSTEM_PROMPT = `You are a short-form video script writer for TikTok, Instagram Reels, and YouTube Shorts. You write scripts for creators promoting products to founder/builder audiences.
@@ -28,12 +43,51 @@ Output format — MANDATORY:
 - Total length 15–45 seconds unless the user asks otherwise.
 - Punchy, conversational, no corporate phrasing. Sound like a real person, not an ad.
 - Write in the same language as the format's description/current script (e.g. if the brief content is Spanish, the script must be Spanish) unless the user asks for a specific language.
+- When reference videos are supplied, treat them as evidence of what the audience is responding to right now. Borrow the angle, the pacing, and the kind of hook that is working. Never lift their sentences, their specific claims, or their product details.
 
 Output ONLY the script. No preamble, no commentary, no "Here's your script:".`;
 
 function bulletList(items?: string[]): string {
   if (!items || items.length === 0) return "(none provided)";
   return items.map((t) => `- ${t}`).join("\n");
+}
+
+function compactNumber(n?: number): string {
+  if (!n || n < 1000) return String(n ?? 0);
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}K`;
+  return `${(n / 1_000_000).toFixed(1)}M`;
+}
+
+// Reference videos, trimmed so a dozen of them can't crowd out the brief
+// itself. Transcripts are the expensive part, so they are the part capped.
+function researchBlock(videos?: ResearchVideo[]): string {
+  const list = (videos ?? []).slice(0, 12);
+  if (list.length === 0) return "";
+  const entries = list.map((v, i) => {
+    const head = [
+      `### Reference ${i + 1}`,
+      v.creator ? `Creator: @${v.creator.replace(/^@/, "")}` : null,
+      v.platform ? `Platform: ${v.platform}` : null,
+      v.views ? `Views: ${compactNumber(v.views)}` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    const body = [
+      v.hook?.trim() ? `Hook: ${v.hook.trim()}` : null,
+      v.caption?.trim() ? `Caption: ${v.caption.trim().slice(0, 300)}` : null,
+      v.whatWorked?.length ? `What worked:\n${bulletList(v.whatWorked)}` : null,
+      v.transcript?.trim()
+        ? `Transcript:\n${v.transcript.trim().slice(0, 1800)}`
+        : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    return `${head}\n${body}`;
+  });
+  return `\n## What is working right now
+These are real videos from this niche with their live view counts. Study the angle and the shape of the hooks, then write something new in that vein. Do not copy their lines.
+
+${entries.join("\n\n")}\n`;
 }
 
 export async function POST(req: Request) {
@@ -80,6 +134,8 @@ ${bulletList(body.hooks)}`;
     ? `\n## Current script (edit this)\n${body.currentScript.trim()}\n`
     : "";
 
+  const research = researchBlock(body.research);
+
   const exampleBlock = body.example?.trim()
     ? `\n## Worked example
 A finished script written to the structure above. Match its shape: same beats, same rhythm, same line lengths, same level of specificity. Match the shape, never the content — do not reuse its lines, its angle, or its details.
@@ -112,7 +168,7 @@ ${body.example.trim()}\n`
           },
           {
             type: "text",
-            text: `${exampleBlock}${currentScriptBlock}\n## Request\n${userPrompt}\n\nWrite the script now. Timestamps only, one beat per line, no preamble.`,
+            text: `${research}${exampleBlock}${currentScriptBlock}\n## Request\n${userPrompt}\n\nWrite the script now. Timestamps only, one beat per line, no preamble.`,
           },
         ],
       },
