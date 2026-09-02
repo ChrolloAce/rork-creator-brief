@@ -15,6 +15,7 @@ type State = {
   config: StudioPublicConfig;
   demos: StudioClip[];
   broll: StudioClip[];
+  libraryCount?: number;
   renders: StudioRender[];
 };
 
@@ -395,8 +396,15 @@ export function Studio({
   const { config, demos, broll, renders } = state;
   const readyDemos = demos.filter((d) => d.status === "ready");
   const demoCount = demos.filter((d) => d.status !== "error").length;
-  const blocker =
-    broll.length === 0
+  const library = config.opening === "library";
+  const libraryCount = state.libraryCount ?? 0;
+  const blocker = library
+    ? libraryCount === 0
+      ? t(lang, "noLibrary")
+      : readyDemos.length === 0
+        ? t(lang, "needDemoFirst")
+        : null
+    : broll.length === 0
       ? t(lang, "noBackgrounds")
       : config.hooks.length === 0
         ? t(lang, "noHooks")
@@ -587,10 +595,14 @@ export function Studio({
             <h2 className="text-xl sm:text-2xl font-black tracking-tight">
               {t(lang, "generateVideo")}
             </h2>
-            <p className="text-sm text-muted mt-1 max-w-prose">{t(lang, "generateHint")}</p>
+            <p className="text-sm text-muted mt-1 max-w-prose">
+              {library
+                ? t(lang, "generateHintLibrary").replace("{sec}", String(config.libraryHookSec))
+                : t(lang, "generateHint")}
+            </p>
             <p className="text-[11px] text-muted mt-1">
               {readyDemos.length} {readyDemos.length === 1 ? t(lang, "untitledDemo").toLowerCase() : "demos"}{" "}
-              {t(lang, "readyWord")} · {config.hooks.length} {t(lang, "hooksWord")}
+              {t(lang, "readyWord")} · {library ? libraryCount : config.hooks.length} {t(lang, "hooksWord")}
             </p>
           </div>
           <button

@@ -233,3 +233,33 @@ export async function renderStitch(input: {
   ];
   await runFfmpeg(args);
 }
+
+// Join two already-normalized clips (same size, fps, stereo AAC) back to back:
+// used by the library opening, where the first N seconds of a reel cut
+// straight into the demo with no cards.
+export async function renderConcat(input: {
+  first: string;
+  second: string;
+  out: string;
+}): Promise<void> {
+  const filter = [
+    "[0:v]fps=" + FPS + ",setsar=1,setpts=PTS-STARTPTS[v0]",
+    "[0:a]aresample=44100,asetpts=PTS-STARTPTS[a0]",
+    "[1:v]fps=" + FPS + ",setsar=1,setpts=PTS-STARTPTS[v1]",
+    "[1:a]aresample=44100,asetpts=PTS-STARTPTS[a1]",
+    "[v0][a0][v1][a1]concat=n=2:v=1:a=1,format=yuv420p[v][a]",
+  ].join(";");
+  await runFfmpeg([
+    "-y",
+    "-i", input.first,
+    "-i", input.second,
+    "-filter_complex", filter.replace(",format=yuv420p[v][a]", "[v][a]"),
+    "-map", "[v]",
+    "-map", "[a]",
+    ...X264,
+    "-crf", "23",
+    ...AAC,
+    "-max_muxing_queue_size", "1024",
+    input.out,
+  ]);
+}

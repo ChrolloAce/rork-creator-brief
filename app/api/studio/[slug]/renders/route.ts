@@ -5,7 +5,8 @@ import {
   listStudioClips,
   listStudioRenders,
 } from "@/lib/db";
-import { buildCaption } from "@/lib/studio";
+import { buildCaption, studioOpening } from "@/lib/studio";
+import { getHookVideos, hookVideoLine } from "@/lib/hook-videos";
 import { kickStudioQueue } from "@/lib/studio-worker";
 import { studioContext } from "../_shared";
 
@@ -38,7 +39,7 @@ export async function POST(
   const { slug } = await params;
   const ctx = await studioContext(slug);
   if (!ctx.ok) return ctx.res;
-  let body: { hookId?: string; hook?: string; explanation?: string; demoId?: string; brollId?: string } = {};
+  let body: { hookId?: string; hook?: string; explanation?: string; demoId?: string; brollId?: string; hookVideoId?: string } = {};
   try {
     const text = await req.text();
     body = text.trim() ? JSON.parse(text) : {};
@@ -51,12 +52,31 @@ export async function POST(
     listStudioClips(slug, { kind: "demo", userId: ctx.viewer.id }),
     listStudioClips(slug, { kind: "broll" }),
   ]);
+  const library = studioOpening(ctx.config) === "library";
   const readyBroll = pool.filter((b) => b.status === "ready");
-  if (readyBroll.length === 0) {
+  if (!library && readyBroll.length === 0) {
     return NextResponse.json(
       { error: "No background clips yet. The team needs to add at least one." },
       { status: 400 }
     );
+  }
+
+  // Library opening: the hook IS a reel. Pick the one this creator has used
+  // least; the caption line comes from the reel's own caption.
+  let reel: Awaited<ReturnType<typeof getHookVideos>>[number] | null = null;
+  if (library) {
+    const reels = await getHookVideos(slug);
+    if (reels.length === 0) {
+      return NextResponse.json({ error: "No reels in the hook library yet." }, { status: 400 });
+    }
+    if (body.hookVideoId) {
+      reel = reels.find((r) => r.id === body.hookVideoId) ?? null;
+      if (!reel) return NextResponse.json({ error: "That reel is not in the library." }, { status: 404 });
+    } else {
+      const used = new Map<string, number>();
+      for (const r of mine) if (r.hookVideoId) used.set(r.hookVideoId, (used.get(r.hookVideoId) ?? 0) + 1);
+      reel = leastUsed(reels, used);
+    }
   }
 
   // Hook + explanation
@@ -64,7 +84,7 @@ export async function POST(
     (h) => !h.hidden && h.hook?.trim() && h.explanation?.trim()
   );
   let pair = body.hookId ? ctx.config.hooks.find((h) => h.id === body.hookId) : undefined;
-  if (!pair && !(body.hook?.trim() && body.explanation?.trim())) {
+  if (!library && !pair && !(body.hook?.trim() && body.explanation?.trim())) {
     if (liveHooks.length === 0) {
       return NextResponse.json({ error: "No hooks written yet." }, { status: 400 });
     }
@@ -72,9 +92,9 @@ export async function POST(
     for (const r of mine) if (r.hookId) used.set(r.hookId, (used.get(r.hookId) ?? 0) + 1);
     pair = leastUsed(liveHooks, used);
   }
-  const hook = (body.hook?.trim() || pair?.hook || "").slice(0, 240);
-  const explanation = (body.explanation?.trim() || pair?.explanation || "").slice(0, 600);
-  if (!hook || !explanation) {
+  const hook = (reel ? hookVideoLine(reel) : body.hook?.trim() || pair?.hook || "").slice(0, 240);
+  const explanation = reel ? "" : (body.explanation?.trim() || pair?.explanation || "").slice(0, 600);
+  if (!library && (!hook || !explanation)) {
     return NextResponse.json({ error: "No hooks written yet." }, { status: 400 });
   }
 
@@ -100,9 +120,11 @@ export async function POST(
     demo = leastUsed(ready, used);
   }
 
-  // Background
+  // Background (broll opening only)
   let brollId = body.brollId ?? null;
-  if (brollId) {
+  if (library) {
+    brollId = null;
+  } else if (brollId) {
     if (!readyBroll.some((b) => b.id === brollId)) {
       return NextResponse.json({ error: "That background clip is not available." }, { status: 404 });
     }
@@ -121,6 +143,7 @@ export async function POST(
     explanationText: explanation,
     demoId: demo!.id,
     brollId,
+    hookVideoId: reel?.id ?? null,
     caption,
   });
   kickStudioQueue();

@@ -715,6 +715,7 @@ async function runSchema() {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
   `;
+  await sql`ALTER TABLE studio_render ADD COLUMN IF NOT EXISTS hook_video_id TEXT`;
   await sql`CREATE INDEX IF NOT EXISTS studio_render_brief_idx ON studio_render (brief_slug, user_id, created_at DESC)`;
   await sql`CREATE INDEX IF NOT EXISTS studio_render_status_idx ON studio_render (status)`;
 
@@ -1981,6 +1982,7 @@ type RenderRow = {
   explanation_text: string;
   demo_id: string | null;
   broll_id: string | null;
+  hook_video_id: string | null;
   caption: string;
   status: string;
   error: string | null;
@@ -1991,7 +1993,7 @@ type RenderRow = {
   created_at: Date;
 };
 
-const RENDER_COLS = `id, brief_slug, user_id, hook_id, hook_text, explanation_text, demo_id, broll_id, caption, status, error, blob_id, poster_id, duration_sec, size_bytes, created_at`;
+const RENDER_COLS = `id, brief_slug, user_id, hook_id, hook_text, explanation_text, demo_id, broll_id, hook_video_id, caption, status, error, blob_id, poster_id, duration_sec, size_bytes, created_at`;
 
 function rowToRender(r: RenderRow): StudioRender {
   return {
@@ -2003,6 +2005,7 @@ function rowToRender(r: RenderRow): StudioRender {
     explanationText: r.explanation_text,
     demoId: r.demo_id,
     brollId: r.broll_id,
+    hookVideoId: r.hook_video_id ?? null,
     caption: r.caption,
     status: asStatus(r.status),
     error: r.error,
@@ -2021,15 +2024,16 @@ export async function createStudioRender(input: {
   hookText: string;
   explanationText: string;
   demoId: string;
-  brollId: string;
+  brollId: string | null;
+  hookVideoId?: string | null;
   caption: string;
 }): Promise<StudioRender> {
   await ensureSchema();
   const sql = getSql();
   const id = `rn_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
   await sql`
-    INSERT INTO studio_render (id, brief_slug, user_id, hook_id, hook_text, explanation_text, demo_id, broll_id, caption, status)
-    VALUES (${id}, ${input.briefSlug}, ${input.userId}, ${input.hookId}, ${input.hookText}, ${input.explanationText}, ${input.demoId}, ${input.brollId}, ${input.caption}, 'queued')
+    INSERT INTO studio_render (id, brief_slug, user_id, hook_id, hook_text, explanation_text, demo_id, broll_id, hook_video_id, caption, status)
+    VALUES (${id}, ${input.briefSlug}, ${input.userId}, ${input.hookId}, ${input.hookText}, ${input.explanationText}, ${input.demoId}, ${input.brollId}, ${input.hookVideoId ?? null}, ${input.caption}, 'queued')
   `;
   const rows = await sql<RenderRow[]>`SELECT ${sql.unsafe(RENDER_COLS)} FROM studio_render WHERE id = ${id}`;
   return rowToRender(rows[0]);

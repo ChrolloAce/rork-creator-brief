@@ -73,3 +73,27 @@ export async function getHookVideos(briefSlug: string): Promise<HookVideo[]> {
     thumbUrl: r.thumb_url,
   }));
 }
+
+export async function getHookVideo(id: string): Promise<HookVideo | null> {
+  await ensureSchema();
+  const rows = await sql<Row[]>`
+    SELECT id, platform, shortcode, account, url, caption, views, likes,
+           comments, duration, width, height, posted_at, video_url, thumb_url
+    FROM hook_video WHERE id = ${id}
+  `;
+  const r = rows[0];
+  if (!r) return null;
+  return {
+    id: r.id, platform: r.platform, shortcode: r.shortcode, account: r.account, url: r.url,
+    caption: r.caption, views: num(r.views), likes: num(r.likes), comments: num(r.comments),
+    duration: r.duration, width: r.width, height: r.height,
+    postedAt: r.posted_at ? r.posted_at.toISOString() : null,
+    videoUrl: r.video_url, thumbUrl: r.thumb_url,
+  };
+}
+
+// One-line label for a reel, used as the render's hook text and caption seed.
+export function hookVideoLine(v: HookVideo): string {
+  const first = (v.caption ?? "").split(/\r?\n/)[0].trim();
+  return (first || `@${v.account}`).slice(0, 240);
+}

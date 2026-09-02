@@ -15,10 +15,12 @@ import {
   updateStudioClip,
   updateStudioRender,
 } from "./db";
-import { normalizeClip, posterFrame, probe, renderStitch } from "./studio-ffmpeg";
+import { normalizeClip, posterFrame, probe, renderConcat, renderStitch } from "./studio-ffmpeg";
+import { getHookVideo } from "./hook-videos";
 import { renderTextCard } from "./studio-text";
 import {
   STUDIO_DEFAULTS,
+  effectiveLibraryHookSec,
   effectiveTimings,
   slugifyForFile,
   type StudioClipKind,
@@ -154,10 +156,49 @@ async function blobToFile(blobId: string, file: string): Promise<void> {
   await writeFile(file, img.bytes);
 }
 
+// Library opening: the first N seconds of a hook_video reel, normalized to the
+// house format, then the demo. No cards, no background loop.
+async function runLibraryRender(job: StudioRender, dir: string): Promise<{ out: string }> {
+  if (!job.demoId || !job.hookVideoId) throw new Error("Pick a demo and a hook reel.");
+  const [demoBlob, reel, cur] = await Promise.all([
+    getStudioClipBlobId(job.demoId),
+    getHookVideo(job.hookVideoId),
+    getCuration(job.briefSlug),
+  ]);
+  if (!demoBlob) throw new Error("That demo is gone. Upload it again.");
+  if (!reel) throw new Error("That hook reel is gone. Try again.");
+  const demo = path.join(dir, "demo.mp4");
+  const raw = path.join(dir, "reel-raw.mp4");
+  const res = await fetch(reel.videoUrl);
+  if (!res.ok) throw new Error("Could not fetch the hook reel.");
+  await Promise.all([
+    blobToFile(demoBlob, demo),
+    writeFile(raw, Buffer.from(await res.arrayBuffer())),
+  ]);
+  const info = await probe(raw);
+  if (!info.hasVideo) throw new Error("The hook reel is not a video.");
+  const hook = path.join(dir, "reel.mp4");
+  await normalizeClip({
+    src: raw,
+    out: hook,
+    maxSec: effectiveLibraryHookSec(cur.studio),
+    hasAudio: info.hasAudio,
+    mode: "cover",
+  });
+  const out = path.join(dir, "out.mp4");
+  await renderConcat({ first: hook, second: demo, out });
+  return { out };
+}
+
 async function runRender(job: StudioRender): Promise<void> {
   const dir = await mkdtemp(path.join(tmpdir(), "studio-rn-"));
   try {
     await withSlot(async () => {
+      if (job.hookVideoId) {
+        const { out } = await runLibraryRender(job, dir);
+        await finishRender(job, dir, out);
+        return;
+      }
       if (!job.demoId || !job.brollId) throw new Error("Pick a demo and a background clip.");
       const [demoBlob, brollBlob, cur] = await Promise.all([
         getStudioClipBlobId(job.demoId),
@@ -181,7 +222,6 @@ async function runRender(job: StudioRender): Promise<void> {
         await renderTextCard(job.explanationText, { tone: "explanation", style })
       );
       const out = path.join(dir, "out.mp4");
-      const poster = path.join(dir, "poster.jpg");
       await renderStitch({
         broll,
         brollHasAudio: brollInfo.hasAudio,
@@ -192,22 +232,7 @@ async function runRender(job: StudioRender): Promise<void> {
         explanationSec,
         out,
       });
-      await posterFrame(out, poster, 0.5);
-      const info = await probe(out);
-      const [mp4, jpg] = await Promise.all([readFile(out), readFile(poster)]);
-      const base = `${slugifyForFile(job.briefSlug, 20)}-${slugifyForFile(job.hookText, 36)}`;
-      const { id: blobId } = await createImage("video/mp4", mp4, `${base}.mp4`);
-      const { id: posterId } = await createImage("image/jpeg", jpg, `${base}.jpg`);
-      await updateStudioRender(job.id, {
-        status: "ready",
-        error: null,
-        blobId,
-        posterId,
-        durationSec: Math.round(info.durationSec * 10) / 10,
-        sizeBytes: mp4.length,
-      });
-      const s = await stat(out);
-      log(job.id, `ready ${(s.size / 1e6).toFixed(1)}MB ${info.durationSec.toFixed(1)}s`);
+      await finishRender(job, dir, out);
     });
   } catch (e) {
     const msg = (e as Error).message || "Render failed.";
@@ -216,6 +241,27 @@ async function runRender(job: StudioRender): Promise<void> {
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+}
+
+// Poster + store + mark ready. Shared by both openings.
+async function finishRender(job: StudioRender, dir: string, out: string): Promise<void> {
+  const poster = path.join(dir, "poster.jpg");
+  await posterFrame(out, poster, 0.5);
+  const info = await probe(out);
+  const [mp4, jpg] = await Promise.all([readFile(out), readFile(poster)]);
+  const base = `${slugifyForFile(job.briefSlug, 20)}-${slugifyForFile(job.hookText, 36)}`;
+  const { id: blobId } = await createImage("video/mp4", mp4, `${base}.mp4`);
+  const { id: posterId } = await createImage("image/jpeg", jpg, `${base}.jpg`);
+  await updateStudioRender(job.id, {
+    status: "ready",
+    error: null,
+    blobId,
+    posterId,
+    durationSec: Math.round(info.durationSec * 10) / 10,
+    sizeBytes: mp4.length,
+  });
+  const s = await stat(out);
+  log(job.id, `ready ${(s.size / 1e6).toFixed(1)}MB ${info.durationSec.toFixed(1)}s`);
 }
 
 // Drain the queue. Safe to call from anywhere, any number of times: only one

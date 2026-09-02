@@ -378,6 +378,34 @@ export function StudioAdmin({
       {/* Timing + look */}
       <div className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 space-y-3">
         <div className="font-black">Timing and look</div>
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          <label className="block md:col-span-2">
+            <span className={label}>Opening</span>
+            <select
+              value={cfg.opening ?? STUDIO_DEFAULTS.opening}
+              onChange={(e) => set({ opening: e.target.value as StudioConfig["opening"] })}
+              className={input}
+            >
+              <option value="broll">Background clips + text cards</option>
+              <option value="library">Hook library: first seconds of a real reel, then the demo</option>
+            </select>
+            <span className="block text-[10px] text-muted mt-0.5">
+              Hook library uses every reel on this brief&apos;s Hooks tab (scripts/scrape-hooks.py), rotated per creator. Hooks, cards and background clips below are ignored in that mode.
+            </span>
+          </label>
+          <label className="block">
+            <span className={label}>Library hook (sec)</span>
+            <input
+              type="number"
+              min={3}
+              max={30}
+              step={1}
+              value={cfg.libraryHookSec ?? STUDIO_DEFAULTS.libraryHookSec}
+              onChange={(e) => set({ libraryHookSec: Number(e.target.value) })}
+              className={input}
+            />
+          </label>
+        </div>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <label className="block">
             <span className={label}>Hook card (sec)</span>

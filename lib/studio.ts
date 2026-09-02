@@ -21,6 +21,12 @@ export type StudioHook = {
 
 export type StudioTextStyle = "pill" | "shadow";
 
+// What the video opens with. "broll": the admin's background clips with hook
+// + explanation text cards (original flow). "library": the first N seconds of
+// a reel from the brief's hook library (hook_video, see scripts/scrape-hooks.py),
+// raw, no text, straight cut to the demo.
+export type StudioOpening = "broll" | "library";
+
 export type StudioConfig = {
   enabled?: boolean;
   // Sidebar / page title. Default "Video Builder".
@@ -42,6 +48,9 @@ export type StudioConfig = {
   minDemos?: number;
   maxDemos?: number;
   textStyle?: StudioTextStyle;
+  opening?: StudioOpening;
+  // Seconds of the library reel to keep when opening === "library".
+  libraryHookSec?: number;
 };
 
 export const STUDIO_DEFAULTS = {
@@ -51,6 +60,8 @@ export const STUDIO_DEFAULTS = {
   minDemos: 3,
   maxDemos: 5,
   textStyle: "pill" as StudioTextStyle,
+  opening: "broll" as StudioOpening,
+  libraryHookSec: 10,
   // Hard cap on demos per creator per brief, regardless of guidance.
   demoCap: 12,
   // Longest demo we keep (seconds). Anything longer is trimmed at ingest.
@@ -85,6 +96,14 @@ export function effectiveTimings(
   const explanationSec =
     raw && raw > 0 ? clampSec(raw, 4, 1.5, 12) : autoExplanationSec(explanation);
   return { hookSec, explanationSec };
+}
+
+export function effectiveLibraryHookSec(c: StudioConfig | undefined | null): number {
+  return clampSec(c?.libraryHookSec, STUDIO_DEFAULTS.libraryHookSec, 3, 30);
+}
+
+export function studioOpening(c: StudioConfig | undefined | null): StudioOpening {
+  return c?.opening === "library" ? "library" : "broll";
 }
 
 function clampSec(v: number | undefined, dflt: number, lo: number, hi: number) {
@@ -131,6 +150,8 @@ export type StudioPublicConfig = {
   demoCap: number;
   maxUploadBytes: number;
   maxDemoSec: number;
+  opening: StudioOpening;
+  libraryHookSec: number;
 };
 
 export function publicStudioConfig(c: StudioConfig): StudioPublicConfig {
@@ -143,6 +164,8 @@ export function publicStudioConfig(c: StudioConfig): StudioPublicConfig {
     demoCap: STUDIO_DEFAULTS.demoCap,
     maxUploadBytes: STUDIO_DEFAULTS.maxUploadBytes,
     maxDemoSec: STUDIO_DEFAULTS.maxDemoSec,
+    opening: studioOpening(c),
+    libraryHookSec: effectiveLibraryHookSec(c),
   };
 }
 
@@ -179,6 +202,8 @@ export type StudioRender = {
   explanationText: string;
   demoId: string | null;
   brollId: string | null;
+  // hook_video.id when the render opened with a library reel.
+  hookVideoId: string | null;
   caption: string;
   status: StudioJobStatus;
   error: string | null;
