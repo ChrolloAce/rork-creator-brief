@@ -58,6 +58,13 @@ function dayLabel(ymd: string, today: string, lang: Lang): string {
   });
 }
 
+function weekdayShort(ymd: string, lang: Lang): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(y, m - 1, d)
+    .toLocaleDateString(lang === "es" ? "es" : "en", { weekday: "short" })
+    .replace(/\.$/, "");
+}
+
 function dayLong(ymd: string, lang: Lang): string {
   const [y, m, d] = ymd.split("-").map(Number);
   return new Date(y, m - 1, d).toLocaleDateString(lang === "es" ? "es" : "en", {
@@ -462,10 +469,9 @@ export function Studio({
   // Calendar: today plus the days ahead, at least a week so there is always
   // somewhere to schedule into.
   const today = state.today;
-  const days = Array.from({ length: Math.max(7, config.daysAhead) }, (_, i) =>
-    addDaysYmd(today, i)
-  );
+  const days = Array.from({ length: 7 }, (_, i) => addDaysYmd(today, i));
   const day = selectedDay && days.includes(selectedDay) ? selectedDay : today;
+  const dayIdx = days.indexOf(day);
   const forDay = (d: string) => renders.filter((r) => r.scheduledFor === d);
   const dayRenders = forDay(day);
   const earlier = renders.filter((r) => r.scheduledFor < today);
@@ -529,41 +535,67 @@ export function Studio({
 
       {step === 2 && (
         <>
-          {/* Day strip */}
-          <ul className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
-            {days.map((d) => {
-              const list = forDay(d);
-              const ready = list.filter((r) => r.status === "ready").length;
-              const busy = list.some((r) => r.status === "queued" || r.status === "processing");
-              const on = d === day;
-              return (
-                <li key={d} className="shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedDay(d)}
-                    aria-pressed={on}
-                    className={`w-[84px] border-2 border-line rounded-md px-2 py-2 text-left ${
-                      on ? "bg-ink text-background nb-shadow-sm" : "bg-background nb-press"
-                    }`}
-                  >
-                    <span className="block text-xs font-black leading-tight truncate">
-                      {dayLabel(d, today, lang)}
-                    </span>
-                    <span
-                      className={`mt-1 inline-flex items-center gap-1 text-[10px] font-bold ${
-                        on ? "opacity-80" : "text-muted"
+          {/* Week bar: seven fixed tiles ("Wed 2"), arrows step the day. */}
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setSelectedDay(days[dayIdx - 1])}
+              disabled={dayIdx <= 0}
+              aria-label={t(lang, "prevDay")}
+              className="w-9 h-11 shrink-0 border-2 border-line rounded-md bg-background nb-press font-black text-lg disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              ‹
+            </button>
+            <ol className="grid grid-cols-7 gap-1 flex-1 min-w-0">
+              {days.map((d) => {
+                const list = forDay(d);
+                const ready = list.filter((r) => r.status === "ready").length;
+                const busy = list.some((r) => r.status === "queued" || r.status === "processing");
+                const on = d === day;
+                const isToday = d === today;
+                return (
+                  <li key={d} className="min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDay(d)}
+                      aria-pressed={on}
+                      aria-label={dayLong(d, lang)}
+                      className={`w-full h-11 border-2 rounded-md flex flex-col items-center justify-center leading-none ${
+                        on
+                          ? "bg-ink text-background border-line nb-shadow-sm"
+                          : `bg-background nb-press ${isToday ? "border-accent" : "border-line"}`
                       }`}
                     >
-                      {busy && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" aria-hidden />
-                      )}
-                      {ready} {ready === 1 ? t(lang, "videoWord") : t(lang, "videosWord")}
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+                      <span className={`text-[9px] font-bold uppercase tracking-wider ${on ? "opacity-70" : "text-muted"}`}>
+                        {weekdayShort(d, lang)}
+                      </span>
+                      <span className="text-sm font-black mt-0.5 flex items-center gap-1">
+                        {Number(d.slice(8, 10))}
+                        {busy ? (
+                          <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" aria-hidden />
+                        ) : ready > 0 ? (
+                          <span
+                            className={`text-[9px] font-black px-1 rounded-sm ${on ? "bg-background text-ink" : "bg-success text-success-ink"}`}
+                          >
+                            {ready}
+                          </span>
+                        ) : null}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+            <button
+              type="button"
+              onClick={() => setSelectedDay(days[dayIdx + 1])}
+              disabled={dayIdx >= days.length - 1}
+              aria-label={t(lang, "nextDay")}
+              className="w-9 h-11 shrink-0 border-2 border-line rounded-md bg-background nb-press font-black text-lg disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              ›
+            </button>
+          </div>
 
           {/* The day */}
           <section className="space-y-3" ref={resultRef}>
