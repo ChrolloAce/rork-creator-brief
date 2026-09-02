@@ -5,14 +5,15 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { t, type Lang } from "@/lib/i18n";
 import type { HookVideo } from "@/lib/hook-videos";
-import type { StudioClip, StudioPublicConfig, StudioRender } from "@/lib/studio";
+import { addDaysYmd, type StudioClip, type StudioPublicConfig, type StudioRender } from "@/lib/studio";
 import { HookCard, HookModal } from "./HooksView";
 
 // The Video Builder, creator side. Two steps, one at a time:
 //   1. Record your demos: how to record, example demos, reels to study, and
 //      the upload. Stays until they have the minimum number of demos.
-//   2. Generate: one button, today's videos underneath, each with its caption.
-//      Demos are tucked away under "Change demos" for later.
+//   2. Your videos: a day strip (today, tomorrow, ...) with the videos already
+//      prepared for each day, each with its caption, plus a button to generate
+//      one more for that day. Demos are tucked under "Change demos".
 // Everything is sized for a phone because that is where creators live.
 
 type State = {
@@ -24,6 +25,8 @@ type State = {
   library: HookVideo[];
   libraryCount: number;
   renders: StudioRender[];
+  // The creator's local date, echoed back by the server.
+  today: string;
 };
 
 type Upload = { key: string; name: string; progress: number; error?: string };
@@ -37,8 +40,31 @@ function fmtSec(s: number | null): string {
   return m > 0 ? `${m}:${String(r).padStart(2, "0")}` : `${r}s`;
 }
 
-function isToday(iso: string): boolean {
-  return new Date(iso).toDateString() === new Date().toDateString();
+// The creator's local calendar date, "YYYY-MM-DD". Their phone decides what
+// "today" is, never the server.
+function localYmd(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function dayLabel(ymd: string, today: string, lang: Lang): string {
+  if (ymd === today) return t(lang, "todayWord");
+  if (ymd === addDaysYmd(today, 1)) return t(lang, "tomorrowWord");
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(lang === "es" ? "es" : "en", {
+    weekday: "short",
+    day: "numeric",
+  });
+}
+
+function dayLong(ymd: string, lang: Lang): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(lang === "es" ? "es" : "en", {
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+  });
 }
 
 function StatusPill({ status, lang }: { status: StudioClip["status"]; lang: Lang }) {
@@ -267,14 +293,17 @@ export function Studio({
   const [justBuilt, setJustBuilt] = useState<string | null>(null);
   // Step 2 hides the demos; this opens them back up to add or swap clips.
   const [manageOpen, setManageOpen] = useState(false);
+  // Which calendar day is open in step 2 (null = today).
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const resultRef = useRef<HTMLDivElement | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(`/api/studio/${encodeURIComponent(briefSlug)}/state`, {
-        cache: "no-store",
-      });
+      const res = await fetch(
+        `/api/studio/${encodeURIComponent(briefSlug)}/state?today=${localYmd()}`,
+        { cache: "no-store" }
+      );
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j.ok) {
         setLoadError(j.error ?? `HTTP ${res.status}`);
@@ -349,7 +378,7 @@ export function Studio({
 
   // One tap. The server picks the hook, the demo and the background this
   // creator has used least, so repeated taps walk through the variety.
-  async function generate() {
+  async function generate(day: string) {
     if (!state) return;
     setBuilding(true);
     setBuildError(null);
@@ -357,7 +386,7 @@ export function Studio({
       const res = await fetch(`/api/studio/${encodeURIComponent(briefSlug)}/renders`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: "{}",
+        body: JSON.stringify({ scheduledFor: day }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j.ok) {
@@ -430,8 +459,18 @@ export function Studio({
           : null;
   const canGenerate = !blocker && !building;
 
-  const todays = renders.filter((r) => isToday(r.createdAt));
-  const earlier = renders.filter((r) => !isToday(r.createdAt));
+  // Calendar: today plus the days ahead, at least a week so there is always
+  // somewhere to schedule into.
+  const today = state.today;
+  const days = Array.from({ length: Math.max(7, config.daysAhead) }, (_, i) =>
+    addDaysYmd(today, i)
+  );
+  const day = selectedDay && days.includes(selectedDay) ? selectedDay : today;
+  const forDay = (d: string) => renders.filter((r) => r.scheduledFor === d);
+  const dayRenders = forDay(day);
+  const earlier = renders.filter((r) => r.scheduledFor < today);
+  const inFillWindow = days.indexOf(day) < config.daysAhead;
+  const dayBusy = dayRenders.some((r) => r.status === "queued" || r.status === "processing");
 
   const demosPanel = (
     <DemosPanel
@@ -490,57 +529,84 @@ export function Studio({
 
       {step === 2 && (
         <>
-          {/* Generate */}
-          <section className="border-2 border-line bg-background rounded-md nb-shadow p-5 sm:p-8 text-center space-y-4">
-            <div>
-              <h2 className="text-2xl sm:text-3xl font-black tracking-tight">
-                {t(lang, "generateVideo")}
-              </h2>
-              <p className="text-sm text-muted mt-2 max-w-prose mx-auto">
-                {library
-                  ? t(lang, "generateHintLibrary").replace("{sec}", String(config.libraryHookSec))
-                  : t(lang, "generateHint")}
-              </p>
+          {/* Day strip */}
+          <ul className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+            {days.map((d) => {
+              const list = forDay(d);
+              const ready = list.filter((r) => r.status === "ready").length;
+              const busy = list.some((r) => r.status === "queued" || r.status === "processing");
+              const on = d === day;
+              return (
+                <li key={d} className="shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDay(d)}
+                    aria-pressed={on}
+                    className={`w-[84px] border-2 border-line rounded-md px-2 py-2 text-left ${
+                      on ? "bg-ink text-background nb-shadow-sm" : "bg-background nb-press"
+                    }`}
+                  >
+                    <span className="block text-xs font-black leading-tight truncate">
+                      {dayLabel(d, today, lang)}
+                    </span>
+                    <span
+                      className={`mt-1 inline-flex items-center gap-1 text-[10px] font-bold ${
+                        on ? "opacity-80" : "text-muted"
+                      }`}
+                    >
+                      {busy && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" aria-hidden />
+                      )}
+                      {ready} {ready === 1 ? t(lang, "videoWord") : t(lang, "videosWord")}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+
+          {/* The day */}
+          <section className="space-y-3" ref={resultRef}>
+            <div className="flex items-end justify-between gap-3 flex-wrap">
+              <div>
+                <div className={label}>{t(lang, "videosForDay").replace("{day}", dayLabel(day, today, lang))}</div>
+                <div className="font-black text-lg leading-tight capitalize">{dayLong(day, lang)}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => void generate(day)}
+                disabled={!canGenerate}
+                className="border-2 border-line bg-accent text-accent-ink px-4 py-2.5 rounded-md nb-shadow-sm nb-press text-xs font-black uppercase tracking-widest disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {building
+                  ? `${t(lang, "building")}…`
+                  : `🎬 ${t(lang, "generateForDay").replace("{day}", dayLabel(day, today, lang))}`}
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() => void generate()}
-              disabled={!canGenerate}
-              className="w-full sm:w-auto border-2 border-line bg-accent text-accent-ink px-10 py-5 rounded-md nb-shadow nb-press font-black uppercase tracking-widest text-lg disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {building ? `${t(lang, "building")}…` : `🎬 ${t(lang, "generateVideo")}`}
-            </button>
-            {blocker && !building ? (
-              <p className="text-sm font-bold text-muted border-2 border-dashed border-line bg-paper rounded-md px-3 py-2 max-w-prose mx-auto">
+            {blocker && !building && (
+              <p className="text-sm font-bold text-muted border-2 border-dashed border-line bg-paper rounded-md px-3 py-2">
                 {blocker}
               </p>
-            ) : (
-              <p className="text-[11px] text-muted">{t(lang, "allSet")}</p>
             )}
             {buildError && (
-              <p className="text-sm font-bold text-[#b91c1c] border-2 border-line bg-[#fee2e2] px-3 py-2 rounded-sm max-w-prose mx-auto">
+              <p className="text-sm font-bold text-[#b91c1c] border-2 border-line bg-[#fee2e2] px-3 py-2 rounded-sm">
                 {buildError}
               </p>
             )}
-          </section>
-
-          {/* Today */}
-          <section className="space-y-3" ref={resultRef}>
-            <div className={label}>
-              {t(lang, "todaysVideos")} · {todays.length}
-            </div>
-            {todays.length === 0 ? (
+            {dayRenders.length === 0 ? (
               <p className="text-sm text-muted border-2 border-dashed border-line bg-paper rounded-md p-6 text-center">
-                {t(lang, "nothingToday")}
+                {!blocker && config.autoFill && config.perDay > 0 && inFillWindow
+                  ? t(lang, "preparingVideos")
+                  : t(lang, "noVideosDay")}
               </p>
             ) : (
               <ul className="space-y-3">
-                {todays.map((r) => (
+                {dayRenders.map((r, i) => (
                   <RenderCard
                     key={r.id}
                     render={r}
                     lang={lang}
-                    open={r.id === justBuilt || r.id === todays[0].id}
+                    open={r.id === justBuilt || (i === 0 && !dayBusy)}
                     onDelete={() => void deleteRender(r.id)}
                   />
                 ))}

@@ -21,11 +21,35 @@ const label = "text-[10px] uppercase tracking-[0.2em] font-bold text-muted";
 const input =
   "mt-1 w-full border-2 border-line rounded-md px-3 py-2 bg-background text-sm focus:outline-none focus:border-accent";
 
-type Activity = {
-  clips: StudioClip[];
+type Creator = {
+  id: string;
+  name: string | null;
+  email: string | null;
+  demos: StudioClip[];
+  readyDemos: number;
+  ready: boolean;
   renders: StudioRender[];
-  users: Record<string, { name: string | null; email: string }>;
 };
+
+type Activity = {
+  minDemos: number;
+  schedule: { autoFill: boolean; perDay: number; daysAhead: number };
+  creators: Creator[];
+  // Shared clips (background + example); demos live on each creator.
+  clips: StudioClip[];
+};
+
+function localYmd(offset = 0): string {
+  const d = new Date();
+  d.setDate(d.getDate() + offset);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function shortDay(ymd: string): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("en", { weekday: "short", day: "numeric" });
+}
 
 function uploadClip(
   slug: string,
@@ -88,8 +112,12 @@ export function StudioAdmin({
     // the effect body free of anything that looks like a synchronous setState.
     void Promise.resolve().then(loadActivity);
   }, [loadActivity]);
-  const anyPending = !!activity?.clips.some((c) => c.status === "processing" || c.status === "queued") ||
-    !!activity?.renders.some((r) => r.status === "processing" || r.status === "queued");
+  const anyPending =
+    !!activity?.clips.some((c) => c.status === "processing" || c.status === "queued") ||
+    !!activity?.creators.some((u) =>
+      u.demos.some((c) => c.status === "processing" || c.status === "queued") ||
+      u.renders.some((r) => r.status === "processing" || r.status === "queued")
+    );
   useEffect(() => {
     if (!anyPending) return;
     const id = setInterval(() => void loadActivity(), 3000);
@@ -129,17 +157,38 @@ export function StudioAdmin({
 
   const broll = (activity?.clips ?? []).filter((c) => c.kind === "broll");
   const examples = (activity?.clips ?? []).filter((c) => c.kind === "example");
-  const demos = (activity?.clips ?? []).filter((c) => c.kind === "demo");
-  const renders = activity?.renders ?? [];
-  const byUser = new Map<string, { demos: StudioClip[]; renders: StudioRender[] }>();
-  for (const d of demos) {
-    const k = d.userId ?? "?";
-    if (!byUser.has(k)) byUser.set(k, { demos: [], renders: [] });
-    byUser.get(k)!.demos.push(d);
-  }
-  for (const r of renders) {
-    if (!byUser.has(r.userId)) byUser.set(r.userId, { demos: [], renders: [] });
-    byUser.get(r.userId)!.renders.push(r);
+  const creators = activity?.creators ?? [];
+  const readyCreators = creators.filter((c) => c.ready);
+  const week = Array.from({ length: 7 }, (_, i) => localYmd(i));
+
+  const [scheduleMsg, setScheduleMsg] = useState<string | null>(null);
+  const [scheduling, setScheduling] = useState(false);
+  async function schedule(body: Record<string, unknown>) {
+    setScheduling(true);
+    setScheduleMsg(null);
+    try {
+      const res = await fetch(`/api/briefs/${encodeURIComponent(briefSlug)}/studio/schedule`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...body, today: localYmd() }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j.ok) setScheduleMsg(`Failed: ${j.error ?? `HTTP ${res.status}`}`);
+      else {
+        const reasons = Object.values(j.results ?? {})
+          .map((r) => (r as { reason?: string; error?: string }).reason ?? (r as { error?: string }).error)
+          .filter(Boolean);
+        setScheduleMsg(
+          `Queued ${j.created} ${j.created === 1 ? "video" : "videos"}.` +
+            (reasons.length ? ` Skipped: ${Array.from(new Set(reasons)).join("; ")}.` : "")
+        );
+      }
+      await loadActivity();
+    } catch (e) {
+      setScheduleMsg(`Failed: ${(e as Error).message}`);
+    } finally {
+      setScheduling(false);
+    }
   }
   const sampleHook = hooks.find((h) => !h.hidden) ?? { hook: "Your hook", explanation: "Your explanation" };
   const previewCaption = buildCaption(cfg, sampleHook);
@@ -656,15 +705,72 @@ export function StudioAdmin({
         )}
       </div>
 
-      {/* Creator activity */}
+      {/* Videos in advance */}
       <div className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 space-y-3">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <div className="font-black">Videos in advance</div>
+            <p className="text-xs text-muted max-w-prose">
+              A creator with enough demos gets videos queued for the coming days, topped up
+              whenever they open the builder, so they show up to a calendar that is already
+              full. They can still generate extra ones for any day.
+            </p>
+          </div>
+          <label className="flex items-center gap-2 border-2 border-line rounded-md px-3 py-2 cursor-pointer bg-paper">
+            <input
+              type="checkbox"
+              checked={cfg.autoFill ?? STUDIO_DEFAULTS.autoFill}
+              onChange={(e) => set({ autoFill: e.target.checked })}
+            />
+            <span className="text-xs font-black uppercase tracking-widest">Auto-fill</span>
+          </label>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-end">
+          <label className="block">
+            <span className={label}>Videos per day</span>
+            <input
+              type="number"
+              min={0}
+              max={5}
+              value={cfg.perDay ?? STUDIO_DEFAULTS.perDay}
+              onChange={(e) => set({ perDay: Number(e.target.value) })}
+              className={input}
+            />
+          </label>
+          <label className="block">
+            <span className={label}>Days ahead</span>
+            <input
+              type="number"
+              min={1}
+              max={14}
+              value={cfg.daysAhead ?? STUDIO_DEFAULTS.daysAhead}
+              onChange={(e) => set({ daysAhead: Number(e.target.value) })}
+              className={input}
+            />
+          </label>
+          <button
+            type="button"
+            disabled={scheduling}
+            onClick={() => void schedule({ mode: "fill" })}
+            className="md:col-span-2 border-2 border-line bg-ink text-background px-3 py-2 rounded-md nb-press text-xs font-black uppercase tracking-widest disabled:opacity-50"
+          >
+            {scheduling ? "Working…" : "Fill every ready creator now"}
+          </button>
+        </div>
+        {scheduleMsg && <p className="text-xs font-bold">{scheduleMsg}</p>}
+      </div>
+
+      {/* Creators dashboard */}
+      <div className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 space-y-3">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <div className="font-black">
-              Creator activity · {byUser.size} {byUser.size === 1 ? "creator" : "creators"} ·{" "}
-              {demos.length} demos · {renders.length} videos
+              Creators · {readyCreators.length} ready · {creators.length - readyCreators.length} not ready
             </div>
-            <p className="text-xs text-muted">Everything creators have uploaded and built.</p>
+            <p className="text-xs text-muted">
+              Ready = at least {activity?.minDemos ?? cfg.minDemos ?? STUDIO_DEFAULTS.minDemos} demos
+              processed. Numbers under each day are that creator&apos;s videos for it.
+            </p>
           </div>
           <button
             type="button"
@@ -674,99 +780,257 @@ export function StudioAdmin({
             Refresh
           </button>
         </div>
-        {byUser.size === 0 ? (
+        {creators.length === 0 ? (
           <p className="text-sm text-muted border-2 border-dashed border-line bg-paper rounded-md p-4">
-            Nothing yet.
+            No creators yet. They appear here after their first upload.
           </p>
         ) : (
-          <ul className="space-y-2">
-            {Array.from(byUser.entries()).map(([uid, v]) => {
-              const u = activity?.users[uid];
-              const who = uid === "_admin" ? "Admin (you)" : u?.name || u?.email || uid;
-              return (
-                <li key={uid} className="border-2 border-line rounded-md bg-background">
-                  <details>
-                    <summary className="flex items-center gap-3 p-3 cursor-pointer">
-                      <span className="font-black text-sm flex-1 min-w-0 truncate">
-                        {who}
-                        {u?.email && u.name ? (
-                          <span className="text-muted font-normal"> · {u.email}</span>
-                        ) : null}
-                      </span>
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-muted">
-                        {v.demos.length} demos · {v.renders.length} videos
-                      </span>
-                    </summary>
-                    <div className="border-t-2 border-line p-3 space-y-3">
-                      {v.demos.length > 0 && (
-                        <div>
-                          <div className={label}>Demos</div>
-                          <ul className="mt-1 flex gap-2 overflow-x-auto">
-                            {v.demos.map((d) => (
-                              <li key={d.id} className="shrink-0 w-16">
-                                <a href={d.url ?? "#"} target="_blank" rel="noreferrer" className="block border-2 border-line rounded-sm overflow-hidden aspect-[9/16] bg-paper">
-                                  {d.posterUrl && (
-                                    /* eslint-disable-next-line @next/next/no-img-element */
-                                    <img src={d.posterUrl} alt="" className="w-full h-full object-cover" />
-                                  )}
-                                </a>
-                                <div className="text-[9px] text-muted truncate mt-0.5">
-                                  {d.status === "ready" ? `${Math.round(d.durationSec ?? 0)}s` : d.status}
-                                </div>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                      {v.renders.length > 0 && (
-                        <div>
-                          <div className={label}>Videos</div>
-                          <ul className="mt-1 space-y-1.5">
-                            {v.renders.map((r) => (
-                              <li key={r.id} className="flex items-center gap-2 text-sm">
-                                <span className="w-8 shrink-0 aspect-[9/16] border-2 border-line bg-paper rounded-sm overflow-hidden">
-                                  {r.posterUrl && (
-                                    /* eslint-disable-next-line @next/next/no-img-element */
-                                    <img src={r.posterUrl} alt="" className="w-full h-full object-cover" />
-                                  )}
-                                </span>
-                                <span className="min-w-0 flex-1">
-                                  <span className="block font-bold truncate">{r.hookText}</span>
-                                  <span className="block text-[10px] text-muted">
-                                    {new Date(r.createdAt).toLocaleString()} · {r.status}
-                                    {r.error ? ` · ${r.error}` : ""}
-                                  </span>
-                                </span>
-                                {r.url && (
-                                  <a
-                                    href={`${r.url}?download=1`}
-                                    className="border-2 border-line bg-background px-2 py-1 rounded-sm text-[10px] font-black uppercase tracking-widest nb-press"
-                                  >
-                                    ⬇
-                                  </a>
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={() => void deleteRender(r.id)}
-                                  className="text-xs font-black px-1 text-muted hover:text-[#b91c1c]"
-                                  aria-label="Delete"
-                                >
-                                  ✕
-                                </button>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                    </div>
-                  </details>
-                </li>
-              );
-            })}
-          </ul>
+          <div className="overflow-x-auto -mx-4 px-4">
+            <table className="w-full text-sm border-separate border-spacing-0 min-w-[720px]">
+              <thead>
+                <tr className="text-[10px] uppercase tracking-widest text-muted">
+                  <th className="text-left font-bold pb-2 pr-3">Creator</th>
+                  <th className="text-left font-bold pb-2 pr-3">Demos</th>
+                  <th className="text-left font-bold pb-2 pr-3">Status</th>
+                  {week.map((d) => (
+                    <th key={d} className="text-center font-bold pb-2 px-1 whitespace-nowrap">
+                      {d === week[0] ? "Today" : shortDay(d)}
+                    </th>
+                  ))}
+                  <th className="pb-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {creators.map((c) => (
+                  <CreatorRow
+                    key={c.id}
+                    creator={c}
+                    minDemos={activity?.minDemos ?? 3}
+                    week={week}
+                    scheduling={scheduling}
+                    onAdd={(days, count) => void schedule({ mode: "add", userIds: [c.id], days, count })}
+                    onDeleteRender={(id) => void deleteRender(id)}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </div>
+  );
+}
+
+function CreatorRow({
+  creator: c,
+  minDemos,
+  week,
+  scheduling,
+  onAdd,
+  onDeleteRender,
+}: {
+  creator: Creator;
+  minDemos: number;
+  week: string[];
+  scheduling: boolean;
+  onAdd: (days: string[], count: number) => void;
+  onDeleteRender: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [addDay, setAddDay] = useState(week[1] ?? week[0]);
+  const [addCount, setAddCount] = useState(1);
+  const who = c.id === "_admin" ? "Admin (you)" : c.name || c.email || c.id;
+  const forDay = (d: string) => c.renders.filter((r) => r.scheduledFor === d && r.status !== "error");
+  const byDay = new Map<string, StudioRender[]>();
+  for (const r of c.renders) {
+    if (!byDay.has(r.scheduledFor)) byDay.set(r.scheduledFor, []);
+    byDay.get(r.scheduledFor)!.push(r);
+  }
+  const dayKeys = Array.from(byDay.keys()).sort().reverse();
+  return (
+    <>
+      <tr className="align-middle">
+        <td className="py-2 pr-3 border-t-2 border-line">
+          <button type="button" onClick={() => setOpen((x) => !x)} className="text-left">
+            <span className="block font-black leading-tight">{who}</span>
+            {c.email && c.name && <span className="block text-[11px] text-muted">{c.email}</span>}
+          </button>
+        </td>
+        <td className="py-2 pr-3 border-t-2 border-line whitespace-nowrap">
+          <span className="font-bold">{c.readyDemos}</span>
+          <span className="text-muted"> / {minDemos}</span>
+        </td>
+        <td className="py-2 pr-3 border-t-2 border-line">
+          {c.ready ? (
+            <span className="inline-block border-2 border-line bg-success text-success-ink px-1.5 py-0.5 rounded-sm text-[10px] font-black uppercase tracking-widest">
+              Ready
+            </span>
+          ) : (
+            <span className="inline-block border-2 border-line bg-paper px-1.5 py-0.5 rounded-sm text-[10px] font-black uppercase tracking-widest whitespace-nowrap">
+              Needs {Math.max(0, minDemos - c.readyDemos)} more
+            </span>
+          )}
+        </td>
+        {week.map((d) => {
+          const list = forDay(d);
+          const busy = list.some((r) => r.status !== "ready");
+          return (
+            <td key={d} className="py-2 px-1 border-t-2 border-line text-center">
+              <span
+                className={`inline-flex items-center justify-center min-w-7 h-7 border-2 border-line rounded-sm text-xs font-black ${
+                  list.length === 0 ? "bg-paper text-muted" : busy ? "bg-accent text-accent-ink" : "bg-ink text-background"
+                }`}
+                title={busy ? "Some still rendering" : undefined}
+              >
+                {list.length}
+              </span>
+            </td>
+          );
+        })}
+        <td className="py-2 pl-2 border-t-2 border-line whitespace-nowrap">
+          <button
+            type="button"
+            onClick={() => setOpen((x) => !x)}
+            className="border-2 border-line bg-background px-2 py-1 rounded-md nb-press text-[10px] font-black uppercase tracking-widest"
+          >
+            {open ? "Close" : "Open"}
+          </button>
+        </td>
+      </tr>
+      {open && (
+        <tr>
+          <td colSpan={4 + week.length} className="pb-3">
+            <div className="border-2 border-line bg-paper rounded-md p-3 space-y-3">
+              <div className="flex items-end gap-2 flex-wrap">
+                <label className="block">
+                  <span className={label}>Add videos on</span>
+                  <input
+                    type="date"
+                    value={addDay}
+                    min={week[0]}
+                    onChange={(e) => setAddDay(e.target.value)}
+                    className={input}
+                  />
+                </label>
+                <label className="block">
+                  <span className={label}>How many</span>
+                  <select
+                    value={addCount}
+                    onChange={(e) => setAddCount(Number(e.target.value))}
+                    className={input}
+                  >
+                    {[1, 2, 3].map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  disabled={scheduling || !c.ready || !/^\d{4}-\d{2}-\d{2}$/.test(addDay)}
+                  onClick={() => onAdd([addDay], addCount)}
+                  className="border-2 border-line bg-ink text-background px-3 py-2 rounded-md nb-press text-xs font-black uppercase tracking-widest disabled:opacity-50"
+                >
+                  Add
+                </button>
+                <button
+                  type="button"
+                  disabled={scheduling || !c.ready}
+                  onClick={() => onAdd(week, 1)}
+                  className="border-2 border-line bg-background px-3 py-2 rounded-md nb-press text-xs font-black uppercase tracking-widest disabled:opacity-50"
+                >
+                  +1 every day this week
+                </button>
+                {!c.ready && (
+                  <span className="text-[11px] text-muted">Needs {minDemos} processed demos first.</span>
+                )}
+              </div>
+
+              <div>
+                <div className={label}>Demos · {c.demos.length}</div>
+                {c.demos.length === 0 ? (
+                  <p className="text-xs text-muted mt-1">None uploaded yet.</p>
+                ) : (
+                  <ul className="mt-1 flex gap-2 overflow-x-auto">
+                    {c.demos.map((d) => (
+                      <li key={d.id} className="shrink-0 w-16">
+                        <a
+                          href={d.url ?? "#"}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="block border-2 border-line rounded-sm overflow-hidden aspect-[9/16] bg-background"
+                        >
+                          {d.posterUrl && (
+                            /* eslint-disable-next-line @next/next/no-img-element */
+                            <img src={d.posterUrl} alt="" className="w-full h-full object-cover" />
+                          )}
+                        </a>
+                        <div className="text-[9px] text-muted truncate mt-0.5">
+                          {d.status === "ready" ? `${Math.round(d.durationSec ?? 0)}s` : d.status}
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div>
+                <div className={label}>Videos · {c.renders.length}</div>
+                {dayKeys.length === 0 ? (
+                  <p className="text-xs text-muted mt-1">Nothing scheduled yet.</p>
+                ) : (
+                  <div className="mt-1 space-y-2">
+                    {dayKeys.map((d) => (
+                      <div key={d}>
+                        <div className="text-[10px] font-black uppercase tracking-widest">
+                          {d === week[0] ? "Today" : shortDay(d)} · {d}
+                        </div>
+                        <ul className="mt-1 space-y-1">
+                          {byDay.get(d)!.map((r) => (
+                            <li key={r.id} className="flex items-center gap-2 text-sm bg-background border-2 border-line rounded-md px-2 py-1">
+                              <span className="w-7 shrink-0 aspect-[9/16] border-2 border-line bg-paper rounded-sm overflow-hidden">
+                                {r.posterUrl && (
+                                  /* eslint-disable-next-line @next/next/no-img-element */
+                                  <img src={r.posterUrl} alt="" className="w-full h-full object-cover" />
+                                )}
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className="block font-bold truncate">{r.hookText}</span>
+                                <span className="block text-[10px] text-muted">
+                                  {r.status} · {r.source}
+                                  {r.error ? ` · ${r.error}` : ""}
+                                </span>
+                              </span>
+                              {r.url && (
+                                <a
+                                  href={`${r.url}?download=1`}
+                                  className="border-2 border-line bg-background px-2 py-1 rounded-sm text-[10px] font-black uppercase tracking-widest nb-press"
+                                >
+                                  ⬇
+                                </a>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => onDeleteRender(r.id)}
+                                className="text-xs font-black px-1 text-muted hover:text-[#b91c1c]"
+                                aria-label="Delete"
+                              >
+                                ✕
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 

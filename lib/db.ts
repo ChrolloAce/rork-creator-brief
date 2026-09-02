@@ -716,6 +716,9 @@ async function runSchema() {
     )
   `;
   await sql`ALTER TABLE studio_render ADD COLUMN IF NOT EXISTS hook_video_id TEXT`;
+  await sql`ALTER TABLE studio_render ADD COLUMN IF NOT EXISTS scheduled_for DATE`;
+  await sql`ALTER TABLE studio_render ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'creator'`;
+  await sql`CREATE INDEX IF NOT EXISTS studio_render_day_idx ON studio_render (brief_slug, user_id, scheduled_for)`;
   await sql`CREATE INDEX IF NOT EXISTS studio_render_brief_idx ON studio_render (brief_slug, user_id, created_at DESC)`;
   await sql`CREATE INDEX IF NOT EXISTS studio_render_status_idx ON studio_render (status)`;
 
@@ -1983,6 +1986,8 @@ type RenderRow = {
   demo_id: string | null;
   broll_id: string | null;
   hook_video_id: string | null;
+  scheduled_for: string | null;
+  source: string | null;
   caption: string;
   status: string;
   error: string | null;
@@ -1993,7 +1998,9 @@ type RenderRow = {
   created_at: Date;
 };
 
-const RENDER_COLS = `id, brief_slug, user_id, hook_id, hook_text, explanation_text, demo_id, broll_id, hook_video_id, caption, status, error, blob_id, poster_id, duration_sec, size_bytes, created_at`;
+// scheduled_for is a DATE; read it as text so no timezone shift can move a
+// video to the wrong day.
+const RENDER_COLS = `id, brief_slug, user_id, hook_id, hook_text, explanation_text, demo_id, broll_id, hook_video_id, to_char(scheduled_for, 'YYYY-MM-DD') AS scheduled_for, source, caption, status, error, blob_id, poster_id, duration_sec, size_bytes, created_at`;
 
 function rowToRender(r: RenderRow): StudioRender {
   return {
@@ -2006,6 +2013,8 @@ function rowToRender(r: RenderRow): StudioRender {
     demoId: r.demo_id,
     brollId: r.broll_id,
     hookVideoId: r.hook_video_id ?? null,
+    scheduledFor: r.scheduled_for ?? r.created_at.toISOString().slice(0, 10),
+    source: r.source === "auto" || r.source === "admin" ? r.source : "creator",
     caption: r.caption,
     status: asStatus(r.status),
     error: r.error,
@@ -2027,13 +2036,16 @@ export async function createStudioRender(input: {
   brollId: string | null;
   hookVideoId?: string | null;
   caption: string;
+  // "YYYY-MM-DD"; null = today (server date).
+  scheduledFor?: string | null;
+  source?: "creator" | "auto" | "admin";
 }): Promise<StudioRender> {
   await ensureSchema();
   const sql = getSql();
   const id = `rn_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
   await sql`
-    INSERT INTO studio_render (id, brief_slug, user_id, hook_id, hook_text, explanation_text, demo_id, broll_id, hook_video_id, caption, status)
-    VALUES (${id}, ${input.briefSlug}, ${input.userId}, ${input.hookId}, ${input.hookText}, ${input.explanationText}, ${input.demoId}, ${input.brollId}, ${input.hookVideoId ?? null}, ${input.caption}, 'queued')
+    INSERT INTO studio_render (id, brief_slug, user_id, hook_id, hook_text, explanation_text, demo_id, broll_id, hook_video_id, caption, status, scheduled_for, source)
+    VALUES (${id}, ${input.briefSlug}, ${input.userId}, ${input.hookId}, ${input.hookText}, ${input.explanationText}, ${input.demoId}, ${input.brollId}, ${input.hookVideoId ?? null}, ${input.caption}, 'queued', ${input.scheduledFor ?? null}::date, ${input.source ?? "creator"})
   `;
   const rows = await sql<RenderRow[]>`SELECT ${sql.unsafe(RENDER_COLS)} FROM studio_render WHERE id = ${id}`;
   return rowToRender(rows[0]);
@@ -2159,6 +2171,27 @@ export async function listStudioForAdmin(briefSlug: string): Promise<{
     for (const r of rows) users[r.id] = { name: r.name, email: r.email };
   }
   return { clips, renders, users };
+}
+
+// Everyone who counts as a creator on this brief for the Video Builder: the
+// roster (brief_creator with an account) plus anyone who has uploaded a demo,
+// plus the admin pseudo-user when it has been used for testing.
+export async function listStudioUsers(
+  briefSlug: string
+): Promise<{ id: string; name: string | null; email: string | null }[]> {
+  await ensureSchema();
+  const sql = getSql();
+  const rows = await sql<{ id: string; name: string | null; email: string | null }[]>`
+    SELECT u.id, u.name, u.email FROM creator_user u
+    WHERE u.id IN (SELECT user_id FROM studio_clip WHERE brief_slug = ${briefSlug} AND user_id IS NOT NULL)
+       OR u.id IN (SELECT user_id FROM brief_creator WHERE brief_slug = ${briefSlug} AND user_id IS NOT NULL)
+    ORDER BY u.created_at DESC
+  `;
+  const admin = await sql<{ n: string }[]>`
+    SELECT count(*)::text AS n FROM studio_clip WHERE brief_slug = ${briefSlug} AND user_id = '_admin' AND kind = 'demo'
+  `;
+  if (Number(admin[0]?.n ?? 0) > 0) rows.push({ id: "_admin", name: "Admin", email: null });
+  return rows;
 }
 
 export async function countStudioClips(

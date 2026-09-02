@@ -54,6 +54,13 @@ export type StudioConfig = {
   // "How to record your demo": plain text, one bullet per line. Shown in
   // step 1 of the creator flow next to the example clips.
   recordGuide?: string;
+  // Videos in advance. When autoFill is on, a creator who has the minimum
+  // demos gets `perDay` videos queued for each of the next `daysAhead` days
+  // (topped up whenever they open the page), so they show up to a calendar
+  // that is already full. The admin can also schedule by hand.
+  autoFill?: boolean;
+  perDay?: number;
+  daysAhead?: number;
 };
 
 export const STUDIO_DEFAULTS = {
@@ -65,6 +72,12 @@ export const STUDIO_DEFAULTS = {
   textStyle: "pill" as StudioTextStyle,
   opening: "broll" as StudioOpening,
   libraryHookSec: 10,
+  autoFill: true,
+  perDay: 1,
+  daysAhead: 3,
+  // Most renders one fill call may queue, so a misconfigured brief cannot
+  // enqueue hundreds of encodes in one request.
+  fillCap: 20,
   // Hard cap on demos per creator per brief, regardless of guidance.
   demoCap: 12,
   // Longest demo we keep (seconds). Anything longer is trimmed at ingest.
@@ -107,6 +120,32 @@ export function effectiveLibraryHookSec(c: StudioConfig | undefined | null): num
 
 export function studioOpening(c: StudioConfig | undefined | null): StudioOpening {
   return c?.opening === "library" ? "library" : "broll";
+}
+
+export function scheduleSettings(c: StudioConfig | undefined | null): {
+  autoFill: boolean;
+  perDay: number;
+  daysAhead: number;
+} {
+  const perDay = Math.min(5, Math.max(0, Math.round(c?.perDay ?? STUDIO_DEFAULTS.perDay)));
+  const daysAhead = Math.min(14, Math.max(1, Math.round(c?.daysAhead ?? STUDIO_DEFAULTS.daysAhead)));
+  return { autoFill: c?.autoFill ?? STUDIO_DEFAULTS.autoFill, perDay, daysAhead };
+}
+
+// Calendar days as "YYYY-MM-DD" strings. The creator's browser decides what
+// "today" is (their timezone), the server only shifts by whole days.
+export function isYmd(v: unknown): v is string {
+  return typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
+}
+
+export function todayYmdUtc(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+export function addDaysYmd(ymd: string, n: number): string {
+  const [y, m, d] = ymd.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + n));
+  return dt.toISOString().slice(0, 10);
 }
 
 function clampSec(v: number | undefined, dflt: number, lo: number, hi: number) {
@@ -156,6 +195,9 @@ export type StudioPublicConfig = {
   opening: StudioOpening;
   libraryHookSec: number;
   recordGuide: string[];
+  autoFill: boolean;
+  perDay: number;
+  daysAhead: number;
 };
 
 export function publicStudioConfig(c: StudioConfig): StudioPublicConfig {
@@ -174,6 +216,7 @@ export function publicStudioConfig(c: StudioConfig): StudioPublicConfig {
       .split(/\r?\n/)
       .map((l) => l.replace(/^\s*[-*•]\s*/, "").trim())
       .filter(Boolean),
+    ...scheduleSettings(c),
   };
 }
 
@@ -214,6 +257,12 @@ export type StudioRender = {
   brollId: string | null;
   // hook_video.id when the render opened with a library reel.
   hookVideoId: string | null;
+  // The calendar day this video is for ("YYYY-MM-DD"). Legacy rows fall back
+  // to the day they were created.
+  scheduledFor: string;
+  // Who asked for it: the creator tapping Generate, the auto-fill, or the
+  // admin scheduling by hand.
+  source: "creator" | "auto" | "admin";
   caption: string;
   status: StudioJobStatus;
   error: string | null;
