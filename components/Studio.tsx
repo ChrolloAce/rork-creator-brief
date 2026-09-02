@@ -490,42 +490,6 @@ export function Studio({
 
       {step === 2 && (
         <>
-          {/* The demos they just uploaded, as thumbnails, so "done" is visible
-              before the Generate button asks for the next step. */}
-          <section className="border-2 border-line bg-background rounded-md p-3 space-y-3">
-            <div className="flex items-center gap-3">
-              <ul className="flex gap-1.5 overflow-x-auto flex-1 min-w-0">
-                {demos.map((d) => (
-                  <li key={d.id} className="shrink-0 w-10">
-                    <div className="aspect-[9/16] border-2 border-line rounded-sm overflow-hidden bg-paper flex items-center justify-center">
-                      {d.posterUrl ? (
-                        /* eslint-disable-next-line @next/next/no-img-element */
-                        <img src={d.posterUrl} alt="" className="w-full h-full object-cover" />
-                      ) : d.status === "error" ? (
-                        <span className="text-xs" aria-hidden>
-                          ⚠️
-                        </span>
-                      ) : (
-                        <span className="w-3 h-3 border-2 border-line border-t-accent rounded-full animate-spin" />
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-              <span className="shrink-0 text-[10px] font-black uppercase tracking-widest text-success-ink bg-success border-2 border-line px-1.5 py-0.5 rounded-sm">
-                {readyDemos.length} {t(lang, "ready")}
-              </span>
-              <button
-                type="button"
-                onClick={() => setManageOpen((x) => !x)}
-                className="shrink-0 border-2 border-line bg-background px-3 py-1.5 rounded-md nb-press text-[10px] font-black uppercase tracking-widest"
-              >
-                {manageOpen ? t(lang, "hideDemos") : t(lang, "changeDemos")}
-              </button>
-            </div>
-            {manageOpen && demosPanel}
-          </section>
-
           {/* Generate */}
           <section className="border-2 border-line bg-background rounded-md nb-shadow p-5 sm:p-8 text-center space-y-4">
             <div>
@@ -607,6 +571,22 @@ export function Studio({
             </details>
           )}
 
+          {/* Demos, tucked away */}
+          <section className="border-t-2 border-line pt-4 space-y-3">
+            <button
+              type="button"
+              onClick={() => setManageOpen((x) => !x)}
+              className="w-full flex items-center justify-between gap-3 text-left"
+            >
+              <span className={label}>
+                {t(lang, "yourDemos")} · {demoCount}
+              </span>
+              <span className="border-2 border-line bg-background px-3 py-1.5 rounded-md nb-press text-[10px] font-black uppercase tracking-widest">
+                {manageOpen ? t(lang, "hideDemos") : t(lang, "changeDemos")}
+              </span>
+            </button>
+            {manageOpen && demosPanel}
+          </section>
         </>
       )}
     </div>
