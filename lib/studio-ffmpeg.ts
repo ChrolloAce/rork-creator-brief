@@ -118,6 +118,21 @@ export async function probe(file: string): Promise<ProbeInfo> {
   };
 }
 
+// Duration of the VIDEO track. The container "Duration:" line is the longest
+// stream, so a file whose picture stops early but whose audio runs on still
+// reports the full length; decoding only the video and reading the final
+// progress timestamp is the honest number.
+export async function videoDurationSec(file: string): Promise<number> {
+  const out = await runFfmpeg(
+    ["-i", file, "-map", "0:v:0", "-an", "-f", "null", "-"],
+    5 * 60_000
+  ).catch((e) => (e as Error).message);
+  const times = Array.from(out.matchAll(/time=(\d+):(\d+):(\d+(?:\.\d+)?)/g));
+  const last = times[times.length - 1];
+  if (!last) return 0;
+  return Number(last[1]) * 3600 + Number(last[2]) * 60 + Number(last[3]);
+}
+
 // Blurred-fill cover: the clip is scaled to fit inside 1080x1920 and sits on
 // a blurred, cropped copy of itself, so a 16:9 screen recording does not get
 // black bars and a 9:16 phone clip covers the frame edge to edge.
@@ -294,8 +309,12 @@ export async function renderPip(input: {
   const top = input.corner.startsWith("top");
   const x = left ? m + "*" + p : "(W-w-" + m + ")*" + p;
   const y = top ? m + "*" + p : "(H-h-" + m + ")*" + p;
+  // Base = hookSec of black, then the demo, built with color+concat rather
+  // than tpad (which produced a demo-length track on the Linux build).
   const filter = [
-    "[1:v]fps=" + FPS + ",setsar=1,setpts=PTS-STARTPTS,tpad=start_duration=" + h0 + ":color=black[base]",
+    "color=c=black:s=" + OUT_W + "x" + OUT_H + ":r=" + FPS + ":d=" + h0 + ",format=yuv420p[blk]",
+    "[1:v]fps=" + FPS + ",setsar=1,setpts=PTS-STARTPTS,format=yuv420p[dv]",
+    "[blk][dv]concat=n=2:v=1:a=0[base]",
     "[0:v]fps=" + FPS + ",setsar=1,setpts=PTS-STARTPTS,scale=eval=frame:w='" + w + "':h='" + hh + "'[reel]",
     "[base][reel]overlay=eval=frame:x='" + x + "':y='" + y + "':eof_action=pass,format=yuv420p[v]",
     "[0:a]aresample=44100,atrim=0:" + h0 + ",asetpts=PTS-STARTPTS[a0]",

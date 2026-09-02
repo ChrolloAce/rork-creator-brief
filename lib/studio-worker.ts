@@ -15,7 +15,7 @@ import {
   updateStudioClip,
   updateStudioRender,
 } from "./db";
-import { normalizeClip, posterFrame, probe, renderConcat, renderStitch, renderPip } from "./studio-ffmpeg";
+import { normalizeClip, posterFrame, probe, renderConcat, renderStitch, renderPip, videoDurationSec } from "./studio-ffmpeg";
 import { getHookVideo } from "./hook-videos";
 import { renderTextCard } from "./studio-text";
 import {
@@ -202,6 +202,16 @@ async function runLibraryRender(job: StudioRender, dir: string): Promise<{ out: 
       margin: pip.margin,
       out,
     });
+    // The picture must run for the hook plus the whole demo. A short video
+    // track with full-length audio is exactly the failure this guards.
+    const expected = hookSec + demoInfo.durationSec;
+    const vsec = await videoDurationSec(out);
+    if (vsec < expected - 1.5) {
+      throw new Error(
+        `Handover render came out short: ${vsec.toFixed(1)}s of picture for ${expected.toFixed(1)}s.`
+      );
+    }
+    log(job.id, `handover ok: ${vsec.toFixed(1)}s picture, hook ${hookSec}s, demo ${demoInfo.durationSec.toFixed(1)}s`);
     return { out };
   }
   await normalizeClip({
