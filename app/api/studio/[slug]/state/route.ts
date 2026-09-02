@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { listStudioClips, listStudioRenders } from "@/lib/db";
 import { isYmd, publicStudioConfig, todayYmdUtc } from "@/lib/studio";
-import { getHookVideos } from "@/lib/hook-videos";
+import { getHookVideos, getHookVideosByIds } from "@/lib/hook-videos";
 import { ensureSchedule } from "@/lib/studio-plan";
 import { kickStudioQueue } from "@/lib/studio-worker";
 import { studioContext } from "../_shared";
@@ -38,6 +38,10 @@ export async function GET(
     listStudioRenders(slug, ctx.viewer.id),
     getHookVideos(slug),
   ]);
+  // Curated study reels replace the library preview outright.
+  const rawStudy = ctx.config.studyReelIds;
+  const studyIds = (Array.isArray(rawStudy) ? rawStudy : []).filter((x): x is string => typeof x === "string" && x.length > 0);
+  const study = studyIds.length > 0 ? await getHookVideosByIds(studyIds) : null;
   return NextResponse.json({
     ok: true,
     viewer: { id: ctx.viewer.id, name: ctx.viewer.name, email: ctx.viewer.email, isAdmin: ctx.viewer.isAdmin },
@@ -47,8 +51,8 @@ export async function GET(
     broll: broll.filter((b) => b.status === "ready"),
     examples: examples.filter((e) => e.status === "ready"),
     renders,
-    libraryCount: library.length,
-    library: library.slice(0, 12),
+    libraryCount: study ? study.length : library.length,
+    library: study ?? library.slice(0, 12),
     filled: fill.created,
   });
 }

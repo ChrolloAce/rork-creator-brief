@@ -177,7 +177,7 @@ export function HookCard({
           />
         )}
         <span className="absolute top-2 left-2 text-[10px] font-black uppercase tracking-widest bg-background text-ink px-1.5 py-0.5 border-2 border-line rounded-sm leading-none">
-          IG
+          {video.platform === "upload" ? "REEL" : "IG"}
         </span>
         {views && (
           <span className="absolute top-2 right-2 text-[10px] font-black uppercase tracking-widest bg-accent text-accent-ink px-1.5 py-0.5 border-2 border-line rounded-sm leading-none">
@@ -261,8 +261,11 @@ export function HookModal({
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-1">
-                Instagram
+                {video.platform === "upload" ? "Reel" : "Instagram"}
               </div>
+              {video.platform === "upload" ? (
+                <span className="text-lg font-black text-ink">{video.account}</span>
+              ) : (
               <a
                 href={`https://instagram.com/${video.account}`}
                 target="_blank"
@@ -271,6 +274,7 @@ export function HookModal({
               >
                 @{video.account}
               </a>
+              )}
             </div>
             <button
               type="button"
@@ -293,6 +297,7 @@ export function HookModal({
               {video.caption}
             </p>
           )}
+          {video.platform !== "upload" && (
           <div className="mt-auto pt-2">
             <a
               href={video.url}
@@ -303,6 +308,7 @@ export function HookModal({
               {t(lang, "watchOn")} Instagram ↗
             </a>
           </div>
+          )}
         </div>
       </div>
     </div>

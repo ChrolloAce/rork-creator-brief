@@ -51,6 +51,10 @@ export type StudioConfig = {
   opening?: StudioOpening;
   // Seconds of the library reel to keep when opening === "library".
   libraryHookSec?: number;
+  // Curated "Reels to study" on the creator page. When set, ONLY these
+  // hook_video ids show there (hidden rows allowed) and the "see all" link
+  // is dropped. Empty/unset = the top of the brief's library as before.
+  studyReelIds?: string[];
   // "How to record your demo": plain text, one bullet per line. Shown in
   // step 1 of the creator flow next to the example clips.
   recordGuide?: string;

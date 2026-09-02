@@ -6,7 +6,7 @@ import { sql, ensureSchema } from "./db";
 // pool. The scraper owns writes; the app only reads.
 export type HookVideo = {
   id: string;
-  platform: "instagram";
+  platform: "instagram" | "upload";
   shortcode: string;
   account: string;
   url: string;
@@ -24,7 +24,7 @@ export type HookVideo = {
 
 type Row = {
   id: string;
-  platform: "instagram";
+  platform: "instagram" | "upload";
   shortcode: string;
   account: string;
   url: string;
@@ -72,6 +72,29 @@ export async function getHookVideos(briefSlug: string): Promise<HookVideo[]> {
     videoUrl: r.video_url,
     thumbUrl: r.thumb_url,
   }));
+}
+
+// Explicit picks by id, in the order given. Ignores `hidden` on purpose:
+// a curated study reel can live outside the rotation pool.
+export async function getHookVideosByIds(ids: string[]): Promise<HookVideo[]> {
+  if (ids.length === 0) return [];
+  await ensureSchema();
+  const rows = await sql<Row[]>`
+    SELECT id, platform, shortcode, account, url, caption, views, likes,
+           comments, duration, width, height, posted_at, video_url, thumb_url
+    FROM hook_video WHERE id = ANY(${ids})
+  `;
+  const by = new Map(rows.map((r) => [r.id, r]));
+  return ids
+    .map((id) => by.get(id))
+    .filter((r): r is Row => !!r)
+    .map((r) => ({
+      id: r.id, platform: r.platform, shortcode: r.shortcode, account: r.account, url: r.url,
+      caption: r.caption, views: num(r.views), likes: num(r.likes), comments: num(r.comments),
+      duration: r.duration, width: r.width, height: r.height,
+      postedAt: r.posted_at ? r.posted_at.toISOString() : null,
+      videoUrl: r.video_url, thumbUrl: r.thumb_url,
+    }));
 }
 
 export async function getHookVideo(id: string): Promise<HookVideo | null> {
