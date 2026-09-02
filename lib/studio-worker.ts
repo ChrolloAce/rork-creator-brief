@@ -118,8 +118,10 @@ export async function ingestClip(input: {
         out,
         maxSec: input.kind === "broll" ? STUDIO_DEFAULTS.maxBrollSec : STUDIO_DEFAULTS.maxDemoSec,
         hasAudio: info.hasAudio,
+        hdr: info.hdr,
         mode: input.kind === "broll" ? "cover" : "fit",
       });
+      if (info.hdr) log(clipId, "HDR source tone mapped to BT.709");
       await posterFrame(out, poster);
       const normalized = await probe(out);
       const [mp4, jpg] = await Promise.all([readFile(out), readFile(poster)]);
@@ -182,19 +184,23 @@ async function runLibraryRender(job: StudioRender, dir: string): Promise<{ out: 
   const hookSec = effectiveLibraryHookSec(cur.studio);
   const pip = pipSettings(cur.studio);
   const out = path.join(dir, "out.mp4");
+  // Demos normalized before the HDR fix still carry bt2020/HLG tags on
+  // 8-bit pixels; tone mapping them here at render time corrects those too.
+  const demoInfo = await probe(demo);
   if (pip.transition === "pip") {
     // The reel keeps playing in the corner, so keep it as long as the demo.
-    const demoInfo = await probe(demo);
     await normalizeClip({
       src: raw,
       out: hook,
       maxSec: Math.min(STUDIO_DEFAULTS.maxDemoSec + hookSec, hookSec + demoInfo.durationSec + 1),
       hasAudio: info.hasAudio,
+      hdr: info.hdr,
       mode: "cover",
     });
     await renderPip({
       reel: hook,
       demo,
+      demoHdr: demoInfo.hdr,
       hookSec,
       animSec: pip.animSec,
       scale: pip.scale,
@@ -219,9 +225,10 @@ async function runLibraryRender(job: StudioRender, dir: string): Promise<{ out: 
     out: hook,
     maxSec: hookSec,
     hasAudio: info.hasAudio,
+    hdr: info.hdr,
     mode: "cover",
   });
-  await renderConcat({ first: hook, second: demo, out });
+  await renderConcat({ first: hook, second: demo, secondHdr: demoInfo.hdr, out });
   return { out };
 }
 
@@ -245,7 +252,7 @@ async function runRender(job: StudioRender): Promise<void> {
       const demo = path.join(dir, "demo.mp4");
       const broll = path.join(dir, "broll.mp4");
       await Promise.all([blobToFile(demoBlob, demo), blobToFile(brollBlob, broll)]);
-      const brollInfo = await probe(broll);
+      const [brollInfo, demoInfo2] = await Promise.all([probe(broll), probe(demo)]);
       const cfg = cur.studio;
       const { hookSec, explanationSec } = effectiveTimings(cfg, job.explanationText);
       const style = cfg?.textStyle ?? STUDIO_DEFAULTS.textStyle;
@@ -260,7 +267,9 @@ async function runRender(job: StudioRender): Promise<void> {
       await renderStitch({
         broll,
         brollHasAudio: brollInfo.hasAudio,
+        brollHdr: brollInfo.hdr,
         demo,
+        demoHdr: demoInfo2.hdr,
         hookPng,
         explanationPng: explPng,
         hookSec,

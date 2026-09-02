@@ -42,13 +42,15 @@ export function runFfmpeg(args: string[], timeoutMs = 10 * 60_000): Promise<stri
   return new Promise((resolve, reject) => {
     void ffmpegBin().then((bin) => {
       const child = spawn(bin, ["-hide_banner", "-nostdin", ...args], {
-        stdio: ["ignore", "ignore", "pipe"],
+        stdio: ["ignore", "pipe", "pipe"],
       });
       let stderr = "";
-      child.stderr.on("data", (d: Buffer) => {
+      const collect = (d: Buffer) => {
         // ffmpeg's progress lines are long and repetitive; keep the tail.
-        stderr = (stderr + d.toString()).slice(-6000);
-      });
+        stderr = (stderr + d.toString()).slice(-60000);
+      };
+      child.stderr.on("data", collect);
+      child.stdout.on("data", collect);
       const timer = setTimeout(() => {
         child.kill("SIGKILL");
         reject(new Error("ffmpeg timed out"));
@@ -79,6 +81,10 @@ export type ProbeInfo = {
   height: number;
   hasAudio: boolean;
   hasVideo: boolean;
+  // BT.2020 / HLG / PQ source (phones record HDR by default). Must be tone
+  // mapped to BT.709, or the 8-bit output comes out oversaturated and every
+  // later stage inherits the wrong color tags.
+  hdr: boolean;
 };
 
 // `ffmpeg -i file` with no output exits non-zero but prints the stream table
@@ -109,13 +115,39 @@ export async function probe(file: string): Promise<ProbeInfo> {
   const rot = out.match(/rotation of (-?\d+(?:\.\d+)?) degrees|rotate\s*:\s*(-?\d+)/);
   const deg = rot ? Math.abs(Number(rot[1] ?? rot[2])) % 180 : 0;
   if (deg === 90) [width, height] = [height, width];
+  const videoLine = out.match(/Stream #\d+:\d+[^\n]*Video:[^\n]*/)?.[0] ?? "";
   return {
     durationSec,
     width,
     height,
     hasVideo: !!video,
     hasAudio: /Stream #\d+:\d+[^\n]*Audio:/.test(out),
+    hdr: /bt2020|smpte2084|arib-std-b67/i.test(videoLine),
   };
+}
+
+// HDR → SDR. Linear light, BT.709 primaries, Hable tone curve, back to
+// BT.709 TV range. Needs libzimg (zscale); ffmpeg-static ships it on macOS
+// and Linux, but check once so a build without it degrades to a plain
+// conversion instead of failing every render.
+const TONEMAP =
+  "zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p";
+let zscaleReady: Promise<boolean> | null = null;
+async function hasZscale(): Promise<boolean> {
+  if (!zscaleReady) {
+    zscaleReady = runFfmpeg(["-filters"], 60_000)
+      .then((o) => / zscale /.test(o))
+      .catch(() => false)
+      .then((ok) => {
+        if (!ok) console.warn("[studio] ffmpeg has no zscale filter; HDR sources will not be tone mapped");
+        return ok;
+      });
+  }
+  return zscaleReady;
+}
+// Filter prefix for an input chain: tone map when the source is HDR.
+async function hdrPrefix(hdr: boolean | undefined): Promise<string> {
+  return hdr && (await hasZscale()) ? TONEMAP + "," : "";
 }
 
 // Duration of the VIDEO track. The container "Duration:" line is the longest
@@ -155,6 +187,13 @@ const X264 = [
   "-preset", "veryfast",
   "-profile:v", "high",
   "-pix_fmt", "yuv420p",
+  // Every output is SDR BT.709 TV range, and says so. Without these tags an
+  // HDR input's bt2020 metadata rides through concat/overlay onto the whole
+  // file and players render the SDR parts with the wrong matrix.
+  "-color_primaries", "bt709",
+  "-color_trc", "bt709",
+  "-colorspace", "bt709",
+  "-color_range", "tv",
   "-movflags", "+faststart",
 ];
 const AAC = ["-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "128k"];
@@ -167,12 +206,13 @@ export async function normalizeClip(input: {
   out: string;
   maxSec: number;
   hasAudio: boolean;
+  hdr?: boolean;
   // "cover" crops to fill (background clips), "fit" keeps everything with a
   // blurred fill (demos, where the content matters).
   mode: "cover" | "fit";
 }): Promise<void> {
   const vf = input.mode === "cover" ? COVER : FIT_FILL;
-  const filter = "[0:v]" + vf + ",fps=" + FPS + ",format=yuv420p,setsar=1[v]";
+  const filter = "[0:v]" + (await hdrPrefix(input.hdr)) + vf + ",fps=" + FPS + ",format=yuv420p,setsar=1[v]";
   const args = [
     "-y",
     "-i", input.src,
@@ -210,7 +250,9 @@ export async function posterFrame(src: string, out: string, atSec = 0.3): Promis
 export async function renderStitch(input: {
   broll: string;
   brollHasAudio: boolean;
+  brollHdr?: boolean;
   demo: string;
+  demoHdr?: boolean;
   hookPng: string;
   explanationPng: string;
   hookSec: number;
@@ -220,11 +262,11 @@ export async function renderStitch(input: {
   const total = input.hookSec + input.explanationSec;
   const bgAudioIdx = input.brollHasAudio ? "0:a" : "4:a";
   const filter = [
-    "[0:v]" + COVER + ",fps=" + FPS + ",setsar=1,trim=duration=" + total + ",setpts=PTS-STARTPTS[bg]",
+    "[0:v]" + (await hdrPrefix(input.brollHdr)) + COVER + ",fps=" + FPS + ",setsar=1,trim=duration=" + total + ",setpts=PTS-STARTPTS[bg]",
     "[bg][2:v]overlay=0:0:enable='lt(t," + input.hookSec + ")'[bg1]",
     "[bg1][3:v]overlay=0:0:enable='gte(t," + input.hookSec + ")',format=yuv420p[v0]",
     "[" + bgAudioIdx + "]aresample=44100,atrim=duration=" + total + ",asetpts=PTS-STARTPTS[a0]",
-    "[1:v]fps=" + FPS + ",setsar=1,setpts=PTS-STARTPTS[v1]",
+    "[1:v]" + (await hdrPrefix(input.demoHdr)) + "fps=" + FPS + ",setsar=1,setpts=PTS-STARTPTS[v1]",
     "[1:a]aresample=44100,asetpts=PTS-STARTPTS[a1]",
     "[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a]",
   ].join(";");
@@ -255,12 +297,14 @@ export async function renderStitch(input: {
 export async function renderConcat(input: {
   first: string;
   second: string;
+  firstHdr?: boolean;
+  secondHdr?: boolean;
   out: string;
 }): Promise<void> {
   const filter = [
-    "[0:v]fps=" + FPS + ",setsar=1,setpts=PTS-STARTPTS[v0]",
+    "[0:v]" + (await hdrPrefix(input.firstHdr)) + "fps=" + FPS + ",setsar=1,setpts=PTS-STARTPTS[v0]",
     "[0:a]aresample=44100,asetpts=PTS-STARTPTS[a0]",
-    "[1:v]fps=" + FPS + ",setsar=1,setpts=PTS-STARTPTS[v1]",
+    "[1:v]" + (await hdrPrefix(input.secondHdr)) + "fps=" + FPS + ",setsar=1,setpts=PTS-STARTPTS[v1]",
     "[1:a]aresample=44100,asetpts=PTS-STARTPTS[a1]",
     "[v0][a0][v1][a1]concat=n=2:v=1:a=1,format=yuv420p[v][a]",
   ].join(";");
@@ -287,7 +331,9 @@ export async function renderConcat(input: {
 // demo.
 export async function renderPip(input: {
   reel: string;
+  reelHdr?: boolean;
   demo: string;
+  demoHdr?: boolean;
   hookSec: number;
   animSec: number;
   scale: number;
@@ -313,9 +359,9 @@ export async function renderPip(input: {
   // than tpad (which produced a demo-length track on the Linux build).
   const filter = [
     "color=c=black:s=" + OUT_W + "x" + OUT_H + ":r=" + FPS + ":d=" + h0 + ",format=yuv420p[blk]",
-    "[1:v]fps=" + FPS + ",setsar=1,setpts=PTS-STARTPTS,format=yuv420p[dv]",
+    "[1:v]" + (await hdrPrefix(input.demoHdr)) + "fps=" + FPS + ",setsar=1,setpts=PTS-STARTPTS,format=yuv420p[dv]",
     "[blk][dv]concat=n=2:v=1:a=0[base]",
-    "[0:v]fps=" + FPS + ",setsar=1,setpts=PTS-STARTPTS,scale=eval=frame:w='" + w + "':h='" + hh + "'[reel]",
+    "[0:v]" + (await hdrPrefix(input.reelHdr)) + "fps=" + FPS + ",setsar=1,setpts=PTS-STARTPTS,scale=eval=frame:w='" + w + "':h='" + hh + "'[reel]",
     "[base][reel]overlay=eval=frame:x='" + x + "':y='" + y + "':eof_action=pass,format=yuv420p[v]",
     "[0:a]aresample=44100,atrim=0:" + h0 + ",asetpts=PTS-STARTPTS[a0]",
     "[1:a]aresample=44100,asetpts=PTS-STARTPTS[a1]",
