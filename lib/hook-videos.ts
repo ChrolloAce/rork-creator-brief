@@ -6,7 +6,7 @@ import { sql, ensureSchema } from "./db";
 // pool. The scraper owns writes; the app only reads.
 export type HookVideo = {
   id: string;
-  platform: "instagram" | "upload";
+  platform: "instagram" | "youtube" | "upload";
   shortcode: string;
   account: string;
   url: string;
@@ -24,7 +24,7 @@ export type HookVideo = {
 
 type Row = {
   id: string;
-  platform: "instagram" | "upload";
+  platform: "instagram" | "youtube" | "upload";
   shortcode: string;
   account: string;
   url: string;

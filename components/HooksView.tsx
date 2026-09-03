@@ -177,7 +177,7 @@ export function HookCard({
           />
         )}
         <span className="absolute top-2 left-2 text-[10px] font-black uppercase tracking-widest bg-background text-ink px-1.5 py-0.5 border-2 border-line rounded-sm leading-none">
-          {video.platform === "upload" ? "REEL" : "IG"}
+          {video.platform === "upload" ? "REEL" : video.platform === "youtube" ? "YT" : "IG"}
         </span>
         {views && (
           <span className="absolute top-2 right-2 text-[10px] font-black uppercase tracking-widest bg-accent text-accent-ink px-1.5 py-0.5 border-2 border-line rounded-sm leading-none">
@@ -261,13 +261,13 @@ export function HookModal({
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted mb-1">
-                {video.platform === "upload" ? "Reel" : "Instagram"}
+                {video.platform === "upload" ? "Reel" : video.platform === "youtube" ? "YouTube" : "Instagram"}
               </div>
               {video.platform === "upload" ? (
                 <span className="text-lg font-black text-ink">{video.account}</span>
               ) : (
               <a
-                href={`https://instagram.com/${video.account}`}
+                href={video.platform === "youtube" ? `https://www.youtube.com/@${video.account}/shorts` : `https://instagram.com/${video.account}`}
                 target="_blank"
                 rel="noreferrer"
                 className="text-lg font-black text-ink hover:text-accent"
@@ -305,7 +305,7 @@ export function HookModal({
               rel="noreferrer"
               className="block w-full text-center border-2 border-line bg-ink text-background font-black uppercase tracking-wider text-sm py-3 rounded-md nb-press"
             >
-              {t(lang, "watchOn")} Instagram ↗
+              {t(lang, "watchOn")} {video.platform === "youtube" ? "YouTube" : "Instagram"} ↗
             </a>
           </div>
           )}
