@@ -604,6 +604,9 @@ export function Studio({
                       )}
                     </ul>
                   )}
+                  <div className="mt-3">
+                    <JoinRow config={config} lang={lang} />
+                  </div>
                 </GsStep>
                 {showcase.length > 0 && (
                   <GsStep n={next()} title={t(lang, "outcomeHeading")}>
@@ -699,6 +702,9 @@ export function Studio({
               </li>
             ))}
           </ol>
+          <div className="mt-3">
+            <JoinRow config={config} lang={lang} />
+          </div>
           <button
             type="button"
             onClick={() => void markAccountsDone()}
@@ -902,6 +908,27 @@ function StepTile({
 }
 
 /* ------------------------ step 1: getting started ----------------------- */
+
+// The sign-up that makes them part of the campaign. Loud on purpose.
+function JoinRow({ config, lang }: { config: StudioPublicConfig; lang: Lang }) {
+  if (!config.joinUrl) return null;
+  return (
+    <div className="border-2 border-line bg-accent text-accent-ink rounded-md p-3 flex items-center gap-3">
+      <div className="min-w-0 flex-1">
+        <div className="font-black leading-tight">{t(lang, "joinTitle")}</div>
+        <div className="text-xs opacity-90 mt-0.5">{t(lang, "joinBody")}</div>
+      </div>
+      <a
+        href={config.joinUrl}
+        target="_blank"
+        rel="noreferrer"
+        className="shrink-0 border-2 border-line bg-background text-ink px-4 py-2 rounded-md nb-press text-xs font-black uppercase tracking-widest"
+      >
+        {config.joinLabel || t(lang, "joinCta")} ↗
+      </a>
+    </div>
+  );
+}
 
 function PlatformTile({ name, icon }: { name: string; icon: React.ReactNode }) {
   return (

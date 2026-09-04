@@ -89,6 +89,10 @@ export type StudioConfig = {
   // "Create your accounts" card on the calendar, one bullet per line, with
   // ==highlight== markup. Hidden once the creator taps Done.
   accountsGuide?: string;
+  // Where creators must sign up to join the campaign. Shown as a button in
+  // step 1 and on the accounts card.
+  joinUrl?: string;
+  joinLabel?: string;
 };
 
 export type StudioAsset = {
@@ -269,6 +273,8 @@ export type StudioPublicConfig = {
   payCapViews: string;
   payoutCadence: string;
   accountsGuide: string[];
+  joinUrl: string;
+  joinLabel: string;
   autoFill: boolean;
   perDay: number;
   daysAhead: number;
@@ -302,6 +308,8 @@ export function publicStudioConfig(c: StudioConfig): StudioPublicConfig {
     payCapViews: c.payCapViews?.trim() ?? "",
     payoutCadence: c.payoutCadence?.trim() ?? "",
     accountsGuide: guideLines(c.accountsGuide),
+    joinUrl: c.joinUrl?.trim() ?? "",
+    joinLabel: c.joinLabel?.trim() ?? "",
     ...scheduleSettings(c),
   };
 }

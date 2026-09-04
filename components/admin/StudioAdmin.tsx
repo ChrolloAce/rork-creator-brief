@@ -611,6 +611,16 @@ export function StudioAdmin({
             automatically.
           </p>
         </div>
+        <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_220px] gap-3">
+          <label className="block">
+            <span className={label}>Sign-up link to join the campaign (step 1 + accounts card)</span>
+            <input type="url" value={cfg.joinUrl ?? ""} placeholder="https://…" onChange={(e) => set({ joinUrl: e.target.value })} className={input} />
+          </label>
+          <label className="block">
+            <span className={label}>Button label</span>
+            <input type="text" value={cfg.joinLabel ?? ""} placeholder="Sign up" onChange={(e) => set({ joinLabel: e.target.value })} className={input} />
+          </label>
+        </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <label className="block">
             <span className={label}>CPM (step 1 pitch)</span>
