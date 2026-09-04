@@ -109,6 +109,7 @@ export async function ingestClip(input: {
   try {
     await withSlot(async () => {
       const info = await probe(file);
+      log(clipId, `source: ${info.width}x${info.height} ${info.durationSec.toFixed(1)}s audio=${info.hasAudio ? "yes" : "NO"} hdr=${info.hdr ? "yes" : "no"}`);
       if (!info.hasVideo) throw new Error("That file does not look like a video.");
       if (info.durationSec < 0.5) throw new Error("That clip is too short.");
       const out = path.join(dir, "norm.mp4");
