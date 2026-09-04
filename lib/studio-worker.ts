@@ -151,6 +151,52 @@ export async function ingestClip(input: {
   }
 }
 
+// Server-side import: fetch a clip the server can reach, cut it to
+// [startSec, endSec], then run the normal ingest on the result. Used by the
+// admin to turn a library reel (or any public file) into a showcase/example.
+export async function importClipFromUrl(input: {
+  clipId: string;
+  kind: StudioClipKind;
+  url: string;
+  startSec: number;
+  endSec?: number;
+  filename: string | null;
+}): Promise<void> {
+  const dir = await mkdtemp(path.join(tmpdir(), "studio-imp-"));
+  const raw = path.join(dir, "raw.mp4");
+  const cut = path.join(dir, "cut.mp4");
+  try {
+    const res = await fetch(input.url);
+    if (!res.ok || !res.body) throw new Error(`Could not fetch the clip (${res.status}).`);
+    await pipeline(
+      Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]),
+      createWriteStream(raw)
+    );
+    let src = raw;
+    if (input.startSec > 0 || input.endSec) {
+      const { runFfmpeg } = await import("./studio-ffmpeg");
+      await runFfmpeg([
+        "-y",
+        "-ss", String(input.startSec),
+        ...(input.endSec ? ["-to", String(input.endSec)] : []),
+        "-i", raw,
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        "-c:a", "aac", "-ar", "44100", "-ac", "2",
+        "-movflags", "+faststart",
+        cut,
+      ]);
+      src = cut;
+    }
+    // ingestClip owns the directory from here (and removes it).
+    await ingestClip({ clipId: input.clipId, kind: input.kind, dir, file: src, filename: input.filename });
+  } catch (e) {
+    const msg = (e as Error).message || "Import failed.";
+    log(input.clipId, `import error: ${msg}`);
+    await updateStudioClip(input.clipId, { status: "error", error: msg.slice(0, 300) }).catch(() => {});
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
 /* ------------------------------- renders -------------------------------- */
 
 async function blobToFile(blobId: string, file: string): Promise<void> {

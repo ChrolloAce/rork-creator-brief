@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { t, type Lang } from "@/lib/i18n";
@@ -12,7 +11,6 @@ import {
   type StudioPublicConfig,
   type StudioRender,
 } from "@/lib/studio";
-import { HookCard, HookModal } from "./HooksView";
 import { parseScriptLines } from "@/lib/script-lines";
 
 // The Video Builder, creator side. Two steps, one at a time:
@@ -792,8 +790,7 @@ function DemosPanel({
   demoCount: number;
   readyCount: number;
 }) {
-  const { config, demos, examples, library, libraryCount } = state;
-  const [openReel, setOpenReel] = useState<HookVideo | null>(null);
+  const { config, demos, examples, showcase } = state;
   const remaining = Math.max(0, minDemos - readyCount);
   const pct = Math.min(100, Math.round((readyCount / minDemos) * 100));
 
@@ -842,32 +839,30 @@ function DemosPanel({
         </section>
       )}
 
-      {showGuide && library.length > 0 && (
-        <section className="space-y-2">
-          <div className="flex items-end justify-between gap-3">
-            <div>
-              <div className={label}>{t(lang, "reelsToStudy")}</div>
-              <p className="text-xs text-muted mt-0.5">{t(lang, "hooksIntro")}</p>
+      {showGuide && showcase.length > 0 && (
+        <section className="border-2 border-line bg-ink text-background rounded-md nb-shadow p-4 space-y-3">
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.2em] font-bold opacity-70">
+              {t(lang, "outcomeLabel")}
             </div>
-            {libraryCount > library.length && (
-              <Link
-                href={`/b/${briefSlug}/hooks`}
-                className="shrink-0 text-[10px] font-black uppercase tracking-widest text-muted hover:text-accent"
-              >
-                {t(lang, "seeAllReels")} ({libraryCount}) →
-              </Link>
-            )}
+            <div className="font-black text-lg leading-tight">{t(lang, "outcomeHeading")}</div>
+            <p className="text-xs opacity-80 mt-0.5">{t(lang, "outcomeHint")}</p>
           </div>
-          <ul className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
-            {library.map((v) => (
-              <li key={v.id} className="shrink-0 w-32 sm:w-36">
-                <HookCard video={v} onOpen={setOpenReel} />
+          <ul className="flex gap-3 overflow-x-auto pb-1 -mx-1 px-1">
+            {showcase.map((e) => (
+              <li key={e.id} className="shrink-0 w-56 sm:w-64">
+                <video
+                  src={e.url ?? undefined}
+                  poster={e.posterUrl ?? undefined}
+                  controls
+                  playsInline
+                  preload="metadata"
+                  className="w-full aspect-[9/16] bg-black border-2 border-background rounded-md object-cover"
+                />
+                {e.label && <div className="text-[11px] font-bold truncate mt-1">{e.label}</div>}
               </li>
             ))}
           </ul>
-          {openReel && (
-            <HookModal video={openReel} lang={lang} onClose={() => setOpenReel(null)} />
-          )}
         </section>
       )}
 
@@ -1236,7 +1231,7 @@ function CreateSection({
             ))}
           </ol>
         )}
-        {showcase.length > 0 && (
+        {showcase.length > 0 && !defaultOpen && (
           <div>
             <div className={label}>{t(lang, "finishedExample")}</div>
             <ul className="mt-2 flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
