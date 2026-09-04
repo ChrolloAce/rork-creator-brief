@@ -630,6 +630,16 @@ export function StudioAdmin({
           </label>
         </div>
         <label className="block">
+          <span className={label}>Create your accounts (card on the calendar; one line per bullet; ==highlight== works)</span>
+          <textarea
+            value={cfg.accountsGuide ?? ""}
+            rows={4}
+            placeholder={"Make a new account on TikTok, Instagram and YouTube.\nName it like ==Your Name AI==."}
+            onChange={(e) => set({ accountsGuide: e.target.value })}
+            className={input}
+          />
+        </label>
+        <label className="block">
           <span className={label}>Script creators follow (start a line with 00:03 for a timestamp)</span>
           <textarea
             value={cfg.script ?? ""}

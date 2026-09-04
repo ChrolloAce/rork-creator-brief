@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { listStudioClips, listStudioRenders } from "@/lib/db";
+import { getStudioFlags, listStudioClips, listStudioRenders } from "@/lib/db";
 import { isYmd, publicStudioConfig, todayYmdUtc } from "@/lib/studio";
 import { getHookVideos, getHookVideosByIds } from "@/lib/hook-videos";
 import { ensureSchedule } from "@/lib/studio-plan";
@@ -31,13 +31,14 @@ export async function GET(
     isAdmin: ctx.viewer.isAdmin,
     today,
   }).catch((e) => ({ created: 0, reason: (e as Error).message }));
-  const [demos, broll, examples, showcase, renders, library] = await Promise.all([
+  const [demos, broll, examples, showcase, renders, library, flags] = await Promise.all([
     listStudioClips(slug, { kind: "demo", userId: ctx.viewer.id }),
     listStudioClips(slug, { kind: "broll" }),
     listStudioClips(slug, { kind: "example" }),
     listStudioClips(slug, { kind: "showcase" }),
     listStudioRenders(slug, ctx.viewer.id),
     getHookVideos(slug),
+    getStudioFlags(slug, ctx.viewer.id),
   ]);
   // Curated study reels replace the library preview outright.
   const rawStudy = ctx.config.studyReelIds;
@@ -57,5 +58,6 @@ export async function GET(
     libraryCount: study ? study.length : library.length,
     library: study ?? library.slice(0, 12),
     filled: fill.created,
+    flags,
   });
 }

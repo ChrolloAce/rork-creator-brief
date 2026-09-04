@@ -721,6 +721,17 @@ async function runSchema() {
   await sql`CREATE INDEX IF NOT EXISTS studio_render_day_idx ON studio_render (brief_slug, user_id, scheduled_for)`;
   await sql`CREATE INDEX IF NOT EXISTS studio_render_brief_idx ON studio_render (brief_slug, user_id, created_at DESC)`;
   await sql`CREATE INDEX IF NOT EXISTS studio_render_status_idx ON studio_render (status)`;
+  // Small per-creator switches for the builder ("I made my accounts").
+  await sql`
+    CREATE TABLE IF NOT EXISTS studio_creator_flag (
+      brief_slug TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      key TEXT NOT NULL,
+      value JSONB NOT NULL DEFAULT 'true'::jsonb,
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (brief_slug, user_id, key)
+    )
+  `;
 
   // Seed Rork brief if none exists
   const existing = await sql`SELECT slug FROM brief`;
@@ -2194,6 +2205,33 @@ export async function listStudioUsers(
   `;
   if (Number(admin[0]?.n ?? 0) > 0) rows.push({ id: "_admin", name: "Admin", email: null });
   return rows;
+}
+
+export async function getStudioFlags(
+  briefSlug: string,
+  userId: string
+): Promise<Record<string, unknown>> {
+  await ensureSchema();
+  const sql = getSql();
+  const rows = await sql<{ key: string; value: unknown }[]>`
+    SELECT key, value FROM studio_creator_flag WHERE brief_slug = ${briefSlug} AND user_id = ${userId}
+  `;
+  return Object.fromEntries(rows.map((r) => [r.key, r.value]));
+}
+
+export async function setStudioFlag(
+  briefSlug: string,
+  userId: string,
+  key: string,
+  value: unknown
+): Promise<void> {
+  await ensureSchema();
+  const sql = getSql();
+  await sql`
+    INSERT INTO studio_creator_flag (brief_slug, user_id, key, value)
+    VALUES (${briefSlug}, ${userId}, ${key}, ${sql.json(value as never)})
+    ON CONFLICT (brief_slug, user_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+  `;
 }
 
 export async function countStudioClips(

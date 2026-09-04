@@ -86,6 +86,9 @@ export type StudioConfig = {
   payMaxPerVideo?: string; // "$6,000"
   payCapViews?: string; // "1,000,000"
   payoutCadence?: string; // "Daily"
+  // "Create your accounts" card on the calendar, one bullet per line, with
+  // ==highlight== markup. Hidden once the creator taps Done.
+  accountsGuide?: string;
 };
 
 export type StudioAsset = {
@@ -265,6 +268,7 @@ export type StudioPublicConfig = {
   payMaxPerVideo: string;
   payCapViews: string;
   payoutCadence: string;
+  accountsGuide: string[];
   autoFill: boolean;
   perDay: number;
   daysAhead: number;
@@ -297,6 +301,7 @@ export function publicStudioConfig(c: StudioConfig): StudioPublicConfig {
     payMaxPerVideo: c.payMaxPerVideo?.trim() ?? "",
     payCapViews: c.payCapViews?.trim() ?? "",
     payoutCadence: c.payoutCadence?.trim() ?? "",
+    accountsGuide: guideLines(c.accountsGuide),
     ...scheduleSettings(c),
   };
 }

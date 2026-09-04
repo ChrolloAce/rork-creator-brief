@@ -34,6 +34,7 @@ type State = {
   renders: StudioRender[];
   // The creator's local date, echoed back by the server.
   today: string;
+  flags?: Record<string, unknown>;
 };
 
 type Upload = { key: string; name: string; progress: number; error?: string };
@@ -334,6 +335,29 @@ export function Studio({
   const [manageOpen, setManageOpen] = useState(false);
   // Which calendar day is open in step 2 (null = today).
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  // "I made my accounts": server-side per creator; the admin pseudo-user has
+  // no roster row, so it falls back to this browser.
+  const [accountsDoneLocal, setAccountsDoneLocal] = useState(false);
+  useEffect(() => {
+    try {
+      if (localStorage.getItem(`sb-accounts-done:${briefSlug}`) === "1") setAccountsDoneLocal(true);
+    } catch {
+      /* storage blocked */
+    }
+  }, [briefSlug]);
+  async function markAccountsDone() {
+    setAccountsDoneLocal(true);
+    try {
+      localStorage.setItem(`sb-accounts-done:${briefSlug}`, "1");
+    } catch {
+      /* storage blocked */
+    }
+    await fetch(`/api/studio/${encodeURIComponent(briefSlug)}/flags`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: "accountsDone", value: true }),
+    }).catch(() => {});
+  }
   const fileInput = useRef<HTMLInputElement | null>(null);
   const resultRef = useRef<HTMLDivElement | null>(null);
 
@@ -506,6 +530,7 @@ export function Studio({
   const dayIdx = days.indexOf(day);
   const forDay = (d: string) => renders.filter((r) => r.scheduledFor === d);
   const dayRenders = forDay(day);
+  const accountsDone = accountsDoneLocal || state.flags?.accountsDone === true;
   const earlier = renders.filter((r) => r.scheduledFor < today);
   const inFillWindow = days.indexOf(day) < config.daysAhead;
   const dayBusy = dayRenders.some((r) => r.status === "queued" || r.status === "processing");
@@ -657,6 +682,31 @@ export function Studio({
             lang={lang}
           />
         </ol>
+      )}
+
+      {step === 2 && config.accountsGuide.length > 0 && !accountsDone && (
+        <section className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 sm:p-5">
+          <h2 className="text-xl font-black leading-tight">{t(lang, "accountsTitle")}</h2>
+          <ol className="mt-3 space-y-2">
+            {config.accountsGuide.map((line, i) => (
+              <li key={i} className="flex items-start gap-2.5 text-sm sm:text-base leading-snug">
+                <span className="w-5 h-5 shrink-0 border-2 border-line bg-paper rounded-sm flex items-center justify-center text-[10px] font-black mt-0.5">
+                  {i + 1}
+                </span>
+                <span>
+                  <InlineRich text={line} />
+                </span>
+              </li>
+            ))}
+          </ol>
+          <button
+            type="button"
+            onClick={() => void markAccountsDone()}
+            className="mt-4 border-2 border-line bg-ink text-background px-4 py-2.5 rounded-md nb-press text-xs font-black uppercase tracking-widest"
+          >
+            ✓ {t(lang, "accountsDone")}
+          </button>
+        </section>
       )}
 
       {step === 2 && (
