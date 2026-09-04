@@ -792,7 +792,7 @@ function DemosPanel({
     <div className="space-y-5">
       {showGuide && (config.script || config.recordGuide.length > 0 || examples.length > 0) && (
         <section className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 space-y-4">
-          {config.script && <ScriptBlock script={config.script} lang={lang} />}
+          {config.script && <ScriptBlock script={config.script} assets={config.assets} lang={lang} />}
           {config.recordGuide.length > 0 && (
             <div>
               <div className={label}>{t(lang, "howToRecord")}</div>
@@ -1016,9 +1016,18 @@ function DemosPanel({
 
 // The lines a creator reads while recording, with the timestamp each one
 // lands on. Same "00:03 line" convention as the format scripts.
-function ScriptBlock({ script, lang }: { script: string; lang: Lang }) {
+function ScriptBlock({
+  script,
+  assets = [],
+  lang,
+}: {
+  script: string;
+  assets?: StudioAsset[];
+  lang: Lang;
+}) {
   const lines = parseScriptLines(script);
   if (lines.length === 0) return null;
+  const pinned = (ts: string | undefined) => (ts ? assets.filter((a) => a.at === ts) : []);
   return (
     <div>
       <div className="flex items-center justify-between gap-2">
@@ -1029,16 +1038,64 @@ function ScriptBlock({ script, lang }: { script: string; lang: Lang }) {
         <CopyButton value={script} text={t(lang, "copyScript")} lang={lang} tone="plain" />
       </div>
       <ol className="mt-2 border-2 border-line bg-paper rounded-md divide-y-2 divide-line">
-        {lines.map((l, i) => (
-          <li key={i} className="flex items-start gap-3 px-3 py-2">
-            <span className="shrink-0 w-12 border-2 border-line bg-background rounded-sm text-center text-[10px] font-black py-0.5 font-mono mt-0.5">
-              {l.timestamp ?? `#${i + 1}`}
-            </span>
-            <span className="text-sm leading-snug font-medium">{l.body}</span>
-          </li>
-        ))}
+        {lines.map((l, i) => {
+          const here = pinned(l.timestamp);
+          return (
+            <li key={i} className="px-3 py-2">
+              <div className="flex items-start gap-3">
+                <span className="shrink-0 w-12 border-2 border-line bg-background rounded-sm text-center text-[10px] font-black py-0.5 font-mono mt-0.5">
+                  {l.timestamp ?? `#${i + 1}`}
+                </span>
+                <span className="text-sm leading-snug font-medium flex-1 min-w-0">{l.body}</span>
+              </div>
+              {here.length > 0 && (
+                <ul className="mt-2 ml-[60px] flex flex-wrap gap-2">
+                  {here.map((a) => (
+                    <PinnedAsset key={a.id} asset={a} lang={lang} />
+                  ))}
+                </ul>
+              )}
+            </li>
+          );
+        })}
       </ol>
     </div>
+  );
+}
+
+// An overlay pinned to a script line: thumbnail, what it is, and Download.
+function PinnedAsset({ asset, lang }: { asset: StudioAsset; lang: Lang }) {
+  const isImage = asset.mime.startsWith("image/");
+  const isVideo = asset.mime.startsWith("video/");
+  const dl = `${asset.url}${asset.url.includes("?") ? "&" : "?"}download=1`;
+  return (
+    <li className="flex items-center gap-2 border-2 border-line bg-background rounded-md p-1.5 pr-2 max-w-full">
+      <span className="w-14 h-14 shrink-0 border-2 border-line bg-paper rounded-sm overflow-hidden flex items-center justify-center">
+        {isImage ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img src={asset.url} alt="" className="w-full h-full object-contain" loading="lazy" />
+        ) : isVideo ? (
+          <video src={asset.url} muted playsInline preload="metadata" className="w-full h-full object-cover bg-ink" />
+        ) : (
+          <span className="text-[9px] font-bold text-muted">file</span>
+        )}
+      </span>
+      <span className="min-w-0">
+        <span className="block text-[11px] font-bold leading-tight truncate max-w-[140px]">
+          {asset.label?.trim() || asset.filename || (isImage ? "Image" : "Video")}
+        </span>
+        <span className="block text-[9px] uppercase tracking-widest font-bold text-muted">
+          {isVideo ? t(lang, "videoWord") : "overlay"}
+        </span>
+      </span>
+      <a
+        href={dl}
+        download
+        className="shrink-0 border-2 border-line bg-ink text-background px-2 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+      >
+        ⬇
+      </a>
+    </li>
   );
 }
 
@@ -1106,7 +1163,9 @@ function CreateSection({
         </span>
       </summary>
       <div className="border-t-2 border-line p-4 space-y-4">
-        {config.script && !defaultOpen && <ScriptBlock script={config.script} lang={lang} />}
+        {config.script && !defaultOpen && (
+          <ScriptBlock script={config.script} assets={config.assets} lang={lang} />
+        )}
         {config.createGuide.length > 0 && (
           <ol className="space-y-1.5">
             {config.createGuide.map((line, i) => (

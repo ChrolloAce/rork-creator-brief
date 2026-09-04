@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { parseScriptLines } from "@/lib/script-lines";
 import {
   STUDIO_DEFAULTS,
   buildCaption,
@@ -193,6 +194,9 @@ export function StudioAdmin({
   const examples = (activity?.clips ?? []).filter((c) => c.kind === "example");
   const showcase = (activity?.clips ?? []).filter((c) => c.kind === "showcase");
   const assets = cfg.assets ?? [];
+  const scriptStamps = parseScriptLines(cfg.script ?? "")
+    .map((l) => l.timestamp)
+    .filter((x): x is string => !!x);
   const creators = activity?.creators ?? [];
   const readyCreators = creators.filter((c) => c.ready);
   const week = Array.from({ length: 7 }, (_, i) => localYmd(i));
@@ -850,11 +854,29 @@ export function StudioAdmin({
                     }
                     className="w-full border-2 border-line rounded-sm px-1.5 py-1 text-xs bg-background focus:outline-none focus:border-accent"
                   />
+                  <select
+                    value={a.at ?? ""}
+                    onChange={(e) =>
+                      set({ assets: assets.map((x) => (x.id === a.id ? { ...x, at: e.target.value || undefined } : x)) })
+                    }
+                    className="w-full border-2 border-line rounded-sm px-1.5 py-1 text-xs bg-background focus:outline-none focus:border-accent"
+                    title="Show beside this script line"
+                  >
+                    <option value="">Not pinned to the script</option>
+                    {scriptStamps.map((ts) => (
+                      <option key={ts} value={ts}>
+                        Overlay at {ts}
+                      </option>
+                    ))}
+                  </select>
                   <div className="text-[10px] text-muted truncate">{a.filename}</div>
                 </div>
               </li>
             ))}
           </ul>
+        )}
+        {assets.length > 0 && scriptStamps.length === 0 && (
+          <p className="text-[11px] text-muted">Add timestamps to the script above to pin assets to lines.</p>
         )}
       </div>
 

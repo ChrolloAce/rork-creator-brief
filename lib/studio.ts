@@ -89,6 +89,9 @@ export type StudioAsset = {
   mime: string;
   filename?: string;
   label?: string;
+  // Script timestamp ("00:07") this asset is overlaid at. Pinned assets show
+  // beside that line of the script; unpinned ones sit in the asset grid.
+  at?: string;
 };
 
 export function newAssetId(): string {
