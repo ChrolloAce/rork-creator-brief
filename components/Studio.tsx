@@ -12,6 +12,7 @@ import {
   type StudioRender,
 } from "@/lib/studio";
 import { parseScriptLines } from "@/lib/script-lines";
+import { InlineRich } from "./RichText";
 
 // The Video Builder, creator side. Two steps, one at a time:
 //   1. Record your demos: how to record, example demos, reels to study, and
@@ -518,7 +519,6 @@ export function Studio({
       onFiles={onFiles}
       onDelete={deleteClip}
       onDismissUpload={(key) => setUploads((x) => x.filter((y) => y.key !== key))}
-      showGuide={step === 1}
       minDemos={minDemos}
       demoCount={demoCount}
       readyCount={readyDemos.length}
@@ -531,41 +531,104 @@ export function Studio({
       <header>
         <div className={label}>{t(lang, "makeSection")}</div>
         <h1 className="text-3xl sm:text-4xl font-black tracking-tight mt-1">{title}</h1>
-        {config.intro && (
+        {config.intro && step === 2 && (
           <p className="text-muted mt-2 max-w-prose whitespace-pre-wrap">{config.intro}</p>
         )}
       </header>
 
-      {/* Step indicator */}
-      <ol className="grid grid-cols-2 gap-2">
-        <StepTile
-          n={1}
-          active={step === 1}
-          done={unlocked}
-          title={t(lang, "stepRecord")}
-          sub={
-            unlocked
-              ? `${readyDemos.length} ${t(lang, "ready").toLowerCase()}`
-              : minDemos === 1
-                ? t(lang, "stepRecordSubOne")
-                : t(lang, "stepRecordSub").replace("{min}", String(minDemos))
-          }
-          lang={lang}
-        />
-        <StepTile
-          n={2}
-          active={step === 2}
-          done={false}
-          locked={!unlocked}
-          title={t(lang, "stepGenerate")}
-          sub={t(lang, "stepGenerateSub")}
-          lang={lang}
-        />
-      </ol>
-
-      {step === 1 && demosPanel}
       {step === 1 && (
-        <CreateSection config={config} showcase={state.showcase} lang={lang} defaultOpen />
+        <ol className="space-y-4">
+          {(() => {
+            let n = 0;
+            const next = () => ++n;
+            const showcase = state.showcase;
+            const hasHowTo =
+              !!config.script || config.createGuide.length > 0 || config.assets.length > 0;
+            const loose = config.assets.filter((a) => !a.at);
+            return (
+              <>
+                <GsStep n={next()} title={t(lang, "gs1Title")}>
+                  <p className="text-base sm:text-lg leading-snug">
+                    <InlineRich text={t(lang, "gs1Body")} />
+                  </p>
+                </GsStep>
+                {showcase.length > 0 && (
+                  <GsStep n={next()} title={t(lang, "outcomeHeading")}>
+                    <ul className="flex gap-3 overflow-x-auto pb-1 -mx-1 px-1">
+                      {showcase.map((e) => (
+                        <li key={e.id} className="shrink-0 w-56 sm:w-64">
+                          <video
+                            src={e.url ?? undefined}
+                            poster={e.posterUrl ?? undefined}
+                            controls
+                            playsInline
+                            preload="metadata"
+                            className="w-full aspect-[9/16] bg-ink border-2 border-line rounded-md object-cover"
+                          />
+                        </li>
+                      ))}
+                    </ul>
+                  </GsStep>
+                )}
+                {hasHowTo && (
+                  <GsStep n={next()} title={t(lang, "gs3Title")}>
+                    <div className="space-y-4">
+                      {config.script && (
+                        <ScriptBlock script={config.script} assets={config.assets} lang={lang} />
+                      )}
+                      {config.createGuide.length > 0 && (
+                        <ol className="space-y-1.5">
+                          {config.createGuide.map((line, i) => (
+                            <li key={i} className="flex items-start gap-2.5 text-sm leading-snug">
+                              <span className="w-5 h-5 shrink-0 border-2 border-line bg-paper rounded-sm flex items-center justify-center text-[10px] font-black mt-0.5">
+                                {i + 1}
+                              </span>
+                              <span>{line}</span>
+                            </li>
+                          ))}
+                        </ol>
+                      )}
+                      {loose.length > 0 && (
+                        <ul className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                          {loose.map((a) => (
+                            <AssetTile key={a.id} asset={a} lang={lang} />
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </GsStep>
+                )}
+                <GsStep n={next()} title={t(lang, "gs4Title")}>
+                  <p className="text-sm leading-snug mb-3">
+                    <InlineRich text={t(lang, "gs4Body")} />
+                  </p>
+                  {demosPanel}
+                </GsStep>
+              </>
+            );
+          })()}
+        </ol>
+      )}
+
+      {step === 2 && (
+        <ol className="grid grid-cols-2 gap-2">
+          <StepTile
+            n={1}
+            active={false}
+            done
+            title={t(lang, "stepRecord")}
+            sub={`${readyDemos.length} ${t(lang, "ready").toLowerCase()}`}
+            lang={lang}
+          />
+          <StepTile
+            n={2}
+            active
+            done={false}
+            title={t(lang, "stepGenerate")}
+            sub={t(lang, "stepGenerateSub")}
+            lang={lang}
+          />
+        </ol>
       )}
 
       {step === 2 && (
@@ -760,6 +823,22 @@ function StepTile({
   );
 }
 
+/* ------------------------ step 1: getting started ----------------------- */
+
+function GsStep({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
+  return (
+    <li className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 sm:p-5">
+      <div className="flex items-center gap-3 mb-3">
+        <span className="w-9 h-9 shrink-0 border-2 border-line bg-ink text-background rounded-md flex items-center justify-center text-lg font-black">
+          {n}
+        </span>
+        <h2 className="text-xl sm:text-2xl font-black leading-tight">{title}</h2>
+      </div>
+      {children}
+    </li>
+  );
+}
+
 /* --------------------------- step 1: demos ------------------------------ */
 
 function DemosPanel({
@@ -770,7 +849,6 @@ function DemosPanel({
   onFiles,
   onDelete,
   onDismissUpload,
-  showGuide,
   minDemos,
   demoCount,
   readyCount,
@@ -782,87 +860,16 @@ function DemosPanel({
   onFiles: (files: FileList | null) => void;
   onDelete: (id: string) => void;
   onDismissUpload: (key: string) => void;
-  showGuide: boolean;
   minDemos: number;
   demoCount: number;
   readyCount: number;
 }) {
-  const { config, demos, examples, showcase } = state;
+  const { config, demos } = state;
   const remaining = Math.max(0, minDemos - readyCount);
   const pct = Math.min(100, Math.round((readyCount / minDemos) * 100));
 
   return (
     <div className="space-y-5">
-      {showGuide && (config.script || config.recordGuide.length > 0 || examples.length > 0) && (
-        <section className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 space-y-4">
-          {config.script && <ScriptBlock script={config.script} assets={config.assets} lang={lang} />}
-          {config.recordGuide.length > 0 && (
-            <div>
-              <div className={label}>{t(lang, "howToRecord")}</div>
-              <ol className="mt-2 space-y-1.5">
-                {config.recordGuide.map((line, i) => (
-                  <li key={i} className="flex items-start gap-2.5 text-sm leading-snug">
-                    <span className="w-5 h-5 shrink-0 border-2 border-line bg-paper rounded-sm flex items-center justify-center text-[10px] font-black mt-0.5">
-                      {i + 1}
-                    </span>
-                    <span>{line}</span>
-                  </li>
-                ))}
-              </ol>
-            </div>
-          )}
-          {examples.length > 0 && (
-            <div>
-              <div className={label}>{t(lang, "exampleDemos")}</div>
-              <ul className="mt-2 flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
-                {examples.map((e) => (
-                  <li key={e.id} className="shrink-0 w-32 sm:w-36">
-                    <video
-                      src={e.url ?? undefined}
-                      poster={e.posterUrl ?? undefined}
-                      controls
-                      playsInline
-                      preload="none"
-                      className="w-full aspect-[9/16] bg-ink border-2 border-line rounded-md object-cover"
-                    />
-                    {(e.label || e.filename) && (
-                      <div className="text-[10px] font-bold truncate mt-1">{e.label || e.filename}</div>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </section>
-      )}
-
-      {showGuide && showcase.length > 0 && (
-        <section className="border-2 border-line bg-ink text-background rounded-md nb-shadow p-4 space-y-3">
-          <div>
-            <div className="text-[10px] uppercase tracking-[0.2em] font-bold opacity-70">
-              {t(lang, "outcomeLabel")}
-            </div>
-            <div className="font-black text-lg leading-tight">{t(lang, "outcomeHeading")}</div>
-            <p className="text-xs opacity-80 mt-0.5">{t(lang, "outcomeHint")}</p>
-          </div>
-          <ul className="flex gap-3 overflow-x-auto pb-1 -mx-1 px-1">
-            {showcase.map((e) => (
-              <li key={e.id} className="shrink-0 w-56 sm:w-64">
-                <video
-                  src={e.url ?? undefined}
-                  poster={e.posterUrl ?? undefined}
-                  controls
-                  playsInline
-                  preload="metadata"
-                  className="w-full aspect-[9/16] bg-black border-2 border-background rounded-md object-cover"
-                />
-                {e.label && <div className="text-[11px] font-bold truncate mt-1">{e.label}</div>}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
       {/* Upload + progress */}
       <section className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 space-y-3">
         <div className="flex items-end justify-between gap-3 flex-wrap">
