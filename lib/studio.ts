@@ -72,7 +72,25 @@ export type StudioConfig = {
   pipCorner?: PipCorner;
   // Corner size as a fraction of the frame width (0.2 to 0.5).
   pipScale?: number;
+  // "How to create your video": plain text, one bullet per line, shown with
+  // the assets and the finished example (studio_clip kind "showcase").
+  createGuide?: string;
+  // Images and videos creators download to build or edit their videos.
+  // Stored through /api/uploads like format assets.
+  assets?: StudioAsset[];
 };
+
+export type StudioAsset = {
+  id: string;
+  url: string;
+  mime: string;
+  filename?: string;
+  label?: string;
+};
+
+export function newAssetId(): string {
+  return `a_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
+}
 
 export type StudioTransition = "cut" | "pip";
 export type PipCorner = "bottom-left" | "top-left" | "bottom-right" | "top-right";
@@ -229,10 +247,19 @@ export type StudioPublicConfig = {
   opening: StudioOpening;
   libraryHookSec: number;
   recordGuide: string[];
+  createGuide: string[];
+  assets: StudioAsset[];
   autoFill: boolean;
   perDay: number;
   daysAhead: number;
 };
+
+function guideLines(v: string | undefined): string[] {
+  return (v ?? "")
+    .split(/\r?\n/)
+    .map((l) => l.replace(/^\s*[-*•]\s*/, "").trim())
+    .filter(Boolean);
+}
 
 export function publicStudioConfig(c: StudioConfig): StudioPublicConfig {
   return {
@@ -246,18 +273,18 @@ export function publicStudioConfig(c: StudioConfig): StudioPublicConfig {
     maxDemoSec: STUDIO_DEFAULTS.maxDemoSec,
     opening: studioOpening(c),
     libraryHookSec: effectiveLibraryHookSec(c),
-    recordGuide: (c.recordGuide ?? "")
-      .split(/\r?\n/)
-      .map((l) => l.replace(/^\s*[-*•]\s*/, "").trim())
-      .filter(Boolean),
+    recordGuide: guideLines(c.recordGuide),
+    createGuide: guideLines(c.createGuide),
+    assets: (c.assets ?? []).filter((a) => a && a.url),
     ...scheduleSettings(c),
   };
 }
 
 // Row shapes shared by the API and the client.
 // demo: a creator's own clip. broll: admin background clip. example: admin
-// "here is what a good demo looks like" clip, shown in step 1.
-export type StudioClipKind = "demo" | "broll" | "example";
+// "here is what a good demo looks like" clip, shown in step 1. showcase: a
+// finished video, playable in the "how to create" section.
+export type StudioClipKind = "demo" | "broll" | "example" | "showcase";
 export type StudioJobStatus = "queued" | "processing" | "ready" | "error";
 
 export type StudioClip = {

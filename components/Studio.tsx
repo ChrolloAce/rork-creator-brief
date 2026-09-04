@@ -5,7 +5,13 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { t, type Lang } from "@/lib/i18n";
 import type { HookVideo } from "@/lib/hook-videos";
-import { addDaysYmd, type StudioClip, type StudioPublicConfig, type StudioRender } from "@/lib/studio";
+import {
+  addDaysYmd,
+  type StudioAsset,
+  type StudioClip,
+  type StudioPublicConfig,
+  type StudioRender,
+} from "@/lib/studio";
 import { HookCard, HookModal } from "./HooksView";
 
 // The Video Builder, creator side. Two steps, one at a time:
@@ -22,6 +28,7 @@ type State = {
   demos: StudioClip[];
   broll: StudioClip[];
   examples: StudioClip[];
+  showcase: StudioClip[];
   library: HookVideo[];
   libraryCount: number;
   renders: StudioRender[];
@@ -550,6 +557,9 @@ export function Studio({
       </ol>
 
       {step === 1 && demosPanel}
+      {step === 1 && (
+        <CreateSection config={config} showcase={state.showcase} lang={lang} defaultOpen />
+      )}
 
       {step === 2 && (
         <>
@@ -649,6 +659,8 @@ export function Studio({
               </ul>
             )}
           </section>
+
+          <CreateSection config={config} showcase={state.showcase} lang={lang} />
 
           {/* Earlier */}
           {earlier.length > 0 && (
@@ -995,6 +1007,118 @@ function DemosPanel({
         )}
       </section>
     </div>
+  );
+}
+
+/* ------------------------- how to create + assets ----------------------- */
+
+function AssetTile({ asset, lang }: { asset: StudioAsset; lang: Lang }) {
+  const isImage = asset.mime.startsWith("image/");
+  const isVideo = asset.mime.startsWith("video/");
+  const dl = `${asset.url}${asset.url.includes("?") ? "&" : "?"}download=1`;
+  return (
+    <li className="border-2 border-line bg-background rounded-md overflow-hidden">
+      <div className="aspect-square bg-paper flex items-center justify-center">
+        {isImage ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img src={asset.url} alt={asset.label ?? ""} className="w-full h-full object-contain" loading="lazy" />
+        ) : isVideo ? (
+          <video src={asset.url} controls playsInline preload="metadata" className="w-full h-full object-contain bg-ink" />
+        ) : (
+          <span className="text-[10px] font-bold text-muted px-2 text-center">{asset.filename ?? asset.mime}</span>
+        )}
+      </div>
+      <div className="p-2 flex items-center gap-2">
+        <span className="min-w-0 flex-1 text-[11px] font-bold truncate">
+          {asset.label?.trim() || asset.filename || (isImage ? "Image" : "Video")}
+        </span>
+        <a
+          href={dl}
+          download
+          className="shrink-0 border-2 border-line bg-ink text-background px-2 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+        >
+          ⬇ {t(lang, "download")}
+        </a>
+      </div>
+    </li>
+  );
+}
+
+// "How to create your video": the guide, a finished example to play, and
+// the assets to download. Open in step 1, collapsed on the calendar. Renders
+// nothing when the admin has not filled any of it in.
+function CreateSection({
+  config,
+  showcase,
+  lang,
+  defaultOpen = false,
+}: {
+  config: StudioPublicConfig;
+  showcase: StudioClip[];
+  lang: Lang;
+  defaultOpen?: boolean;
+}) {
+  if (config.createGuide.length === 0 && config.assets.length === 0 && showcase.length === 0) return null;
+  return (
+    <details className="group border-2 border-line bg-background rounded-md nb-shadow-sm" open={defaultOpen}>
+      <summary className="cursor-pointer list-none p-4 flex items-center justify-between gap-3">
+        <span>
+          <span className="block font-black text-lg leading-tight">{t(lang, "howToCreate")}</span>
+          <span className="block text-[11px] text-muted mt-0.5">
+            {config.assets.length} {config.assets.length === 1 ? t(lang, "fileWord") : t(lang, "filesWord")}
+            {showcase.length > 0 ? ` · ${t(lang, "finishedExample").toLowerCase()}` : ""}
+          </span>
+        </span>
+        <span className="text-muted text-xs group-open:rotate-180 transition-transform" aria-hidden>
+          ▼
+        </span>
+      </summary>
+      <div className="border-t-2 border-line p-4 space-y-4">
+        {config.createGuide.length > 0 && (
+          <ol className="space-y-1.5">
+            {config.createGuide.map((line, i) => (
+              <li key={i} className="flex items-start gap-2.5 text-sm leading-snug">
+                <span className="w-5 h-5 shrink-0 border-2 border-line bg-paper rounded-sm flex items-center justify-center text-[10px] font-black mt-0.5">
+                  {i + 1}
+                </span>
+                <span>{line}</span>
+              </li>
+            ))}
+          </ol>
+        )}
+        {showcase.length > 0 && (
+          <div>
+            <div className={label}>{t(lang, "finishedExample")}</div>
+            <ul className="mt-2 flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+              {showcase.map((e) => (
+                <li key={e.id} className="shrink-0 w-40 sm:w-44">
+                  <video
+                    src={e.url ?? undefined}
+                    poster={e.posterUrl ?? undefined}
+                    controls
+                    playsInline
+                    preload="none"
+                    className="w-full aspect-[9/16] bg-ink border-2 border-line rounded-md object-cover"
+                  />
+                  {e.label && <div className="text-[10px] font-bold truncate mt-1">{e.label}</div>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {config.assets.length > 0 && (
+          <div>
+            <div className={label}>{t(lang, "assetsToUse")}</div>
+            <p className="text-xs text-muted mt-0.5">{t(lang, "assetsHint")}</p>
+            <ul className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {config.assets.map((a) => (
+                <AssetTile key={a.id} asset={a} lang={lang} />
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </details>
   );
 }
 

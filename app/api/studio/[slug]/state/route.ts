@@ -31,10 +31,11 @@ export async function GET(
     isAdmin: ctx.viewer.isAdmin,
     today,
   }).catch((e) => ({ created: 0, reason: (e as Error).message }));
-  const [demos, broll, examples, renders, library] = await Promise.all([
+  const [demos, broll, examples, showcase, renders, library] = await Promise.all([
     listStudioClips(slug, { kind: "demo", userId: ctx.viewer.id }),
     listStudioClips(slug, { kind: "broll" }),
     listStudioClips(slug, { kind: "example" }),
+    listStudioClips(slug, { kind: "showcase" }),
     listStudioRenders(slug, ctx.viewer.id),
     getHookVideos(slug),
   ]);
@@ -50,6 +51,8 @@ export async function GET(
     demos,
     broll: broll.filter((b) => b.status === "ready"),
     examples: examples.filter((e) => e.status === "ready"),
+    // Finished videos, playable in "how to create".
+    showcase: showcase.filter((e) => e.status === "ready"),
     renders,
     libraryCount: study ? study.length : library.length,
     library: study ?? library.slice(0, 12),

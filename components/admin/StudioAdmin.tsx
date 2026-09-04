@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   STUDIO_DEFAULTS,
   buildCaption,
+  newAssetId,
   newHookId,
   normalizeTag,
   type StudioClip,
@@ -54,7 +55,7 @@ function shortDay(ymd: string): string {
 function uploadClip(
   slug: string,
   file: File,
-  kind: "broll" | "example",
+  kind: "broll" | "example" | "showcase",
   onProgress: (p: number) => void
 ): Promise<{ ok: boolean; error?: string }> {
   return new Promise((resolve) => {
@@ -94,9 +95,41 @@ export function StudioAdmin({
   const setHooks = (next: StudioHook[]) => set({ hooks: next });
 
   const [activity, setActivity] = useState<Activity | null>(null);
-  const [uploads, setUploads] = useState<{ key: string; name: string; kind: "broll" | "example"; progress: number; error?: string }[]>([]);
+  const [uploads, setUploads] = useState<{ key: string; name: string; kind: "broll" | "example" | "showcase"; progress: number; error?: string }[]>([]);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const exampleInput = useRef<HTMLInputElement | null>(null);
+  const showcaseInput = useRef<HTMLInputElement | null>(null);
+  const assetInput = useRef<HTMLInputElement | null>(null);
+  const [assetBusy, setAssetBusy] = useState<string | null>(null);
+  const [assetErr, setAssetErr] = useState<string | null>(null);
+
+  // Assets go through /api/uploads (multipart, admin-only), same as format
+  // assets, and live in the config as {url, mime, filename, label}.
+  async function onAssetFiles(files: FileList | null) {
+    if (!files) return;
+    const list = Array.from(files);
+    if (assetInput.current) assetInput.current.value = "";
+    setAssetErr(null);
+    let next = [...(cfg.assets ?? [])];
+    for (const file of list) {
+      setAssetBusy(file.name);
+      try {
+        const form = new FormData();
+        form.append("file", file);
+        const res = await fetch("/api/uploads", { method: "POST", body: form });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok || !j.url) throw new Error(j.error ?? `upload failed: HTTP ${res.status}`);
+        next = [
+          ...next,
+          { id: newAssetId(), url: j.url as string, mime: (j.mime as string) ?? file.type, filename: (j.filename as string) ?? file.name, label: "" },
+        ];
+        set({ assets: next });
+      } catch (e) {
+        setAssetErr(`${file.name}: ${(e as Error).message}`);
+      }
+    }
+    setAssetBusy(null);
+  }
 
   const loadActivity = useCallback(async () => {
     try {
@@ -124,11 +157,12 @@ export function StudioAdmin({
     return () => clearInterval(id);
   }, [anyPending, loadActivity]);
 
-  async function onFiles(files: FileList | null, kind: "broll" | "example") {
+  async function onFiles(files: FileList | null, kind: "broll" | "example" | "showcase") {
     if (!files) return;
     const list = Array.from(files);
     if (fileInput.current) fileInput.current.value = "";
     if (exampleInput.current) exampleInput.current.value = "";
+    if (showcaseInput.current) showcaseInput.current.value = "";
     for (const file of list) {
       const key = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
       setUploads((u) => [...u, { key, name: file.name, kind, progress: 0 }]);
@@ -157,6 +191,8 @@ export function StudioAdmin({
 
   const broll = (activity?.clips ?? []).filter((c) => c.kind === "broll");
   const examples = (activity?.clips ?? []).filter((c) => c.kind === "example");
+  const showcase = (activity?.clips ?? []).filter((c) => c.kind === "showcase");
+  const assets = cfg.assets ?? [];
   const creators = activity?.creators ?? [];
   const readyCreators = creators.filter((c) => c.ready);
   const week = Array.from({ length: 7 }, (_, i) => localYmd(i));
@@ -653,6 +689,159 @@ export function StudioAdmin({
                 {b.status === "error" && (
                   <div className="px-1.5 pb-1 text-[10px] text-[#b91c1c]">{b.error}</div>
                 )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* How to create: guide + finished example + assets */}
+      <div className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 space-y-4">
+        <div>
+          <div className="font-black">How to create (assets + finished example)</div>
+          <p className="text-xs text-muted">
+            For creators who build or edit the video themselves. Shows under the demos in step 1
+            and as a collapsed section on the calendar. Hidden when everything here is empty.
+          </p>
+        </div>
+        <label className="block">
+          <span className={label}>How to create (one line per bullet)</span>
+          <textarea
+            value={cfg.createGuide ?? ""}
+            rows={4}
+            placeholder={"Open the assets below in your editor.\nPut the logo in the last 2 seconds.\nExport vertical 1080x1920."}
+            onChange={(e) => set({ createGuide: e.target.value })}
+            className={input}
+          />
+        </label>
+
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div className="font-bold text-sm">Finished example · {showcase.length}</div>
+            <p className="text-xs text-muted">A done video creators can play. Normalized like a demo.</p>
+          </div>
+          <div>
+            <input
+              ref={showcaseInput}
+              type="file"
+              accept="video/*,.mov,.mp4,.m4v,.webm"
+              multiple
+              className="sr-only"
+              onChange={(e) => void onFiles(e.target.files, "showcase")}
+            />
+            <button
+              type="button"
+              onClick={() => showcaseInput.current?.click()}
+              className="border-2 border-line bg-ink text-background px-3 py-1.5 rounded-md nb-press text-xs font-black uppercase tracking-widest"
+            >
+              + Upload example
+            </button>
+          </div>
+        </div>
+        {uploads.some((u) => u.kind === "showcase") && (
+          <ul className="space-y-1">
+            {uploads.filter((u) => u.kind === "showcase").map((u) => (
+              <li key={u.key} className="text-xs flex items-center gap-2">
+                <span className="font-bold truncate">{u.name}</span>
+                {u.error ? (
+                  <span className="text-[#b91c1c] font-bold">{u.error}</span>
+                ) : (
+                  <span className="text-muted">{Math.round(u.progress * 100)}%</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        {showcase.length > 0 && (
+          <ul className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-7 gap-2">
+            {showcase.map((b) => (
+              <li key={b.id} className="border-2 border-line rounded-md overflow-hidden bg-background">
+                <div className="relative aspect-[9/16] bg-paper">
+                  {b.posterUrl ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img src={b.posterUrl} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-[10px] font-bold text-muted">
+                      {b.status === "error" ? "failed" : "processing…"}
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void deleteClip(b.id)}
+                    className="absolute top-1 right-1 w-6 h-6 border-2 border-line bg-background rounded-sm text-xs font-black"
+                    aria-label="Delete"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="px-1.5 py-1 text-[10px] font-bold truncate">{b.label || b.filename || "example"}</div>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div className="font-bold text-sm">Assets · {assets.length}</div>
+            <p className="text-xs text-muted">Images or videos they download: logos, overlays, b-roll, end cards.</p>
+          </div>
+          <div>
+            <input
+              ref={assetInput}
+              type="file"
+              accept="image/*,video/*,.mov,.mp4,.png,.jpg,.jpeg,.webp,.gif"
+              multiple
+              className="sr-only"
+              onChange={(e) => void onAssetFiles(e.target.files)}
+            />
+            <button
+              type="button"
+              onClick={() => assetInput.current?.click()}
+              disabled={!!assetBusy}
+              className="border-2 border-line bg-accent text-accent-ink px-3 py-1.5 rounded-md nb-press text-xs font-black uppercase tracking-widest disabled:opacity-50"
+            >
+              {assetBusy ? `Uploading ${assetBusy}…` : "+ Upload assets"}
+            </button>
+          </div>
+        </div>
+        {assetErr && <p className="text-xs font-bold text-[#b91c1c]">{assetErr}</p>}
+        {assets.length > 0 && (
+          <ul className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+            {assets.map((a) => (
+              <li key={a.id} className="border-2 border-line rounded-md overflow-hidden bg-background">
+                <div className="relative aspect-square bg-paper flex items-center justify-center">
+                  {a.mime.startsWith("image/") ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img src={a.url} alt="" className="w-full h-full object-contain" />
+                  ) : a.mime.startsWith("video/") ? (
+                    <video src={a.url} muted playsInline preload="metadata" className="w-full h-full object-contain" />
+                  ) : (
+                    <span className="text-[10px] font-bold text-muted">{a.mime}</span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!confirm("Remove this asset?")) return;
+                      set({ assets: assets.filter((x) => x.id !== a.id) });
+                    }}
+                    className="absolute top-1 right-1 w-6 h-6 border-2 border-line bg-background rounded-sm text-xs font-black"
+                    aria-label="Remove"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="p-1.5 space-y-1">
+                  <input
+                    type="text"
+                    value={a.label ?? ""}
+                    placeholder={a.filename || "Label"}
+                    onChange={(e) =>
+                      set({ assets: assets.map((x) => (x.id === a.id ? { ...x, label: e.target.value } : x)) })
+                    }
+                    className="w-full border-2 border-line rounded-sm px-1.5 py-1 text-xs bg-background focus:outline-none focus:border-accent"
+                  />
+                  <div className="text-[10px] text-muted truncate">{a.filename}</div>
+                </div>
               </li>
             ))}
           </ul>
