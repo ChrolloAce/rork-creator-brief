@@ -608,6 +608,16 @@ export function StudioAdmin({
           </p>
         </div>
         <label className="block">
+          <span className={label}>Script creators follow (start a line with 00:03 for a timestamp)</span>
+          <textarea
+            value={cfg.script ?? ""}
+            rows={8}
+            placeholder={"00:00 That is totally made by AI.\n00:03 Now here is how..."}
+            onChange={(e) => set({ script: e.target.value })}
+            className={`${input} font-mono text-xs`}
+          />
+        </label>
+        <label className="block">
           <span className={label}>How to record (one line per bullet)</span>
           <textarea
             value={cfg.recordGuide ?? ""}

@@ -13,6 +13,7 @@ import {
   type StudioRender,
 } from "@/lib/studio";
 import { HookCard, HookModal } from "./HooksView";
+import { parseScriptLines } from "@/lib/script-lines";
 
 // The Video Builder, creator side. Two steps, one at a time:
 //   1. Record your demos: how to record, example demos, reels to study, and
@@ -789,8 +790,9 @@ function DemosPanel({
 
   return (
     <div className="space-y-5">
-      {showGuide && (config.recordGuide.length > 0 || examples.length > 0) && (
+      {showGuide && (config.script || config.recordGuide.length > 0 || examples.length > 0) && (
         <section className="border-2 border-line bg-background rounded-md nb-shadow-sm p-4 space-y-4">
+          {config.script && <ScriptBlock script={config.script} lang={lang} />}
           {config.recordGuide.length > 0 && (
             <div>
               <div className={label}>{t(lang, "howToRecord")}</div>
@@ -1010,6 +1012,36 @@ function DemosPanel({
   );
 }
 
+/* ------------------------------- script --------------------------------- */
+
+// The lines a creator reads while recording, with the timestamp each one
+// lands on. Same "00:03 line" convention as the format scripts.
+function ScriptBlock({ script, lang }: { script: string; lang: Lang }) {
+  const lines = parseScriptLines(script);
+  if (lines.length === 0) return null;
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <div className={label}>{t(lang, "scriptToFollow")}</div>
+          <p className="text-xs text-muted mt-0.5">{t(lang, "scriptHint")}</p>
+        </div>
+        <CopyButton value={script} text={t(lang, "copyScript")} lang={lang} tone="plain" />
+      </div>
+      <ol className="mt-2 border-2 border-line bg-paper rounded-md divide-y-2 divide-line">
+        {lines.map((l, i) => (
+          <li key={i} className="flex items-start gap-3 px-3 py-2">
+            <span className="shrink-0 w-12 border-2 border-line bg-background rounded-sm text-center text-[10px] font-black py-0.5 font-mono mt-0.5">
+              {l.timestamp ?? `#${i + 1}`}
+            </span>
+            <span className="text-sm leading-snug font-medium">{l.body}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
 /* ------------------------- how to create + assets ----------------------- */
 
 function AssetTile({ asset, lang }: { asset: StudioAsset; lang: Lang }) {
@@ -1058,7 +1090,7 @@ function CreateSection({
   lang: Lang;
   defaultOpen?: boolean;
 }) {
-  if (config.createGuide.length === 0 && config.assets.length === 0 && showcase.length === 0) return null;
+  if (!config.script && config.createGuide.length === 0 && config.assets.length === 0 && showcase.length === 0) return null;
   return (
     <details className="group border-2 border-line bg-background rounded-md nb-shadow-sm" open={defaultOpen}>
       <summary className="cursor-pointer list-none p-4 flex items-center justify-between gap-3">
@@ -1074,6 +1106,7 @@ function CreateSection({
         </span>
       </summary>
       <div className="border-t-2 border-line p-4 space-y-4">
+        {config.script && !defaultOpen && <ScriptBlock script={config.script} lang={lang} />}
         {config.createGuide.length > 0 && (
           <ol className="space-y-1.5">
             {config.createGuide.map((line, i) => (

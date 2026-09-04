@@ -78,6 +78,9 @@ export type StudioConfig = {
   // Images and videos creators download to build or edit their videos.
   // Stored through /api/uploads like format assets.
   assets?: StudioAsset[];
+  // The script creators read while recording, in the app's "00:03 line"
+  // convention (lib/script-lines.ts). Shown with the recording guide.
+  script?: string;
 };
 
 export type StudioAsset = {
@@ -249,6 +252,7 @@ export type StudioPublicConfig = {
   recordGuide: string[];
   createGuide: string[];
   assets: StudioAsset[];
+  script: string;
   autoFill: boolean;
   perDay: number;
   daysAhead: number;
@@ -276,6 +280,7 @@ export function publicStudioConfig(c: StudioConfig): StudioPublicConfig {
     recordGuide: guideLines(c.recordGuide),
     createGuide: guideLines(c.createGuide),
     assets: (c.assets ?? []).filter((a) => a && a.url),
+    script: c.script?.trim() ?? "",
     ...scheduleSettings(c),
   };
 }
