@@ -514,7 +514,6 @@ export function Studio({
       state={state}
       uploads={uploads}
       lang={lang}
-      briefSlug={briefSlug}
       fileInput={fileInput}
       onFiles={onFiles}
       onDelete={deleteClip}
@@ -767,7 +766,6 @@ function DemosPanel({
   state,
   uploads,
   lang,
-  briefSlug,
   fileInput,
   onFiles,
   onDelete,
@@ -780,7 +778,6 @@ function DemosPanel({
   state: State;
   uploads: Upload[];
   lang: Lang;
-  briefSlug: string;
   fileInput: React.RefObject<HTMLInputElement | null>;
   onFiles: (files: FileList | null) => void;
   onDelete: (id: string) => void;

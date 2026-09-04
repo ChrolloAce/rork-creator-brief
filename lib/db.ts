@@ -1867,7 +1867,8 @@ function rowToClip(r: ClipRow): StudioClip {
   return {
     id: r.id,
     briefSlug: r.brief_slug,
-    kind: r.kind === "broll" ? "broll" : "demo",
+    kind:
+      r.kind === "broll" || r.kind === "example" || r.kind === "showcase" ? r.kind : "demo",
     userId: r.user_id,
     label: r.label,
     filename: r.filename,
@@ -1892,7 +1893,8 @@ export async function createStudioClip(input: {
 }): Promise<StudioClip> {
   await ensureSchema();
   const sql = getSql();
-  const id = `${input.kind === "broll" ? "bg" : "dm"}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  const prefix = { demo: "dm", broll: "bg", example: "ex", showcase: "sc" }[input.kind] ?? "dm";
+  const id = `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
   await sql`
     INSERT INTO studio_clip (id, brief_slug, kind, user_id, label, filename, status)
     VALUES (${id}, ${input.briefSlug}, ${input.kind}, ${input.userId}, ${input.label ?? null}, ${input.filename ?? null}, 'processing')
