@@ -84,6 +84,15 @@ function canShareFiles(): boolean {
   }
 }
 
+// Fetch a file and hand it to the phone's share sheet (Save Video / Save
+// Image). Falls back to opening the download link if sharing is refused.
+async function shareUrl(url: string, name: string, mime: string): Promise<void> {
+  const res = await fetch(url);
+  const blob = await res.blob();
+  const file = new File([blob], name, { type: mime });
+  await navigator.share({ files: [file], title: name });
+}
+
 function fileNameFor(hook: string): string {
   const base = hook.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
   return `${base || "video"}.mp4`;
@@ -1064,10 +1073,34 @@ function ScriptBlock({
 }
 
 // An overlay pinned to a script line: thumbnail, what it is, and Download.
+function useSaveButton(asset: StudioAsset) {
+  const [shareable, setShareable] = useState(false);
+  useEffect(() => {
+    const ok = canShareFiles();
+    if (ok) setShareable(true);
+  }, []);
+  const [saving, setSaving] = useState(false);
+  const isVideo = asset.mime.startsWith("video/");
+  const dl = `${asset.url}${asset.url.includes("?") ? "&" : "?"}download=1`;
+  const name = asset.filename || `${asset.label || "asset"}.${isVideo ? "mp4" : "png"}`;
+  async function save() {
+    if (saving) return;
+    setSaving(true);
+    try {
+      await shareUrl(asset.url, name, asset.mime);
+    } catch {
+      /* cancelled or unsupported for this type; the link still works */
+    } finally {
+      setSaving(false);
+    }
+  }
+  return { shareable, saving, save, dl };
+}
+
 function PinnedAsset({ asset, lang }: { asset: StudioAsset; lang: Lang }) {
   const isImage = asset.mime.startsWith("image/");
   const isVideo = asset.mime.startsWith("video/");
-  const dl = `${asset.url}${asset.url.includes("?") ? "&" : "?"}download=1`;
+  const { shareable, saving, save, dl } = useSaveButton(asset);
   return (
     <li className="flex items-center gap-2 border-2 border-line bg-background rounded-md p-1.5 pr-2 max-w-full">
       <span className="w-14 h-14 shrink-0 border-2 border-line bg-paper rounded-sm overflow-hidden flex items-center justify-center">
@@ -1088,13 +1121,25 @@ function PinnedAsset({ asset, lang }: { asset: StudioAsset; lang: Lang }) {
           {isVideo ? t(lang, "videoWord") : "overlay"}
         </span>
       </span>
-      <a
-        href={dl}
-        download
-        className="shrink-0 border-2 border-line bg-ink text-background px-2 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
-      >
-        ⬇
-      </a>
+      {shareable ? (
+        <button
+          type="button"
+          onClick={() => void save()}
+          disabled={saving}
+          className="shrink-0 border-2 border-line bg-ink text-background px-2 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest disabled:opacity-60"
+          aria-label={t(lang, "saveToPhotos")}
+        >
+          {saving ? "…" : `⬇ ${t(lang, "saveWord")}`}
+        </button>
+      ) : (
+        <a
+          href={dl}
+          download
+          className="shrink-0 border-2 border-line bg-ink text-background px-2 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+        >
+          ⬇
+        </a>
+      )}
     </li>
   );
 }
@@ -1104,7 +1149,7 @@ function PinnedAsset({ asset, lang }: { asset: StudioAsset; lang: Lang }) {
 function AssetTile({ asset, lang }: { asset: StudioAsset; lang: Lang }) {
   const isImage = asset.mime.startsWith("image/");
   const isVideo = asset.mime.startsWith("video/");
-  const dl = `${asset.url}${asset.url.includes("?") ? "&" : "?"}download=1`;
+  const { shareable, saving, save, dl } = useSaveButton(asset);
   return (
     <li className="border-2 border-line bg-background rounded-md overflow-hidden">
       <div className="aspect-square bg-paper flex items-center justify-center">
@@ -1121,13 +1166,24 @@ function AssetTile({ asset, lang }: { asset: StudioAsset; lang: Lang }) {
         <span className="min-w-0 flex-1 text-[11px] font-bold truncate">
           {asset.label?.trim() || asset.filename || (isImage ? "Image" : "Video")}
         </span>
-        <a
-          href={dl}
-          download
-          className="shrink-0 border-2 border-line bg-ink text-background px-2 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
-        >
-          ⬇ {t(lang, "download")}
-        </a>
+        {shareable ? (
+          <button
+            type="button"
+            onClick={() => void save()}
+            disabled={saving}
+            className="shrink-0 border-2 border-line bg-ink text-background px-2 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest disabled:opacity-60"
+          >
+            {saving ? "…" : `⬇ ${t(lang, "saveWord")}`}
+          </button>
+        ) : (
+          <a
+            href={dl}
+            download
+            className="shrink-0 border-2 border-line bg-ink text-background px-2 py-1 rounded-sm nb-press text-[10px] font-black uppercase tracking-widest"
+          >
+            ⬇ {t(lang, "download")}
+          </a>
+        )}
       </div>
     </li>
   );
