@@ -1148,6 +1148,8 @@ function CreateSection({
   defaultOpen?: boolean;
 }) {
   if (!config.script && config.createGuide.length === 0 && config.assets.length === 0 && showcase.length === 0) return null;
+  // Pinned assets already sit beside their script line; the grid is for the rest.
+  const loose = config.assets.filter((a) => !a.at);
   return (
     <details className="group border-2 border-line bg-background rounded-md nb-shadow-sm" open={defaultOpen}>
       <summary className="cursor-pointer list-none p-4 flex items-center justify-between gap-3">
@@ -1198,12 +1200,12 @@ function CreateSection({
             </ul>
           </div>
         )}
-        {config.assets.length > 0 && (
+        {loose.length > 0 && (
           <div>
             <div className={label}>{t(lang, "assetsToUse")}</div>
             <p className="text-xs text-muted mt-0.5">{t(lang, "assetsHint")}</p>
             <ul className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {config.assets.map((a) => (
+              {loose.map((a) => (
                 <AssetTile key={a.id} asset={a} lang={lang} />
               ))}
             </ul>
