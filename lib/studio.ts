@@ -81,6 +81,11 @@ export type StudioConfig = {
   // The script creators read while recording, in the app's "00:03 line"
   // convention (lib/script-lines.ts). Shown with the recording guide.
   script?: string;
+  // Step 1 pitch: the money. All free text so the admin can phrase it.
+  payCpm?: string; // "$2"
+  payMaxPerVideo?: string; // "$6,000"
+  payCapViews?: string; // "1,000,000"
+  payoutCadence?: string; // "Daily"
 };
 
 export type StudioAsset = {
@@ -256,6 +261,10 @@ export type StudioPublicConfig = {
   createGuide: string[];
   assets: StudioAsset[];
   script: string;
+  payCpm: string;
+  payMaxPerVideo: string;
+  payCapViews: string;
+  payoutCadence: string;
   autoFill: boolean;
   perDay: number;
   daysAhead: number;
@@ -284,6 +293,10 @@ export function publicStudioConfig(c: StudioConfig): StudioPublicConfig {
     createGuide: guideLines(c.createGuide),
     assets: (c.assets ?? []).filter((a) => a && a.url),
     script: c.script?.trim() ?? "",
+    payCpm: c.payCpm?.trim() ?? "",
+    payMaxPerVideo: c.payMaxPerVideo?.trim() ?? "",
+    payCapViews: c.payCapViews?.trim() ?? "",
+    payoutCadence: c.payoutCadence?.trim() ?? "",
     ...scheduleSettings(c),
   };
 }

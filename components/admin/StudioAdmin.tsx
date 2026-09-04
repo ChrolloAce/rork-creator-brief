@@ -611,6 +611,24 @@ export function StudioAdmin({
             automatically.
           </p>
         </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <label className="block">
+            <span className={label}>CPM (step 1 pitch)</span>
+            <input type="text" value={cfg.payCpm ?? ""} placeholder="$2" onChange={(e) => set({ payCpm: e.target.value })} className={input} />
+          </label>
+          <label className="block">
+            <span className={label}>Max per cross-posted video</span>
+            <input type="text" value={cfg.payMaxPerVideo ?? ""} placeholder="$6,000" onChange={(e) => set({ payMaxPerVideo: e.target.value })} className={input} />
+          </label>
+          <label className="block">
+            <span className={label}>View cap</span>
+            <input type="text" value={cfg.payCapViews ?? ""} placeholder="1,000,000" onChange={(e) => set({ payCapViews: e.target.value })} className={input} />
+          </label>
+          <label className="block">
+            <span className={label}>Payouts</span>
+            <input type="text" value={cfg.payoutCadence ?? ""} placeholder="Daily" onChange={(e) => set({ payoutCadence: e.target.value })} className={input} />
+          </label>
+        </div>
         <label className="block">
           <span className={label}>Script creators follow (start a line with 00:03 for a timestamp)</span>
           <textarea

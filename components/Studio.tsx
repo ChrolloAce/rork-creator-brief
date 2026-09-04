@@ -551,6 +551,34 @@ export function Studio({
                   <p className="text-base sm:text-lg leading-snug">
                     <InlineRich text={t(lang, "gs1Body")} />
                   </p>
+                  <div className="mt-3">
+                    <div className={label}>{t(lang, "postTo")}</div>
+                    <ul className="mt-1.5 grid grid-cols-3 gap-2">
+                      <PlatformTile name="TikTok" icon={<TikTokIcon />} />
+                      <PlatformTile name="Instagram" icon={<InstagramIcon />} />
+                      <PlatformTile name="YouTube" icon={<YouTubeIcon />} />
+                    </ul>
+                  </div>
+                  {(config.payCpm || config.payMaxPerVideo || config.payoutCadence) && (
+                    <ul className="mt-3 grid grid-cols-3 gap-2">
+                      {config.payCpm && (
+                        <StatTile big={config.payCpm} small={t(lang, "perThousandViews")} />
+                      )}
+                      {config.payMaxPerVideo && (
+                        <StatTile
+                          big={config.payMaxPerVideo}
+                          small={
+                            t(lang, "perCrossPost") +
+                            (config.payCapViews ? ` · ${t(lang, "viewCap").replace("{n}", config.payCapViews)}` : "")
+                          }
+                          accent
+                        />
+                      )}
+                      {config.payoutCadence && (
+                        <StatTile big={config.payoutCadence} small={t(lang, "payoutsWord")} />
+                      )}
+                    </ul>
+                  )}
                 </GsStep>
                 {showcase.length > 0 && (
                   <GsStep n={next()} title={t(lang, "outcomeHeading")}>
@@ -824,6 +852,58 @@ function StepTile({
 }
 
 /* ------------------------ step 1: getting started ----------------------- */
+
+function PlatformTile({ name, icon }: { name: string; icon: React.ReactNode }) {
+  return (
+    <li className="border-2 border-line bg-paper rounded-md p-2 flex flex-col items-center gap-1">
+      <span className="w-9 h-9 flex items-center justify-center">{icon}</span>
+      <span className="text-[11px] font-black">{name}</span>
+    </li>
+  );
+}
+
+function StatTile({ big, small, accent = false }: { big: string; small: string; accent?: boolean }) {
+  return (
+    <li
+      className={`border-2 border-line rounded-md p-2 text-center ${accent ? "bg-accent text-accent-ink" : "bg-background"}`}
+    >
+      <span className="block text-lg sm:text-xl font-black leading-tight">{big}</span>
+      <span className={`block text-[10px] font-bold leading-tight mt-0.5 ${accent ? "opacity-90" : "text-muted"}`}>
+        {small}
+      </span>
+    </li>
+  );
+}
+
+function TikTokIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="30" height="30" aria-hidden>
+      <path
+        fill="#0a0a0a"
+        d="M16.6 3c.3 2.6 1.9 4.2 4.4 4.4v3.2c-1.6 0-3.1-.5-4.4-1.4v6.5c0 3.5-2.8 5.8-6 5.8S4.6 19.2 4.6 15.7c0-3.6 3-6.2 6.6-5.7v3.3c-1.8-.5-3.4.8-3.4 2.4 0 1.5 1.2 2.6 2.7 2.6s2.7-1.1 2.7-2.6V3h3.4z"
+      />
+    </svg>
+  );
+}
+
+function InstagramIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="30" height="30" aria-hidden>
+      <rect x="3" y="3" width="18" height="18" rx="5" fill="none" stroke="#E1306C" strokeWidth="2.2" />
+      <circle cx="12" cy="12" r="4" fill="none" stroke="#E1306C" strokeWidth="2.2" />
+      <circle cx="17.3" cy="6.7" r="1.3" fill="#E1306C" />
+    </svg>
+  );
+}
+
+function YouTubeIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="32" height="32" aria-hidden>
+      <rect x="2" y="5" width="20" height="14" rx="4.5" fill="#FF0000" />
+      <path d="M10 9.2v5.6l4.8-2.8z" fill="#ffffff" />
+    </svg>
+  );
+}
 
 function GsStep({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
   return (
